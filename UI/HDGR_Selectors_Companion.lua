@@ -127,6 +127,7 @@ local SPECIAL_COLLECTION_ORDER = {
     ["collection:recently-learned"] = 1,
     ["collection:dyeable"]          = 2,
     ["collection:trophies"]         = 3,
+    ["collection:neighborhood"]     = 4,
 }
 
 -- Themes-mode sidebar: concepts grouped by tier into "Room Concepts / Themed / Faction" sections.

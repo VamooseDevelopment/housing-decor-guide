@@ -12,10 +12,11 @@
 
 ---
 
-## What's New in v3.34.1
+## What's New in v3.34.2
 
-- **The shopping list keeps its vendor headings when you send a blueprint's missing decor over twice.** The second send rebuilt the list while the window was open, and the items arrived before anyone had worked out who sells them, so they all fell under Wishlist and the vendor headings disappeared until you closed the window and opened it again. Sellers are now worked out the moment a list arrives, whether you route it from a blueprint, paste it in as a code, or another addon sends it. Reported by Soul.
-- **The Destroy decor list holds still while you destroy from it.** It sorts by how many copies you have stored, so every destroy reshuffled the list and could slide a different piece under your cursor between clicks. From your first destroy the order stays put. It sorts again when you leave the tab and come back, or turn the filter off and on.
+- **Neighborhood Decor in the house editor companion.** Under Collections, beside Recently Learned, Dyeable Items and Trophies, a new list holds the decor sold by vendors in Founder's Point and Razorwind Shores: the same pieces the Neighborhood filter finds on the Acquire tab. It's among the Styles tab's collections too.
+- **When something inside HDG breaks, it now says so in chat.** A line starting `[HDG] [E]` names what went wrong, so you can screenshot it and send it to us on Discord. Some of you have had the window stop opening from the minimap button, or the Zone Scanner refuse to close, with no error anywhere: the game hides addon errors unless you turn them on, so there was nothing to report. This release doesn't fix that yet. It lets us find the cause the next time it happens. Each problem prints once per session. Reported by txcreek, Vectality and Panseit.
+- **The red plus in the house editor's catalog marks only decor you don't own.** Go straight into the editor without opening HDG and it could sit on nearly every piece, a mural with three in storage included, until you opened HDG. It now goes by the same count the game shows on that tile.
 
 ## The Decor Catalog
 
@@ -106,7 +107,7 @@ A companion window injects into Blizzard's House Editor so you can **place decor
 ---
 
 **Author:** Vamoose
-**Version:** 3.34.1
+**Version:** 3.34.2
 **Game Version:** 12.1.0 (Midnight)
 **Source / Issues:** https://github.com/VamooseAddons/housing-decor-guide
 **Discord:** https://discord.gg/RWZaxJaHFP

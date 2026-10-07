@@ -1900,6 +1900,20 @@ function R:IsOwned(rowOrID)
          + (row.numPlaced or 0)) > 0  -- exception(boundary): catalog struct field sparse
 end
 
+-- Sold by a vendor standing in a housing neighborhood (Founder's Point / Razorwind
+-- Shores). row.vendors is always stamped by _bakeVendors (empty list included) and
+-- carries each vendor's mapID off VendorAugment. ONE definition, shared by the
+-- Acquire tab's Neighborhood filter and the "Neighborhood Decor" collection, so the
+-- filter and the collection can't drift apart on what counts.
+function R:IsSoldInNeighborhood(row)
+    for _, v in ipairs(row.vendors) do
+        if v.mapID and HDG.Constants.NEIGHBORHOOD_MAP_IDS[v.mapID] then
+            return true
+        end
+    end
+    return false
+end
+
 -- decorID -> itemID via byDecorID (used by ShoppingCodec + StyleEngine).
 function R:GetItemIDByDecorID(decorID)
     if not decorID then return nil end

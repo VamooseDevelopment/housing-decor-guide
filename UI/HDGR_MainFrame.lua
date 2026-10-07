@@ -9,14 +9,9 @@
 
 HDG = HDG or {}
 
--- Tag registration: runPipeline catches stage errors and surfaces them
--- via Log:Error("pipeline", ...). Register at file-load so the log
--- pipeline doesn't reject the call as an unknown tag (Log:Push errors
--- loudly on unregistered tags to catch typos). HDG.Log is guaranteed
--- loaded (TOC ordering: Core/HDGR_Log.lua first).
-HDG.Log:RegisterTags({
-    pipeline = { user = true, level = "error", duration = nil },  -- sticky error rail
-})
+-- No log tag of its own: a pipeline stage error throws out of the Store
+-- subscriber that runs RefreshMainWindow, and Store's _callSubscriber logs it
+-- to the "error" rail before re-raising.
 
 -- (VFN's GetSelectedSet / GetSetTitle helpers dropped -- HDG has no
 -- libraries/sets concept. Tab-driven view selection is in PrepareContext.)
@@ -501,7 +496,9 @@ local function runPipeline(frame, invalidation, actionType)
             -- Strict call (ADR-042): the per-stage pcall was the isolation
             -- class -- a Bind-stage throw used to leave LATER stages running
             -- on a half-bound frame (deterministic-but-wrong paint). A throw
-            -- now aborts the pipeline and surfaces via the outer ErrorBoundary.
+            -- now aborts the pipeline. RefreshMainWindow is mostly reached from a
+            -- Store subscriber, outside ErrorBoundary; there Store's
+            -- _callSubscriber logs the throw before re-raising it.
             stage.run(ctx)
             if timed then perf:RecordStage(stage.name, t0, k0) end
         end

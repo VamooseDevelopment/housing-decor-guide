@@ -128,6 +128,16 @@ function Log:Notify(level, text, metadata)
     dispatchPush(buildEntry(self, { tag = "notify", level = level, text = text, metadata = metadata }))
 end
 
+-- A notify line printed to chat WITHOUT the Store. Notify's chat print comes from
+-- Log:_OnNotify, a Store subscriber, so it starves with the rest of a notification
+-- flush that a raising subscriber aborts -- the one failure this exists to report
+-- (Store _callSubscriber). Same formatting and next-frame taint-safe print as
+-- _RenderEntry; nothing is recorded, so callers that want the Debug tab entry also
+-- Log:Error it.
+function Log:PrintDirect(level, text)
+    self:_RenderEntry(buildEntry(self, { tag = "notify", level = level, text = text }))
+end
+
 -- ===== Engine-level tags (always present) ================================
 -- Module tags added via Modules:Phase1. `user = true` = only thing that surfaces to the status rail.
 -- Both boot-time registration and Log:_Reset read from this table (single source).

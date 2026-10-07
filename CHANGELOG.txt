@@ -1,3 +1,23 @@
+## [3.34.2] - 2026-10-08 (October 2026)
+
+### Added
+- **Neighborhood Decor in the house editor companion.** Under Collections, beside Recently
+  Learned, Dyeable Items and Trophies, a new list holds the decor sold by vendors in Founder's
+  Point and Razorwind Shores: the same pieces the Neighborhood filter finds on the Acquire tab.
+  It's among the Styles tab's collections too.
+- **When something inside HDG breaks, it now says so in chat.** A line starting `[HDG] [E]`
+  names what went wrong, so you can screenshot it and send it to us on Discord. Some of you have
+  had the window stop opening from the minimap button, or the Zone Scanner refuse to close, with
+  no error anywhere: the game hides addon errors unless you turn them on, so there was nothing to
+  report. This release doesn't fix that yet. It lets us find the cause the next time it happens.
+  Each problem prints once per session. (Thanks txcreek, Vectality and Panseit.)
+
+### Fixed
+- **The red plus in the house editor's catalog marks only decor you don't own.** Go straight
+  into the editor without opening HDG and it could sit on nearly every piece, a mural with three
+  in storage included, until you opened HDG. It now goes by the same count the game shows on
+  that tile.
+
 ## [3.34.1] - 2026-09-22 (September 2026)
 
 ### Fixed

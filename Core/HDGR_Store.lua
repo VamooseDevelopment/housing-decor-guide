@@ -1464,6 +1464,7 @@ HDG.Store = {
     _subscribers = {},
     _pendingNotifications = nil,
     _flushScheduled = false,
+    _loggedSubscriberErrors = {},   -- message -> true; _callSubscriber logs each once per session
     _saveTimer = nil,
     _saveDelay = 1,   -- seconds to coalesce saves
 }
@@ -1507,6 +1508,29 @@ function HDG.Store:Unsubscribe(fn)
     self._subscribers[fn] = nil
 end
 
+-- One subscriber call: an error is logged AND re-raised (the HDGR_Modules.lua
+-- onInitialize shape). The flush runs outside ErrorBoundaryMiddleware, so before
+-- this a subscriber error reached only geterrorhandler() -- silent for a player
+-- without BugSack ("window won't open, no errors showing", Discord 2026-10-08,
+-- docs/WINDOW_WONT_OPEN_2026-10-08.md). The re-raise keeps ADR-042: nothing is
+-- swallowed and the rest of the flush still aborts. Logged once per distinct
+-- message: Log:Error dispatches LOG_PUSH, which schedules the next flush, so a
+-- subscriber that throws on every action would otherwise log itself every frame.
+-- The Log entry lands on the status rail and Debug tab, both inside the main
+-- window this failure can keep shut, so the same message also goes straight to
+-- chat (PrintDirect: not through the flush that is failing) for the player to report.
+local function _callSubscriber(store, fn, n)
+    local ok, err = pcall(fn, n.type, n.invalidation, n.action)
+    if ok then return end
+    local msg = tostring(err)
+    if not store._loggedSubscriberErrors[msg] then
+        store._loggedSubscriberErrors[msg] = true
+        HDG.Log:PrintDirect("error", "Hit an error -- please screenshot this line and report it on Discord: " .. msg)
+        HDG.Log:Error("error", ("subscriber error (action=%s): %s"):format(tostring(n.type), msg))
+    end
+    error(err, 0)   -- level 0: err already carries the subscriber's file:line
+end
+
 -- Deferred notification: C_Timer.After(0) batches multiple dispatches in the
 -- same frame, fanning each accumulated action out to every subscriber on
 -- the next frame. Prevents re-entrant-flush corruption (a subscriber that
@@ -1534,12 +1558,13 @@ function HDG.Store:_Notify(actionType, invalidation, action)
         if not pending then return end
         local snapshot = {}
         for fn in pairs(self._subscribers) do snapshot[#snapshot + 1] = fn end
-        -- No blanket pcall (ADR-042): real bugs must surface loudly. NOTE: this
+        -- No swallowing pcall (ADR-042): real bugs must surface loudly. NOTE: this
         -- flush runs on a deferred C_Timer, OUTSIDE the dispatch chain -- so
-        -- ErrorBoundaryMiddleware does NOT cover it. A raising subscriber
-        -- surfaces as a raw Lua error and aborts the remaining subscribers for
-        -- this flush; that loss is deliberate (the alternative silently runs
-        -- downstream subscribers against state the failed one never processed).
+        -- ErrorBoundaryMiddleware does NOT cover it. _callSubscriber reports a raising
+        -- subscriber (chat line + Debug tab + status rail), then re-raises it, which aborts
+        -- the remaining subscribers for this flush; that loss is deliberate (the
+        -- alternative silently runs downstream subscribers against state the
+        -- failed one never processed).
         -- exception(boundary): Perf instrumentation is optional, may be absent in early boot / tests.
         local perf = HDG.Perf
         local timed = perf and perf:Enabled()
@@ -1548,7 +1573,7 @@ function HDG.Store:_Notify(actionType, invalidation, action)
 
         for _, n in ipairs(pending) do
             for _, fn in ipairs(snapshot) do
-                fn(n.type, n.invalidation, n.action)
+                _callSubscriber(self, fn, n)
             end
         end
 
@@ -1575,10 +1600,10 @@ function HDG.Store:FlushNotifications()
     self._flushScheduled = false
     local snapshot = {}
     for fn in pairs(self._subscribers) do snapshot[#snapshot + 1] = fn end
-    -- Same no-blanket-pcall rationale as the deferred flush path.
+    -- Same log-and-re-raise as the deferred flush path.
     for _, n in ipairs(pending) do
         for _, fn in ipairs(snapshot) do
-            fn(n.type, n.invalidation, n.action)
+            _callSubscriber(self, fn, n)
         end
     end
 end

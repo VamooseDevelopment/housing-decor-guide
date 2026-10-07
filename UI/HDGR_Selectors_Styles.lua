@@ -671,6 +671,7 @@ _resolveNamePatternItems = function(collID, def, state)
 end
 
 -- Special resolver: "dyeable" = canCustomize; "trophies" = isUniqueTrophy;
+-- "neighborhood" = sold in a housing neighborhood (the Acquire filter's predicate);
 -- "recently-learned" = decor from account.craft.history learned events, newest first.
 -- Memoized against changeSeq (bumped on each learned CRAFT_HISTORY_PUSH, so this cache
 -- refreshes the moment a decor is learned).
@@ -690,6 +691,10 @@ _resolveSpecialItems = function(collID, def, state)
     elseif def.resolver == "trophies" then
         HDG.HousingCatalogObserver:IterateRows(function(itemID, row)
             if row.isUniqueTrophy then items[#items + 1] = itemID end
+        end)
+    elseif def.resolver == "neighborhood" then
+        HDG.HousingCatalogObserver:IterateRows(function(itemID, row)
+            if HDG.HousingCatalogObserver:IsSoldInNeighborhood(row) then items[#items + 1] = itemID end
         end)
     elseif def.resolver == "recently-learned" then
         -- Decor most-recently added to the house chest, deduped by item. Entries are

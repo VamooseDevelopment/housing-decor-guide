@@ -432,21 +432,14 @@ local _PRESET_TO_FLAG = {
     reputation  = "REP",
     crafted     = "CRAFT",
 }
--- SOLD IN A HOUSING NEIGHBORHOOD. row.vendors already carries mapID -- the
--- vendor resolver stamps it off VendorAugment alongside npcID -- so this is a
--- direct read rather than a name join.
+-- SOLD IN A HOUSING NEIGHBORHOOD. The predicate lives on the catalog observer
+-- (IsSoldInNeighborhood) because the companion's "Neighborhood Decor" collection
+-- asks the same question; this adapts it to an envelope row.
 local function _matchesNeighborhood(envRow)
     if not envRow.itemID then return false end
     local catRow = HDG.HousingCatalogObserver:GetRow(envRow.itemID)
     if not catRow then return false end  -- exception(nullable): itemID outside the catalog
-    -- No `or {}`: _bakeVendors always stamps row.vendors, empty list included,
-    -- precisely so downstream walks need no guard.
-    for _, v in ipairs(catRow.vendors) do
-        if v.mapID and HDG.Constants.NEIGHBORHOOD_MAP_IDS[v.mapID] then
-            return true
-        end
-    end
-    return false
+    return HDG.HousingCatalogObserver:IsSoldInNeighborhood(catRow)
 end
 
 -- NOTHING BETWEEN YOU AND BUYING IT: a vendor sells it, the price is gold, and

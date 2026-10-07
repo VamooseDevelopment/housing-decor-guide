@@ -290,6 +290,15 @@ HDGR_CollectionDefinitions = {
         resolver = "trophies",
     },
 
+    ["neighborhood"] = {
+        displayName = "Neighborhood Decor",
+        icon = "Interface\\Icons\\Garrison_Building_Barracks",
+        tier = "collection",
+        color = { r = 0.55, g = 0.80, b = 0.45 },
+        description = "Decor sold by vendors in the housing neighborhoods, Founder's Point and Razorwind Shores.",
+        resolver = "neighborhood",
+    },
+
     ["recently-learned"] = {
         displayName = "Recently Learned",
         icon = "Interface\\Icons\\INV_Misc_Book_09",
@@ -303,7 +312,7 @@ HDGR_CollectionDefinitions = {
 -- Display order for minicard grid
 HDGR_CollectionOrder = {
     -- Special (most useful first)
-    "recently-learned", "dyeable", "trophies",
+    "recently-learned", "dyeable", "trophies", "neighborhood",
     -- Furniture
     "chairs-seating", "tables-desks", "beds-bedding",
     "shelves-storage", "barrels-crates", "cushions-pillows",
