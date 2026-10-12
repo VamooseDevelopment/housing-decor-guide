@@ -334,8 +334,14 @@ R.AcqPreset_neighborhood = { title = "locale:TIP_ACQ_PRESET_NBH_TITLE", body = "
 R.AcqPreset_ungated      = { title = "locale:TIP_ACQ_PRESET_UNG_TITLE", body = "locale:TIP_ACQ_PRESET_UNG_BODY", anchor = "ANCHOR_BOTTOM" }
 R.AcqMissingToggle      = { title = "locale:TIP_ACQ_MISSING_TITLE",     body = "locale:TIP_ACQ_MISSING_BODY",     anchor = "ANCHOR_BOTTOM" }
 
+-- ===== + Cart (Decor, Shop by Item, Shop by Vendor) =========================
+-- One word on all three buttons: a player who met "+ Wish" in one tab and
+-- "+ Cart" in another took them for different lists. The vendor one says where
+-- the item lands, because it keeps the vendor.
+R.CartAdd       = { title = "locale:TIP_CART_ADD_TITLE", body = "locale:TIP_CART_ADD_BODY",        anchor = "ANCHOR_TOP" }
+R.CartAddVendor = { title = "locale:TIP_CART_ADD_TITLE", body = "locale:TIP_CART_ADD_VENDOR_BODY", anchor = "ANCHOR_TOP" }
+
 -- ===== Decor browser controls ===============================================
-R.DecorWishlist     = { title = "locale:TIP_DECOR_WISHLIST_TITLE",      body = "locale:TIP_DECOR_WISHLIST_BODY",      anchor = "ANCHOR_TOP" }
 R.DecorDestroy      = { title = "locale:TIP_DECOR_DESTROY_TITLE",       body = "locale:TIP_DECOR_DESTROY_BODY",       anchor = "ANCHOR_TOP" }
 R.DecorStoredFilter = { title = "locale:TIP_DECOR_STORED_FILTER_TITLE", body = "locale:TIP_DECOR_STORED_FILTER_BODY", anchor = "ANCHOR_BOTTOM" }
 
@@ -649,6 +655,25 @@ function R.RecipeRow(self)
         anchor     = "ANCHOR_RIGHT",
         extraLines = extras,
     }
+end
+
+-- A crafted item's recipe, for a tooltip that is otherwise the item's own: the
+-- profession that makes it, whether you know the recipe, where it is learnt,
+-- and its materials as have/need for `qty` crafts. Public because the shopping
+-- list's item rows keep Blizzard's item body and add these beneath it (a
+-- player asked which profession and what materials a listed item needs). Same
+-- helpers and recipes.db read as R.RecipeRow, so the two never disagree.
+function R.AppendCraftLines(extras, itemID, qty)
+    local recipe = HDG.Selectors:Call("recipes.db", HDG.Store:GetState())[itemID]
+    if recipe.profession then  -- exception(nullable): a recipe captured before the profession walk has none yet
+        extras[#extras + 1] = { text = "Profession: " .. recipe.profession, r = 0.70, g = 0.78, b = 0.88 }
+    end
+    _appendRecipeKnowledge(extras, itemID)
+    _appendRecipeSource(extras, itemID)
+    if qty > 1 then
+        extras[#extras + 1] = { text = ("Listed: x%d -- materials below are for all %d"):format(qty, qty), r = 0.6, g = 0.78, b = 0.95 }
+    end
+    _buildRecipeRowMaterials(extras, recipe, HDG.BagObserver:GetCounts(), qty)
 end
 
 

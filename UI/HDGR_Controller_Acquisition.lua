@@ -231,6 +231,11 @@ local function _wireAcqItemRow(row, ed)
     local isRecipe = ed.kind == "recipe"
     row:SetScript("OnClick", function()
         if not itemID then return end
+        -- Shift-click links the item in chat, as on Shop by Item's rows.
+        if IsShiftKeyDown() then
+            HDG.UI.LinkItem(itemID)
+            return
+        end
         CH.Mechanics.SetUITransientView("acquisition", "selectedItemID", itemID)
         CH.Mechanics.SetUITransientView("acquisition", "selectedRecipeItemID",
             isRecipe and itemID or nil)
@@ -539,6 +544,37 @@ function AcquisitionController:_wireAchievementHyperlinks(rootFrame)
     hyperHost:SetScript("OnHyperlinkLeave", function() HDG.TooltipEngine:Hide() end)
 end
 
+-- |Hhdgrdecor:<itemID>|h on the selected item's name (acq.selectedItem.name):
+-- click opens the item's Decor entry, where + Cart, notes and the model live.
+local function _parseDecorLink(link)
+    local kind, payload = strsplit(":", link or "", 2)
+    if kind ~= "hdgrdecor" or not payload or payload == "" then return nil end
+    return tonumber(payload)
+end
+
+function AcquisitionController:_wireDecorHyperlink(rootFrame)
+    local nameLabel = HDG.UI.W(rootFrame, "acquisitionDetailPanel.selectedName")
+    local hyperHost = nameLabel and nameLabel.GetParent and nameLabel:GetParent()
+    if not (hyperHost and hyperHost.SetHyperlinksEnabled) then return end  -- exception(false-positive): mock-fidelity guard (mirrors the hdgrach wiring above)
+    hyperHost:EnableMouse(true)
+    hyperHost:SetHyperlinksEnabled(true)
+    hyperHost:SetScript("OnHyperlinkClick", function(_, link)
+        local itemID = _parseDecorLink(link)
+        if not itemID then return end
+        CH.Mechanics.JumpToDecor(itemID)
+    end)
+    hyperHost:SetScript("OnHyperlinkEnter", function(self, link)
+        if not _parseDecorLink(link) then return end
+        HDG.TooltipEngine:Show(self, {
+            anchor     = "ANCHOR_CURSOR",
+            extraLines = {
+                { text = HDG.Locale:Get("ACQ_DECOR_LINK_HINT"), r = 0.7, g = 0.7, b = 0.7 },
+            },
+        })
+    end)
+    hyperHost:SetScript("OnHyperlinkLeave", function() HDG.TooltipEngine:Hide() end)
+end
+
 -- Show-on-map: open world map + drop pin via HDG.Waypoints.
 function AcquisitionController:_wireShowOnMap(rootFrame)
     HDG.UI.OnClick(rootFrame, "acquisitionDetailPanel.showOnMapBtn", function()
@@ -660,6 +696,7 @@ function AcquisitionController:Wire(rootFrame)
     end)
 
     self:_wireAchievementHyperlinks(rootFrame)
+    self:_wireDecorHyperlink(rootFrame)
 
     -- Items grid/list toggle (account-persisted).
     HDG.UI.OnClick(rootFrame, "acquisitionDetailPanel.itemsViewGridBtn", function()

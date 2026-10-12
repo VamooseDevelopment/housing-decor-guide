@@ -1360,19 +1360,33 @@ local function syntheticQueueFromSelection(state, ctx)
     return { { recipeID = r.itemID, itemID = r.itemID, remaining = 1 } }
 end
 
+-- The queue's rows for one recipe (empty when it isn't queued).
+local function queueRowsFor(q, recipeID)
+    local filtered = {}
+    for _, row in ipairs(q) do
+        if row.recipeID == recipeID then filtered[#filtered + 1] = row end
+    end
+    return filtered
+end
+
 -- Effective queue: real queue if non-empty; else selection-derived fallback.
 -- queueSelectedRecipeID scopes to a single recipe for the "click a queue row" UX.
+-- materialsRecipeID (a recipe opened from another window) comes first: its own
+-- queue row when it is queued, so the count is the queue's; one craft when not.
 local function effectiveQueue(state, ctx)
     local q = Selectors:Call("recipes.queue", state, ctx)
+    local opened = state.session.ui.recipes.materialsRecipeID
+    if opened then
+        local rows = queueRowsFor(q, opened)
+        if #rows > 0 then return rows end
+        return { { recipeID = opened, itemID = opened, remaining = 1 } }
+    end
     if not (q and #q > 0) then
         return syntheticQueueFromSelection(state, ctx)
     end
     local scoped = state.session.ui.recipes.queueSelectedRecipeID
     if not scoped then return q end
-    local filtered = {}
-    for _, row in ipairs(q) do
-        if row.recipeID == scoped then filtered[#filtered + 1] = row end
-    end
+    local filtered = queueRowsFor(q, scoped)
     if #filtered == 0 then return q end   -- recipe removed from queue; fall back to full
     return filtered
 end
@@ -1472,7 +1486,7 @@ Selectors:Register("recipes.materials.direct", {
     -- queueSelectedRecipeID is read inside effectiveQueue -- the scope
     -- filter narrows the queue to a single recipe. Track here so toggling
     -- it invalidates the materials list.
-    reads = {"session.resolvers.bag.tick", "session.ui.recipes.queueSelectedRecipeID", "session.resolvers.staticData.tick", "session.itemNames.names"},
+    reads = {"session.resolvers.bag.tick", "session.ui.recipes.queueSelectedRecipeID", "session.ui.recipes.materialsRecipeID", "session.resolvers.staticData.tick", "session.itemNames.names"},
     fn = function(state, ctx)
         local queue = effectiveQueue(state, ctx)
         if not queue then return {} end
@@ -1492,7 +1506,7 @@ Selectors:Register("recipes.materials.direct", {
 
 Selectors:Register("recipes.materials.raw", {
     calls = {"recipes.queue", "recipes.selectedRecipe", "recipes.craftGraph"},
-    reads = {"session.resolvers.bag.tick", "session.ui.recipes.queueSelectedRecipeID", "session.itemNames.names"},
+    reads = {"session.resolvers.bag.tick", "session.ui.recipes.queueSelectedRecipeID", "session.ui.recipes.materialsRecipeID", "session.itemNames.names"},
     fn = function(state, ctx)
         local queue = effectiveQueue(state, ctx)
         if not queue then return {} end
@@ -1561,7 +1575,7 @@ end
 
 Selectors:Register("recipes.materials.byRecipe", {
     calls = {"recipes.queue", "recipes.selectedRecipe", "recipes.craftGraph", "recipes.db"},
-    reads = {"session.resolvers.bag.tick", "session.ui.recipes.queueSelectedRecipeID", "session.resolvers.staticData.tick", "session.itemNames.names"},
+    reads = {"session.resolvers.bag.tick", "session.ui.recipes.queueSelectedRecipeID", "session.ui.recipes.materialsRecipeID", "session.resolvers.staticData.tick", "session.itemNames.names"},
     fn = function(state, ctx)
         local queue = effectiveQueue(state, ctx)
         if not queue then return {} end
@@ -1573,7 +1587,7 @@ Selectors:Register("recipes.materials.byRecipe", {
 
 Selectors:Register("recipes.materials.byRecipeRaw", {
     calls = {"recipes.queue", "recipes.selectedRecipe", "recipes.craftGraph", "recipes.db"},
-    reads = {"session.resolvers.bag.tick", "session.ui.recipes.queueSelectedRecipeID", "session.resolvers.staticData.tick", "session.itemNames.names"},
+    reads = {"session.resolvers.bag.tick", "session.ui.recipes.queueSelectedRecipeID", "session.ui.recipes.materialsRecipeID", "session.resolvers.staticData.tick", "session.itemNames.names"},
     fn = function(state, ctx)
         local queue = effectiveQueue(state, ctx)
         if not queue then return {} end

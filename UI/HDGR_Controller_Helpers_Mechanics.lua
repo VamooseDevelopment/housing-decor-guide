@@ -97,6 +97,17 @@ function Mech.ConfirmDeleteVersion(houseID, versionID, name, afterAccept)
     })
 end
 
+-- Open the main window on a view, with that view's filters reset so the
+-- target is listed (a zone filter left on once hid the jumped-to vendor, and the
+-- player landed on someone else's goods).
+local function _openViewReset(view)
+    if Mech.GetState().account.ui.mainWindowShown ~= true then
+        Mech.Dispatch(HDG.Constants.ACTIONS.MAIN_WINDOW_TOGGLE)
+    end
+    Mech.SetUIPersistent("view", view)
+    Mech.Dispatch(HDG.Constants.ACTIONS.UI_FILTER_RESET, { tab = view })
+end
+
 -- Vendor deep-link: open the main window on Acquire > Shop by Vendor with this
 -- vendor selected. Callable from any window (shopping widget / zone popup vendor
 -- rows / the Decor source hyperlink). Resets EVERY acquisition filter, not just
@@ -109,13 +120,36 @@ end
 -- acq.selectedVendor). The selected row scrolls into view via the selection
 -- reveal queue (UI.QueueSelectionReveal).
 function Mech.JumpToVendor(npcID, name, zone)
-    if Mech.GetState().account.ui.mainWindowShown ~= true then
-        Mech.Dispatch(HDG.Constants.ACTIONS.MAIN_WINDOW_TOGGLE)
-    end
-    Mech.SetUIPersistent("view", "acquisition")
+    _openViewReset("acquisition")
     Mech.SetUITransientView("acquisition", "viewMode", "vendor")
-    Mech.Dispatch(HDG.Constants.ACTIONS.UI_FILTER_RESET, { tab = "acquisition" })
     Mech.SelectVendor(npcID, name, zone)
+end
+
+-- Recipe deep-link: Crafting > Recipes on this recipe (itemID = the crafted
+-- decor, which is how recipes are keyed), its materials in the Materials list.
+-- The reset puts the profession filter back to this character's professions,
+-- which hides a recipe from any other profession -- so that one profession is
+-- added to the filter (a toggle, so only when it is missing; the filter is
+-- saved per character, so it stays added). An empty set means all professions.
+function Mech.JumpToRecipe(itemID)
+    _openViewReset("recipes")
+    local state = Mech.GetState()
+    local profession = HDG.Selectors:Call("recipes.db", state, {})[itemID].profession
+    local shown = HDG.Selectors:Call("recipes.professionFilter", state, {})
+    if next(shown) ~= nil and not shown[profession] then
+        Mech.Dispatch(HDG.Constants.ACTIONS.RECIPES_TOGGLE_PROFESSION, { profession = profession })
+    end
+    Mech.Dispatch(HDG.Constants.ACTIONS.RECIPES_SHOW_RECIPE, { recipeID = itemID })
+end
+
+-- Decor deep-link: the Decor browser on this item's undyed row. The list
+-- selects by variantKey, and the undyed row's key is "<itemID>:base"
+-- (decor.items, HDGR_Selectors_Decor.lua); the reset clears the Dyed and
+-- Stored filters that could leave that row out.
+function Mech.JumpToDecor(itemID)
+    _openViewReset("decor")
+    Mech.SetUITransientView("decor", "selectedItemID", itemID)
+    Mech.SetUITransientView("decor", "selectedVariantKey", tostring(itemID) .. ":base")
 end
 
 

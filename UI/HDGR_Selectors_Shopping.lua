@@ -258,6 +258,19 @@ local function _resolveWishlistVendor(itemID, preferredMapID)
     return nil
 end
 
+-- Where clicking the item's row takes the player: its recipe on the Recipes tab
+-- when it is crafted (which profession, what materials -- the question a crafted
+-- item on the list raises), else its Decor entry. Crafted = the catalog row has
+-- a recipe, the same test that puts it in the Crafting / Auction House section
+-- (GetBindTypeForItem). "none" for what the catalog lacks (a housing dye, or
+-- anything before the catalog loads): the row then has no plain click.
+local function _opensTo(itemID)
+    local row = HDG.HousingCatalogObserver:GetRow(itemID)
+    if not row then return "none" end  -- exception(nullable): dyes and pre-load items have no catalog row
+    if row.recipe then return "recipe" end
+    return "decor"
+end
+
 Selectors:Register("shopping.activeListEntries", {
     reads = {"session.resolvers.staticData.tick",  "session.itemNames.names", "session.resolvers.catalog.tick" },
     calls = { "shopping.activeList", "shopping.neighborhood" },
@@ -304,6 +317,7 @@ Selectors:Register("shopping.activeListEntries", {
                     -- lane. Housing dyes never bind, and the AH is where they are bought.
                     isTradeable = HDG.Constants.HOUSING_DYE_ITEM_IDS[entry.itemID] == true
                         or HDG.HousingCatalogObserver:GetBindTypeForItem(entry.itemID) == "BoE",
+                    opens = _opensTo(entry.itemID),
                 }
             end
         end
@@ -356,6 +370,7 @@ local function _buildShoppingItemRow(item, npcID)
     return {
         kind   = "item", itemID = item.itemID, npcID = npcID,
         qty    = item.qty,
+        opens  = item.opens,
         iconID = item.iconID,
         gold   = item.gold,
         requiresRep = item.requiresRep,
@@ -370,7 +385,7 @@ local function _appendWishSection(rows, wish, wishCollapsed)
     for _, w in ipairs(wish) do
         rows[#rows + 1] = {
             kind = "wishItem", itemID = w.itemID, qty = w.qty,
-            addedAt = w.addedAt, iconID = w.iconID,
+            addedAt = w.addedAt, iconID = w.iconID, opens = w.opens,
             availableFrom = w.availableFrom,   -- catalog "where to buy" hint (display only)
         }
     end
@@ -386,7 +401,7 @@ local function _appendAhSection(rows, ah, ahCollapsed)
     for _, a in ipairs(ah) do
         rows[#rows + 1] = {
             kind = "ahItem", itemID = a.itemID, qty = a.qty,
-            addedAt = a.addedAt, iconID = a.iconID,
+            addedAt = a.addedAt, iconID = a.iconID, opens = a.opens,
         }
     end
 end

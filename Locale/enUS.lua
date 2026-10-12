@@ -87,7 +87,6 @@ HDG.Locale:Register("enUS", {
     -- Detail pane
     DECOR_PREVIEW_PLACEHOLDER = "Click an item to preview",
     DECOR_DESTROY_BTN      = "Destroy a stored copy",
-    DECOR_WISHLIST_BTN     = "+ Wish",
     DECOR_MAP_BTN          = "+ Map",
     DECOR_WAYPOINT_BTN     = "+ Way",
     DECOR_NOTE_PLACEHOLDER = "Add a personal note...",
@@ -458,8 +457,7 @@ HDG.Locale:Register("enUS", {
     ACQ_VENDOR_NOTE_PLACEHOLDER = "Add a vendor note...",
     ACQ_ITEMS_VIEW_GRID        = "Grid",
     ACQ_ITEMS_VIEW_LIST        = "List",
-    ACQ_CART_ADD_BTN           = "Cart +",
-    ACQ_SELECTED_CART_BTN      = "+ Cart",
+    ACQ_DECOR_LINK_HINT        = "Click to open this item in the Decor tab",
     ACQ_MISSING_TOGGLE         = "Missing",
 
     -- Recipes tab
@@ -537,7 +535,9 @@ HDG.Locale:Register("enUS", {
 
     -- Shopping tab
     SHOP_TITLE              = "Shopping List",
-    SHOP_HINT_LEFT          = "Expand or collapse a group (zone, vendor, or wishlist).",
+    SHOP_HINT_LEFT          = "Expand or collapse a group (zone, vendor, or wishlist). On an item, open its recipe, or its entry in the Decor tab.",
+    SHOP_HINT_LEFT_RECIPE   = "Open its recipe -- the profession and the materials.",
+    SHOP_HINT_LEFT_DECOR    = "Open it in the Decor tab.",
     SHOP_HINT_RIGHT         = "Item options -- set quantity, remove, or show the vendor on the map.",
     SHOP_HINT_SHIFT         = "Search the Auction House for the item (with the Auction House open).",
     SHOP_PANEL_TITLE        = "Shopping",
@@ -696,8 +696,10 @@ HDG.Locale:Register("enUS", {
     TIP_ACQ_PRESET_UNG_BODY = "Decor a vendor sells for gold that needs no reputation, quest or achievement first. Broader than Neighborhood, and it relies on the catalog naming a requirement -- a vendor you have to unlock to reach can still appear.",
     TIP_ACQ_MISSING_TITLE = "Not Collected",
     TIP_ACQ_MISSING_BODY = "Narrows the list to decor you haven't collected yet -- stacks with the source filter beside it.",
-    TIP_DECOR_WISHLIST_TITLE = "Add to Wishlist",
-    TIP_DECOR_WISHLIST_BODY = "Saves this item to the Wishlist section of your active Shopping list -- create a Shopping list first if you don't have one.",
+    CART_ADD_BTN = "+ Cart",
+    TIP_CART_ADD_TITLE = "Add to Cart",
+    TIP_CART_ADD_BODY = "Adds this item to your active Shopping list -- create a Shopping list first if you don't have one.",
+    TIP_CART_ADD_VENDOR_BODY = "Adds this item to your active Shopping list, under this vendor -- create a Shopping list first if you don't have one.",
     TIP_DECOR_DESTROY_TITLE = "Destroy Stored Decor",
     TIP_DECOR_DESTROY_BODY = "Permanently removes copies from your housing storage -- opens a quantity dialog first. This cannot be undone.",
     TIP_DECOR_STORED_FILTER_TITLE = "Show Stored Decor",

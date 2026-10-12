@@ -391,6 +391,9 @@ LC.widgets["decorPanel.search"] = {
     placeholder = "locale:DECOR_SEARCH_PLACEHOLDER",
     -- Its placeholder names decor, so pets mode swaps in petPanel.search instead.
     -- Both write session.ui.decor.searchQuery, so the query survives the switch.
+    -- Bound back from state so a jump from another window (UI_FILTER_RESET)
+    -- clears the box it can't reach.
+    binding = { text = "decor.filterQuery" },
     visible = "decor.showDecorDetail",
 }
 -- Persistent filter reset: always visible. Wired in Controller_Decor -> UI_FILTER_RESET{tab="decor"}.
@@ -510,9 +513,9 @@ LC.widgets["decorDetailPanel.destroyBtn"] = {
     textTone = "error",
     visible = "decor.showDestroyButton",
 }
--- Detail action row (note column, above the note editbox): + Wish / Map / Waypoint sharing
+-- Detail action row (note column, above the note editbox): + Cart / Map / Waypoint sharing
 -- the width. Map + Waypoint reuse Shop-by-Vendor's actions against the decor's primary vendor
--- and hide when there's no mappable vendor, leaving + Wish to fill the row.
+-- and hide when there's no mappable vendor, leaving + Cart to fill the row.
 LC.sections["decor.detailActionRow"] = {
     ["in"]  = "decor.noteCard",
     layout  = "horizontal",
@@ -520,11 +523,12 @@ LC.sections["decor.detailActionRow"] = {
     gap     = "xs",
     order   = 5,
 }
--- + Wish: adds selected item as wishlist entry (npcID=nil). Wired in HDGR_Controller_Decor.
-LC.widgets["decorDetailPanel.wishlistBtn"] = {
-    tooltip = { recipe = "DecorWishlist" },
+-- + Cart: adds the selected item with no vendor (npcID=nil), so it lands in the
+-- Wishlist section (or Crafting / Auction House when crafted). Wired in HDGR_Controller_Decor.
+LC.widgets["decorDetailPanel.cartBtn"] = {
+    tooltip = { recipe = "CartAdd" },
     kind = "button", ["in"] = "decor.detailActionRow", font = "small",
-    text = "locale:DECOR_WISHLIST_BTN", width = "fill", height = 22,
+    text = "locale:CART_ADD_BTN", width = "fill", height = 22,
     order = 10, variant = "tertiary",
     visible = "decor.hasSelectedItem",
 }

@@ -246,6 +246,11 @@ local function NewRecipesSessionUI()
         -- effectiveQueue). Toggle on second click via Deselectable flag
         -- on the queue scrollbox + RECIPES_TOGGLE_QUEUE_SELECTION action.
         queueSelectedRecipeID = nil,
+        -- A recipe opened from another window (RECIPES_SHOW_RECIPE): the materials
+        -- list shows it alone, queued or not, until the player picks a recipe or a
+        -- queue row here. Without it a non-empty queue keeps the list on the queue's
+        -- totals, beside a recipe the player came to see.
+        materialsRecipeID  = nil,
         -- focusedItemID: set by clicking a recipe or queue row. Last click wins.
         focusedItemID      = nil,
         expandedSections   = {},        -- [sectionKey] = true (open) / nil (closed)
@@ -3241,21 +3246,41 @@ HDG.Actions:Register{ name = "RECIPES_TOGGLE_FILTER",
 
 HDG.Actions:Register{ name = "RECIPES_SELECT_RECIPE",
     persists = false, combatUnsafe = false, 
-    invalidates = { "session.ui.recipes.selectedRecipeID", "session.ui.recipes.queueSelectedRecipeID" },
+    invalidates = { "session.ui.recipes.selectedRecipeID", "session.ui.recipes.queueSelectedRecipeID",
+                    "session.ui.recipes.materialsRecipeID" },
     reduce = function(state, payload)
         state.session.ui.recipes.selectedRecipeID = payload.recipeID
         -- Picking a recipe from the list resets queue scoping: the queue row
         -- deselects + Materials returns to the full-queue aggregate. (Last
         -- selection wins; recipe-list and queue selections are mutually exclusive.)
         state.session.ui.recipes.queueSelectedRecipeID = nil
+        state.session.ui.recipes.materialsRecipeID = nil
+    end }
+
+-- A recipe opened from another window: the list click's selection and focus, and
+-- the materials list goes to this recipe alone even when the queue has rows (the
+-- player came to see what IT needs). selectedRecipeID is named in invalidates so
+-- the list reveals the row, a re-open of the same recipe included.
+HDG.Actions:Register{ name = "RECIPES_SHOW_RECIPE",
+    persists = false, combatUnsafe = false,
+    invalidates = { "session.ui.recipes.selectedRecipeID", "session.ui.recipes.queueSelectedRecipeID",
+                    "session.ui.recipes.materialsRecipeID", "session.ui.recipes.focusedItemID" },
+    reduce = function(state, payload)
+        local r = state.session.ui.recipes
+        r.selectedRecipeID      = payload.recipeID
+        r.focusedItemID         = payload.recipeID   -- recipeID == the crafted item's id
+        r.materialsRecipeID     = payload.recipeID
+        r.queueSelectedRecipeID = nil
     end }
 
 HDG.Actions:Register{ name = "RECIPES_TOGGLE_QUEUE_SELECTION",
     persists = false, combatUnsafe = false, 
-    invalidates = { "session.ui.recipes.queueSelectedRecipeID" },
+    invalidates = { "session.ui.recipes.queueSelectedRecipeID", "session.ui.recipes.materialsRecipeID" },
     reduce = function(state, payload)
         -- Toggle: click-on-selected clears (so mats list returns to the
         -- full-queue aggregate); click-on-other sets to that recipeID.
+        -- A queue click takes the materials list back from an opened recipe.
+        state.session.ui.recipes.materialsRecipeID = nil
         local cur = state.session.ui.recipes.queueSelectedRecipeID
         if cur == payload.recipeID then
             state.session.ui.recipes.queueSelectedRecipeID = nil

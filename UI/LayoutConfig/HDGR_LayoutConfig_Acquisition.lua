@@ -593,9 +593,9 @@ LC.widgets["acquisitionDetailPanel.itemWowheadBtn"] = {
     visible = "acq.hasSelectedItem",
 }
 LC.widgets["acquisitionDetailPanel.itemInfoCartBtn"] = {
-    tooltip = false,
+    tooltip = { recipe = "CartAdd" },
     kind = "button", ["in"] = "acq.itemInfoCartRow", font = "small",
-    text = "locale:ACQ_CART_ADD_BTN", width = "auto", height = 22, order = 10, variant = "tertiary",
+    text = "locale:CART_ADD_BTN", width = "auto", height = 22, order = 10, variant = "tertiary",
     visible = "acq.hasSelectedItem",
 }
 -- Vendor list header ("Available from (N)"). Height 18 (was 32) -- phantom space
@@ -672,9 +672,9 @@ LC.widgets["acquisitionDetailPanel.selectedDetail"] = {
 }
 -- Cart+: adds selected item to active shopping list. Wired in HDGR_Controller_Acquisition.
 LC.widgets["acquisitionDetailPanel.selectedAddToCartBtn"] = {
-    tooltip = false,
+    tooltip = { recipe = "CartAddVendor" },
     kind = "button", ["in"] = "acq.actionCol.selectedBlock",
-    font = "small", text = "locale:ACQ_SELECTED_CART_BTN", width = "fill", height = 20,
+    font = "small", text = "locale:CART_ADD_BTN", width = "fill", height = 20,
     order = 30, variant = "tertiary",
 }
 

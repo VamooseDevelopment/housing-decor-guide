@@ -12,11 +12,11 @@
 
 ---
 
-## What's New in v3.34.2
+## What's New in v3.35.0
 
-- **Neighborhood Decor in the house editor companion.** Under Collections, beside Recently Learned, Dyeable Items and Trophies, a new list holds the decor sold by vendors in Founder's Point and Razorwind Shores: the same pieces the Neighborhood filter finds on the Acquire tab. It's among the Styles tab's collections too.
-- **When something inside HDG breaks, it now says so in chat.** A line starting `[HDG] [E]` names what went wrong, so you can screenshot it and send it to us on Discord. Some of you have had the window stop opening from the minimap button, or the Zone Scanner refuse to close, with no error anywhere: the game hides addon errors unless you turn them on, so there was nothing to report. This release doesn't fix that yet. It lets us find the cause the next time it happens. Each problem prints once per session. Reported by txcreek, Vectality and Panseit.
-- **The red plus in the house editor's catalog marks only decor you don't own.** Go straight into the editor without opening HDG and it could sit on nearly every piece, a mural with three in storage included, until you opened HDG. It now goes by the same count the game shows on that tile.
+- **Click an item on the shopping list to see what it takes.** A crafted item opens its recipe on the Recipes tab, and the Materials list shows what that recipe needs even when your craft queue holds other things. If the recipe belongs to a profession this character doesn't have, that profession is added to the Recipes filter so the recipe is there. Anything else opens in the Decor tab. Hover a crafted item to see which profession makes it, whether you know the recipe, where to learn it, and the materials for the number on your list.
+- **Go from a vendor's item to its Decor entry.** On Shop by Vendor, click the name of the item you've picked to open it in the Decor tab. Shift-click an item in a vendor's list to link it in chat, as you can on Shop by Item.
+- **One button adds to the shopping list everywhere: + Cart.** The Decor tab called it + Wish and Shop by Item called it Cart +, so they looked like different lists. They're the same list. Hover the button to see where the item will land.
 
 ## The Decor Catalog
 
@@ -26,7 +26,7 @@
 - **Uncollected** toggle to focus on what you're missing; **Destroy Decor** toggle to manage stored duplicates, with a confirmed destroy dialog that counts each copy as the game takes it, or Ctrl-Shift-click a row to destroy one copy.
 - **3D model preview** of any piece -- rotate, zoom, swap the backdrop, and preview specific dye variants.
 - **Rich detail card**: category breadcrumb, size, source, owned/stored/placed counts, first-acquisition House XP bonus, and style/faction tags.
-- **Private notes** per item and a one-click **+ Wishlist** that adds to your active shopping list.
+- **Private notes** per item and a one-click **+ Cart** that adds to your active shopping list.
 
 - **Placeable pets** -- a Pets filter listing the pets in your collection that can be placed on decor, ordered by size, with each pet's height shown against your own character, family filters, a full-size preview, and Summon or Dismiss.
 
@@ -34,7 +34,7 @@
 
 **Shop by Vendor:** browse every decor vendor (searchable; filter by faction, expansion, zone, reputation, or source). Each vendor shows what they sell -- items *and* recipe scrolls -- with gold/currency costs, multiple payment options, and live **[QUEST] / [ACH] / [REP]** gate chips that brighten as you meet them. A map thumbnail plus **Waypoint** and **Map** buttons get you there; **Map N Vendors** pins a whole filtered list at once.
 
-**Find Decor:** search any piece and see exactly how to get it -- a typed source line with the reputation faction *and your live progress*, a clickable achievement link, the **alt who completed the quest** (account-wide), craft/drop tags, and an "Available from" list of every vendor that sells it. **Add to Cart**, copy Wowhead links, or jump straight to a vendor.
+**Find Decor:** search any piece and see exactly how to get it -- a typed source line with the reputation faction *and your live progress*, a clickable achievement link, the **alt who completed the quest** (account-wide), craft/drop tags, and an "Available from" list of every vendor that sells it. **+ Cart**, copy Wowhead links, or jump straight to a vendor.
 
 ## Crafting
 
@@ -81,7 +81,7 @@ A companion window injects into Blizzard's House Editor so you can **place decor
 
 ## Tools
 
-- **Shopping** -- a floating, multi-list shopping manager grouped by zone and vendor, with "Waypoint All" and share/import codes. At a vendor, "Buy All" purchases every gold-priced list item in one paced pass, and right-clicking a gold-priced decor item opens a quantity picker. Items come off the list as you buy them.
+- **Shopping** -- a floating, multi-list shopping manager grouped by zone and vendor, with "Waypoint All" and share/import codes. Click an item to open its recipe, or its Decor entry if it isn't crafted. At a vendor, "Buy All" purchases every gold-priced list item in one paced pass, and right-clicking a gold-priced decor item opens a quantity picker. Items come off the list as you buy them.
 - **Zone alerts** -- entering a zone with a decor vendor (selling something you're missing or have listed) can pop a window, ping chat, and play a sound -- each toggle optional.
 - **Your Data** -- collection KPIs, achievement progress (decor, coupons, lumber milestones), and full crafting/farming history.
 - **Config** -- multiple color themes with a live preview, UI scaling, and account profiles.
@@ -107,7 +107,7 @@ A companion window injects into Blizzard's House Editor so you can **place decor
 ---
 
 **Author:** Vamoose
-**Version:** 3.34.2
+**Version:** 3.35.0
 **Game Version:** 12.1.0 (Midnight)
-**Source / Issues:** https://github.com/VamooseAddons/housing-decor-guide
+**Source / Issues:** https://github.com/VamooseDevelopment/housing-decor-guide
 **Discord:** https://discord.gg/RWZaxJaHFP

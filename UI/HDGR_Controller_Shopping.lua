@@ -252,16 +252,21 @@ local function _showAhButtons(row)
     row._ahCraftBtn:Show()
 end
 
--- Mouse-action hints on every item row's tooltip. The header glyphs carry the
--- same words, but the row is where a player hovers when deciding what to do
--- with an item, so the gesture has to be readable there too.
+-- Mouse-action hints on every item row's tooltip, by where a click takes the
+-- item (ed.opens). The header glyphs carry the same words, but the row is where
+-- a player hovers when deciding what to do with an item, so the gesture has to
+-- be readable there too.
 local SHOP_ITEM_HINTS = {
-    shiftText = "locale:SHOP_HINT_SHIFT",
-    rightText = "locale:SHOP_HINT_RIGHT",
+    recipe = { leftText  = "locale:SHOP_HINT_LEFT_RECIPE",
+               shiftText = "locale:SHOP_HINT_SHIFT", rightText = "locale:SHOP_HINT_RIGHT" },
+    decor  = { leftText  = "locale:SHOP_HINT_LEFT_DECOR",
+               shiftText = "locale:SHOP_HINT_SHIFT", rightText = "locale:SHOP_HINT_RIGHT" },
+    none   = { shiftText = "locale:SHOP_HINT_SHIFT", rightText = "locale:SHOP_HINT_RIGHT" },
 }
 
 -- Item-row tooltip: Blizzard's item body, the resolved vendor when a wishlist
--- row knows one, then the click hints. Headers stamp no _shopItemID -> no tooltip.
+-- row knows one, a crafted item's recipe (profession, materials), then the
+-- click hints. Headers stamp no _shopItemID -> no tooltip.
 local function _shoppingRowTooltip(self)
     if not self._shopItemID then return nil end  -- exception(nullable): header / non-item rows don't stamp it
     local af = self._shopVendor
@@ -271,7 +276,10 @@ local function _shoppingRowTooltip(self)
         extraLines[1] = { text = "Available from: " .. (af.name or "?") .. zone,
                           r = 0.6, g = 0.78, b = 0.95 }
     end
-    HDG.TooltipEngine.AppendClickHints(extraLines, SHOP_ITEM_HINTS)
+    if self._shopOpens == "recipe" then
+        HDG.TooltipRecipes.AppendCraftLines(extraLines, self._shopItemID, self._shopQty)
+    end
+    HDG.TooltipEngine.AppendClickHints(extraLines, SHOP_ITEM_HINTS[self._shopOpens])
     return {
         itemID     = self._shopItemID,
         anchor     = "ANCHOR_RIGHT",
@@ -342,6 +350,16 @@ local function _configureVendorRow(row, ed)
     end)
 end
 
+-- A plain click on an item opens where its question is answered: a crafted
+-- item's recipe (which profession, what materials), else its Decor entry.
+local function _openItem(ed)
+    if ed.opens == "recipe" then
+        HDG.ControllerHelpers.Mechanics.JumpToRecipe(ed.itemID)
+    elseif ed.opens == "decor" then
+        HDG.ControllerHelpers.Mechanics.JumpToDecor(ed.itemID)
+    end
+end
+
 local function _configureItemRow(row, ed)
     row:SetHeight(20)
     -- Item-shape chrome: icon 16 on left, name after icon, name right-capped at
@@ -356,15 +374,22 @@ local function _configureItemRow(row, ed)
     -- hint is optional -- only resolved rows know a "where to buy".
     row._shopItemID = ed.itemID
     row._shopVendor = ed.availableFrom  -- exception(nullable): AH-only / unresolved items have no vendor
+    row._shopOpens  = ed.opens
+    row._shopQty    = ed.qty
     _showItemChrome(row, ed)
     -- Shift-click links the item, which lands in the Auction House search bar
     -- when the AH is open on a Buy tab -- the Warehouse and Recipes materials
     -- gesture. The Crafting / Auction House section is where a player goes to
     -- buy what they cannot make, so its rows carry it (owner, 2026-09-07);
     -- wishlist and vendor items take it too so one gesture reads the same on
-    -- every row. A plain left click stays a no-op; right-click owns the menu.
+    -- every row. A plain left click opens the item (_openItem); right-click
+    -- owns the menu.
     HDG.UI.WireLeftRightClick(row, function()
-        if IsShiftKeyDown() then HDG.UI.LinkMaterial(ed.itemID, HDG.UI.ItemName(ed.itemID)) end
+        if IsShiftKeyDown() then
+            HDG.UI.LinkMaterial(ed.itemID, HDG.UI.ItemName(ed.itemID))
+            return
+        end
+        _openItem(ed)
     end, function()
         ShoppingController:_OpenItemContextMenu(row, ed)
     end)
@@ -411,7 +436,8 @@ local function _shoppingRowFactory(template)
             row._rightFs:ClearAllPoints()
             row:SetScript("OnClick", nil)
             row:RegisterForClicks("LeftButtonUp")
-            row._shopItemID, row._shopVendor = nil, nil   -- tooltip stamps (resolved wishItems only)
+            -- Tooltip stamps (item rows only; _shopVendor on resolved wishItems only).
+            row._shopItemID, row._shopVendor, row._shopOpens, row._shopQty = nil, nil, nil, nil
             _hideAllChrome(row)
 
             local handler = _CONFIGURE_SHOPPING_BY_KIND[ed.kind]

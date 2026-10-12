@@ -138,6 +138,7 @@ LC.widgets["petPanel.search"] = {
     height = 22, width = 240, order = 10,
     multiline = false,
     placeholder = "locale:PETS_SEARCH_PLACEHOLDER",
+    binding = { text = "decor.filterQuery" },   -- same state as decorPanel.search
     visible = "pets.isMode",
 }
 

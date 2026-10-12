@@ -647,7 +647,7 @@ function DecorController:Wire(rootFrame)
         end)
     end
 
-    self:_wireWishlist(rootFrame)
+    self:_wireCart(rootFrame)
     self:_wireVendorNav(rootFrame)
     self:_wireVendorHyperlink(rootFrame)
 end
@@ -767,15 +767,15 @@ function DecorController:_wireNoteBox(rootFrame)
         "itemID", "NOTE_CLEAR", "NOTE_SET")
 end
 
--- Wishlist: adds selected item (npcID nil) to shopping list (surfaces in Wishlist section).
-function DecorController:_wireWishlist(rootFrame)
-    HDG.UI.OnClick(rootFrame, "decorDetailPanel.wishlistBtn", function()
+-- + Cart: adds selected item (npcID nil) to shopping list (surfaces in Wishlist section).
+function DecorController:_wireCart(rootFrame)
+    HDG.UI.OnClick(rootFrame, "decorDetailPanel.cartBtn", function()
         local state = HDG.Store:GetState()  -- exception(false-positive): top-level controller method (not a row factory)
         local item  = HDG.Selectors:Call("decor.selectedItem", state, {})
         if not item then return end
         if state.account.activeShoppingListId == "" then
             HDG.Log:Warn("shopping",
-                "No active shopping list -- open the Shopping tab to create one (decor wishlist)")
+                "No active shopping list -- open the Shopping tab to create one (decor cart)")
             return
         end
         HDG.Store:Dispatch({
@@ -783,7 +783,7 @@ function DecorController:_wireWishlist(rootFrame)
             payload = { itemID = item.itemID, qty = 1 },   -- npcID nil = wishlist
         })
         HDG.Log:Success("shopping",
-            (item.name or "Item") .. " added to wishlist")
+            (item.name or "Item") .. " added to shopping list")
     end)
 end
 

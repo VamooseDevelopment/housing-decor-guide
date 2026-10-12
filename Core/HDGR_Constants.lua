@@ -980,6 +980,8 @@ HDG.Constants = {
         RECIPES_SELECT_RECIPE      = "HDGR_RECIPES_SELECT_RECIPE",      -- payload: { recipeID }
         -- Queue-row toggle: nil if recipeID matches current, else set. Scopes the materials list when set.
         RECIPES_TOGGLE_QUEUE_SELECTION = "HDGR_RECIPES_TOGGLE_QUEUE_SELECTION", -- payload: { recipeID }
+        -- Opened from another window (the shopping list): selects the recipe AND gives it the materials list.
+        RECIPES_SHOW_RECIPE        = "HDGR_RECIPES_SHOW_RECIPE",        -- payload: { recipeID }
 
         -- ===== Cross-feature observer dispatches =====
         -- Bulk payload avoids per-item dispatch spam in debug mode.

@@ -2214,7 +2214,7 @@ Selectors:Register("acq.selectedItem", {
 -- green-name treatment (rows in the items list use the same wrap). reads
 -- account.config.scheme so the baked color refreshes on scheme swap.
 Selectors:Register("acq.selectedItem.name", {
-    reads = {"account.config.scheme"},
+    reads = {"account.config.scheme", "session.resolvers.catalog.tick"},
     calls = {"acq.selectedItem", "acq.selectedRecipe"},
     fn = function(state, ctx)
         -- Recipe scroll selected -> "Recipe: <name>" (known -> collected color).
@@ -2222,7 +2222,14 @@ Selectors:Register("acq.selectedItem.name", {
         if recipe then return HDG.Theme:CollectionLabel(recipe.isKnown, recipe.name) end
         local v = Selectors:Call("acq.selectedItem", state, ctx)
         if not v then return "Click an item" end
-        return HDG.Theme:CollectionLabel(v.isCollected, v.name)
+        local label = HDG.Theme:CollectionLabel(v.isCollected, v.name)
+        -- A decor item's name links to its Decor entry (wired in
+        -- AcquisitionController:_wireDecorHyperlink), so a player browsing a
+        -- vendor can get there without noting the name and searching for it.
+        -- The collected colour stays: it is the item's state, and the link
+        -- announces itself on hover.
+        if not HDG.HousingCatalogObserver:GetRow(v.itemID) then return label end  -- exception(nullable): a vendor can list an item the catalog lacks
+        return "|Hhdgrdecor:" .. v.itemID .. "|h" .. label .. "|h"
     end,
 })
 
