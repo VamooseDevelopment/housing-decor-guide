@@ -164,7 +164,7 @@ local function _pinZoneVendors(zoneName)
             local v = e.vendor
             if e.npcID and v and v.zone == zoneName and not seen[e.npcID] then
                 seen[e.npcID] = true
-                if v.mapID > 0 and v.x and v.y then
+                if HDG.VendorRank.HasLocation(v.mapID, v.x, v.y) then
                     HDG.Waypoints:Set(v.mapID, v.x, v.y, v.name)
                 end
             end
@@ -495,17 +495,21 @@ function ShoppingController:_OpenItemContextMenu(anchor, ed)
     }
     -- Open on world map: stored cart vendor (npcID), or the catalog-resolved vendor
     -- for a wishlist item (availableFrom; mapID present only when waypointable).
+    -- The Map action, as the item says (review 2026-10-15); ShowOnMap reports a
+    -- missing location itself, so the click is never silent.
     if ed.npcID then
         items[#items + 1] = { text = "Open vendor on map", callback = function()
             local aug = HDG.StaticData.VendorAugment:Get(ed.npcID)
-            if aug and aug.mapID and aug.mapID > 0 then
-                HDG.Waypoints:Set(aug.mapID, aug.x, aug.y, aug.name)
+            if not aug then  -- exception(nullable): a cart vendor with no VendorAugment row
+                HDG.Waypoints:PrintResult(false, "no_map")
+                return
             end
+            HDG.Waypoints:ShowOnMap(aug.mapID, aug.x, aug.y, aug.name)
         end }
     elseif ed.availableFrom and ed.availableFrom.mapID then
         local af = ed.availableFrom
         items[#items + 1] = { text = "Open vendor on map", callback = function()
-            HDG.Waypoints:Set(af.mapID, af.x, af.y, af.name)
+            HDG.Waypoints:ShowOnMap(af.mapID, af.x, af.y, af.name)
         end }
     elseif ed.kind == "ahItem" then
         items[#items + 1] = { text = "Search on Auctionator", callback = function()
@@ -817,7 +821,7 @@ function ShoppingController:Wire(rootFrame)
             for _, r in ipairs(rows) do
                 if r.kind == "vendor" then
                     local aug = HDG.StaticData.VendorAugment:Get(r.npcID)
-                    if aug and aug.mapID and aug.mapID > 0 then
+                    if aug and HDG.VendorRank.HasLocation(aug.mapID, aug.x, aug.y) then
                         HDG.Waypoints:Set(aug.mapID, aug.x, aug.y, aug.name)
                     end
                 end

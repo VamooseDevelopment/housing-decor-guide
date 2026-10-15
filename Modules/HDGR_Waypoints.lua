@@ -60,6 +60,28 @@ function HDG.Waypoints.ZonePctToMap(mapID, pctX, pctY)
 end
 
 -- ============================================================================
+-- FEEDBACK LINES (ahead of every caller: they are file locals)
+-- ============================================================================
+
+-- Failure feedback: Log:Warn on the user tag -> status rail toast, AND the Log
+-- engine auto-chats warn-level entries (shouldTrace), so failures stay visible
+-- even with the window closed. No direct print needed.
+local function warnLine(msg)
+    HDG.Log:Warn("waypoints_user", msg)
+end
+
+-- Success feedback: status rail toast. Chat ONLY when the main window (which
+-- hosts the rail) is hidden -- waypoints can be set from the standalone zone
+-- scanner / shopping windows / map pins, and feedback must not be lost there.
+-- Chat stays quiet whenever the rail can show the ack.
+local function successLine(msg)
+    HDG.Log:Success("waypoints_user", msg)
+    if not HDG.Store:GetState().account.ui.mainWindowShown then
+        print(HDG.Theme:GetTextStateColorToken("success") .. "[HDG]|r " .. msg)  -- exception(boundary): rail not visible; chat is the only feedback surface
+    end
+end
+
+-- ============================================================================
 -- SINGLE WAYPOINT
 -- ============================================================================
 
@@ -99,15 +121,12 @@ function HDG.Waypoints:_doSet(mapID, x, y, title)
         if pref == "tomtom" then return false, "no_tomtom" end
     end
 
-    -- Native waypoint (with map pin fallback for unsupported zones)
-    if C_Map.CanSetUserWaypointOnMap(uiMapID) then
-        local point = UiMapPoint.CreateFromCoordinates(uiMapID, mapX, mapY)
-        C_Map.SetUserWaypoint(point)
-        C_SuperTrack.SetSuperTrackedUserWaypoint(true)
-    end
-    HDG.Waypoints:AddMapPin(uiMapID, mapX, mapY, title or "Vendor")
-    -- OpenWorldMap is combat-protected; pcall absorbs cross-addon-taint.
-    if not InCombatLockdown() then pcall(OpenWorldMap, uiMapID) end  -- exception(fire-forget): map-open taint absorb; failure is non-actionable
+    -- Blizzard's own waypoint, super-tracked (what Waypoint UI and the quest arrow show).
+    -- A WAYPOINT ONLY (owner 2026-10-15): it neither opens the map nor drops HDG's pin --
+    -- that is the Map button's job. A zone Blizzard refuses waypoints in says so.
+    if not C_Map.CanSetUserWaypointOnMap(uiMapID) then return false, "unsupported_map" end
+    C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(uiMapID, mapX, mapY))
+    C_SuperTrack.SetSuperTrackedUserWaypoint(true)
     return true, "native"
 end
 
@@ -121,7 +140,7 @@ function HDG.Waypoints:Set(mapID, x, y, title, faction)
     local ok, provider = self:_doSet(mapID, x, y, title)
     local b = self._batch
     if b then
-        if ok then b.count = b.count + 1; b.provider = provider
+        if ok then b.count = b.count + 1; b.provider = provider; b.last = title
         else b.failReason = provider end
     else
         self:PrintResult(ok, provider, title, nil, faction)
@@ -140,7 +159,7 @@ function HDG.Waypoints:RunBatch(fn)
     self._batch = nil
     if not ok then HDG.Log:Warn("waypoints", "RunBatch body error: " .. tostring(err)) end
     if b.count > 0 then
-        self:PrintResult(true, b.provider, nil, b.count)
+        self:PrintResult(true, b.provider, b.last, b.count)
     else
         self:PrintResult(false, b.failReason or "no_map", nil, nil)
     end
@@ -149,10 +168,10 @@ end
 
 -- ============================================================================
 -- SHOW ON MAP
--- The "Map" / "Show on Map" button action (vs :Set, which routes through a
--- provider like TomTom). Opens the WorldMap focused on the target zone + drops
--- a Blizzard user waypoint, supertrack, and our own pin. Shared by every tab's
--- per-row Map button (Acquisition vendors, Trainers, Midnight recipe sources).
+-- The "Map" / "Show on Map" button action (vs :Set, the waypoint). Opens the
+-- WorldMap focused on the target zone with our own pin, and nothing else. Shared
+-- by every Map button and every "map all" in the main window
+-- (audit: docs/MAP_WAYPOINT_AUDIT_2026-10-15.md).
 -- ============================================================================
 
 -- One-time OnShow hook (wrong-map fix): ShowUIPanel dispatches async to a
@@ -187,64 +206,74 @@ function HDG.Waypoints:OpenWorldMapAt(uiMapID)
     end
 end
 
--- Full show-on-map action. Coords are zone-pct (0-100). Returns false + reason
--- when unusable (combat / no resolvable map), matching :Set.
+-- The Map button, everywhere: open the world map at the place with HDG's pin on it.
+-- A MAP ONLY (owner 2026-10-15) -- it leaves your waypoint alone; Set is the waypoint.
+-- Coords are zone-pct (0-100). Says what happened either way, so no caller hand-rolls
+-- it and none stays silent (combat and a missing location used to be).
 function HDG.Waypoints:ShowOnMap(mapID, pctX, pctY, title)
+    local ok, reason = self:_doShowOnMap(mapID, pctX, pctY, title)
+    if ok then
+        successLine("Showing " .. (title or "vendor") .. " on the map.")
+    else
+        self:PrintResult(false, reason)
+    end
+    return ok, reason
+end
+
+function HDG.Waypoints:_doShowOnMap(mapID, pctX, pctY, title)
     if InCombatLockdown() then return false, "combat" end
     local uiMapID, mapX, mapY = HDG.Waypoints.ZonePctToMap(mapID, pctX, pctY)
     if not uiMapID then return false, "no_map" end
-    if C_Map.CanSetUserWaypointOnMap(uiMapID) then
-        local point = UiMapPoint.CreateFromCoordinates(uiMapID, mapX, mapY)
-        C_Map.SetUserWaypoint(point)
-        C_SuperTrack.SetSuperTrackedUserWaypoint(true)
-    end
     HDG.Waypoints:AddMapPin(uiMapID, mapX, mapY, title or "Vendor")
     HDG.Waypoints:OpenWorldMapAt(uiMapID)
     return true, "native"
+end
+
+-- "Map all" -- ONE meaning for every list that has it (owner 2026-10-15): pin every
+-- vendor in `vendors` that has a location, open the map once at the first, touch no
+-- waypoint. Vendors records are { mapID, x, y, name } in zone-pct. Returns the count.
+function HDG.Waypoints:MapAll(vendors)
+    if InCombatLockdown() then
+        self:PrintResult(false, "combat")
+        return 0
+    end
+    local placed, firstMapID = self:SetMultiple(vendors)
+    if placed == 0 then
+        warnLine("No vendor in this list has a known location yet.")
+        return 0
+    end
+    self:OpenWorldMapAt(firstMapID)
+    successLine(string.format("Mapped %d vendor%s.", placed, placed == 1 and "" or "s"))
+    return placed
 end
 
 -- ============================================================================
 -- FEEDBACK MESSAGES
 -- ============================================================================
 
--- Failure feedback: Log:Warn on the user tag -> status rail toast, AND the Log
--- engine auto-chats warn-level entries (shouldTrace), so failures stay visible
--- even with the window closed. No direct print needed.
-local function warnLine(msg)
-    HDG.Log:Warn("waypoints_user", msg)
-end
-
--- Success feedback: status rail toast. Chat ONLY when the main window (which
--- hosts the rail) is hidden -- waypoints can be set from the standalone zone
--- scanner / shopping windows / map pins, and feedback must not be lost there.
--- Chat stays quiet whenever the rail can show the ack.
-local function successLine(msg)
-    HDG.Log:Success("waypoints_user", msg)
-    if not HDG.Store:GetState().account.ui.mainWindowShown then
-        print(HDG.Theme:GetTextStateColorToken("success") .. "[HDG]|r " .. msg)  -- exception(boundary): rail not visible; chat is the only feedback surface
-    end
-end
+-- Failure lines serve every button (Map and Wpt share the reasons; trainers and
+-- Shopping too), so they name the obstacle rather than the action or the target.
+local FAIL_LINE = {
+    combat          = "Can't do that in combat -- try again after the fight.",
+    no_tomtom       = "TomTom is not installed. Set Waypoint Provider to Auto or Blizzard in HDG settings.",
+    unsupported_map = "The game doesn't allow waypoints in this zone.",
+    no_map          = "No known location yet.",
+}
 
 function HDG.Waypoints:PrintResult(ok, provider, title, count, vendorFaction)
     if not ok then
-        if provider == "combat" then
-            warnLine("Cannot set waypoints during combat.")
-        elseif provider == "no_tomtom" then
-            warnLine("TomTom is not installed. Set Waypoint Provider to Auto or Blizzard in HDG settings.")
-        elseif provider == "unsupported_map" then
-            warnLine("Cannot set waypoint for this zone.")
-        elseif provider == "no_map" then
-            warnLine("No valid coordinates for this vendor.")
-        else
-            warnLine("Could not set waypoint.")
-        end
+        -- Every reason is minted in this file; one without a line is a bug here.
+        warnLine(assert(FAIL_LINE[provider], "Waypoints: no FAIL_LINE for " .. tostring(provider)))
         return
     end
-    if count then
+    if count and count > 1 then
         if provider == "tomtom" then
             successLine(string.format("Set %d TomTom waypoints.", count))
         else
-            successLine(string.format("%d vendor pins added to map. Navigating to closest.", count))
+            -- Blizzard keeps ONE user waypoint: each Set replaced the last. Say which
+            -- one is live rather than promise a route through all of them.
+            successLine(string.format("Waypoint set for %s -- the game tracks one at a time (%d vendors).",
+                title or "the last vendor", count))
         end
     else
         local name = title or "vendor"
@@ -329,14 +358,11 @@ function HDGR_VendorPinMixin:ApplyPosition()
 end
 
 
+-- A pin click is a Waypoint click: the facade owns the combat check, the
+-- provider choice and the feedback line. Pins hold map fractions; Set takes
+-- zone-pct.
 function HDGR_VendorPinMixin:OnClick()
-    -- C_SuperTrack.SetSuperTrackedUserWaypoint has secure mixin callbacks;
-    -- in lockdown it propagates taint into Blizzard's tracker.
-    if InCombatLockdown() then return end
-    if not (self.data and self.data.mapID) then return end
-    local pt = UiMapPoint.CreateFromCoordinates(self.data.mapID, self._x, self._y)
-    C_Map.SetUserWaypoint(pt)
-    C_SuperTrack.SetSuperTrackedUserWaypoint(true)
+    HDG.Waypoints:Set(self.data.mapID, self._x * 100, self._y * 100, self.data.title)
 end
 
 -- ---- Render ---------------------------------------------------------------
@@ -376,6 +402,10 @@ end
 
 function HDG.Waypoints:AddMapPin(mapID, x, y, title)
     _pendingPins[mapID] = _pendingPins[mapID] or {}
+    -- Map on the same vendor twice used to stack a second pin on the first.
+    for _, p in ipairs(_pendingPins[mapID]) do
+        if p.x == x and p.y == y and p.title == title then return end
+    end
     table.insert(_pendingPins[mapID], {
         mapID = mapID, x = x, y = y, title = title,
     })
@@ -386,23 +416,22 @@ function HDG.Waypoints:AddMapPin(mapID, x, y, title)
 end
 
 -- Drop map pins for a list of vendor records (each: { mapID, x, y, name }).
--- Skips entries without valid coords (canWaypoint=false / mapID nil).
--- Returns the count of pins placed.
+-- Skips entries ZonePctToMap can't place (no location yet). Returns the count
+-- of pins placed and the first one's map.
 function HDG.Waypoints:SetMultiple(vendors)
     -- Replace, never append: each Map All click used to add a second copy of
     -- every pin and the pool grew with it for the session.
     wipe(_pendingPins)
-    local placed = 0
+    local placed, firstMapID = 0, nil
     for _, v in ipairs(vendors) do
-        if v.mapID and v.x and v.y then
-            local uiMapID, mapX, mapY = HDG.Waypoints.ZonePctToMap(v.mapID, v.x, v.y)
-            if uiMapID then
-                HDG.Waypoints:AddMapPin(uiMapID, mapX, mapY, v.name or "Vendor")
-                placed = placed + 1
-            end
+        local uiMapID, mapX, mapY = HDG.Waypoints.ZonePctToMap(v.mapID, v.x, v.y)
+        if uiMapID then
+            HDG.Waypoints:AddMapPin(uiMapID, mapX, mapY, v.name or "Vendor")
+            placed = placed + 1
+            firstMapID = firstMapID or uiMapID
         end
     end
-    return placed
+    return placed, firstMapID
 end
 
 function HDG.Waypoints:ClearAllMapPins()

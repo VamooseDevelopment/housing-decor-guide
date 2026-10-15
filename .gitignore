@@ -1,0 +1,36 @@
+# Carried over from the workspace .gitignore when this addon moved to its own repo.
+.DS_Store
+__MACOSX
+*.zip
+.idea/
+.vscode/
+.env
+.mcp.json
+.plan
+.superpowers/
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/worktrees/
+*.tmp
+*.bak
+*~
+luac.out
+*.luac
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+Blizzard_*.lua
+schemecolors.lua
+archive/
+backups/
+testing/
+*.db.backup-*
+
+# This addon only (from the workspace .gitignore)
+/lumberhud.lua
+/lumberradar.lua
+
+# Local notes for Claude -- private. The pipeline doc lives in the workspace repo
+# (housingdecorguide-tools/PIPELINES.md); this repo is public.
+/CLAUDE.md

@@ -92,13 +92,18 @@ local function _showItemChrome(row, ed)
     if ed.onShoppingList then row._cartMark:Show() end
 end
 
+-- The vendor pin = the Waypoint action (HDG.Waypoints:Set, which reports). Greyed with a
+-- why-tooltip when the vendor has no location yet, never a click that does nothing.
 local function _showVendorPin(row, ed)
     _ensureVendorChrome(row)
     local mapID, x, y, name = ed.mapID, ed.x, ed.y, ed.name
+    local tipVendor = { name = name, zone = ed.zone, mapID = mapID, x = x, y = y }
+    HDG.UI.SetEnabledLook(row._zonePinBtn, ed.mappable)
+    HDG.TooltipEngine:Attach(row._zonePinBtn, function()
+        return HDG.TooltipRecipes.VendorNavTip(tipVendor, "VENDOR_WAY_TIP")
+    end)
     row._zonePinBtn:SetScript("OnClick", function()
-        if mapID and mapID > 0 and x and y and HDG.Waypoints then
-            HDG.Waypoints:Set(mapID, x, y, name)   -- :Set emits the chat message
-        end
+        HDG.Waypoints:Set(mapID, x, y, name)
     end)
     row._zonePinBtn:Show()
 end
@@ -228,18 +233,12 @@ function ZoneController:Wire(rootFrame)
     local scBtn = HDG.UI.W(rootFrame, "zonePanel.showCollectedBtn")
     if scBtn then HDG.TooltipEngine:Attach(scBtn, HDG.TooltipRecipes.ZoneShowCollected) end
 
-    -- Map All -- set waypoints for every visible vendor.
+    -- Map All -- pin every visible vendor and open the map once: the same meaning as
+    -- Acquire's Map Vendors (owner 2026-10-15). It used to set a waypoint per vendor, each
+    -- replacing the last, and open the map once per vendor.
     HDG.UI.OnClick(rootFrame, "zonePanel.mapAllBtn", function()
         local state = HDG.Store:GetState()  -- exception(false-positive): top-level controller method (not a row factory)
-        local vendors = HDG.Selectors:Call("zone.filteredVendors", state, {})
-        -- RunBatch emits ONE consolidated chat line for the whole batch.
-        HDG.Waypoints:RunBatch(function()
-            for _, v in ipairs(vendors) do
-                if v.mapID > 0 and v.x and v.y and HDG.Waypoints then
-                    HDG.Waypoints:Set(v.mapID, v.x, v.y, v.name)
-                end
-            end
-        end)
+        HDG.Waypoints:MapAll(HDG.Selectors:Call("zone.filteredVendors", state, {}))
     end)
 end
 

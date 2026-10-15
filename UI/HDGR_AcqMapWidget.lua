@@ -8,8 +8,10 @@
 --   { mapID, x, y, name, zone }    or    nil  (no vendor selected)
 --
 -- Map rendering delegates to HDG.MapRenderer (ported from VFN). Pin click:
---   left  -> SetUserWaypoint + super-track
---   right -> OpenWorldMap focused on the vendor's zone
+--   left  -> HDG.Waypoints:Set       (the Waypoint button's action)
+--   right -> HDG.Waypoints:ShowOnMap (the Map button's action)
+-- Through the shared facade like every other Map/Waypoint control: it guards combat,
+-- checks the zone takes waypoints, honours the TomTom setting and says what happened.
 --
 -- Single pin per widget; no pooling. Player pin is a second pin appended
 -- when GetPlayerMapPosition returns coordinates on the same map.
@@ -61,7 +63,7 @@ local function buildPin(parent, color, label, onLeftClick, onRightClick, atlas)
         if not self._label or self._label == "" then return nil end
         local extras = {}
         if self._onLeftClick then extras[#extras + 1] = { text = "Left-click", right = "Set waypoint" } end
-        if self._onRightClick then extras[#extras + 1] = { text = "Right-click", right = "Open world map" } end
+        if self._onRightClick then extras[#extras + 1] = { text = "Right-click", right = "Show on map" } end
         return { title = self._label, extraLines = extras }
     end
     HDG.TooltipEngine:Attach(pin, _pinTooltipDef)
@@ -139,14 +141,14 @@ local function dispatchVendorMap(widget, values)
         -- Stash current point so click closures (built once, reused) read live coords.
         widget._currentPoint = point
         widget._vendorPin = widget._vendorPin or buildPin(canvas, VENDOR_COLOR, point.name,
+            -- the point is 0-1 map space; the facade takes zone-pct
             function()
                 local p = widget._currentPoint
-                local pt = UiMapPoint.CreateFromCoordinates(p.mapID, p.x, p.y)
-                C_Map.SetUserWaypoint(pt)
-                C_SuperTrack.SetSuperTrackedUserWaypoint(true)
+                HDG.Waypoints:Set(p.mapID, p.x * 100, p.y * 100, p.name)
             end,
             function()
-                HDG.AcquisitionController:OpenWorldMapAt(widget._currentPoint.mapID)
+                local p = widget._currentPoint
+                HDG.Waypoints:ShowOnMap(p.mapID, p.x * 100, p.y * 100, p.name)
             end,
             "housing-decor-vendor_32"         -- native Blizzard housing-vendor pin atlas
         )

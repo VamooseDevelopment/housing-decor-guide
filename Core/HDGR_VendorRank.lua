@@ -19,6 +19,16 @@
 HDG = HDG or {}
 HDG.VendorRank = HDG.VendorRank or {}
 
+-- THE "has a location" test (review 2026-10-15): can we put a pin or a waypoint on
+-- this vendor? A VendorAugment row can carry an npcID and a zone with no map point
+-- yet (a vendor new to the game), and mapID 0 is the master's "no map" (garrison
+-- vendors). Every Map/Wpt gate, greyed button and "Map N" count asks this one
+-- question, in zone-pct coords. Here rather than on StaticData for the reason
+-- above: the facade is stubbed out in most of the suite.
+function HDG.VendorRank.HasLocation(mapID, x, y)
+    return mapID ~= nil and mapID > 0 and x ~= nil and y ~= nil
+end
+
 -- Rank 0  stands in the preferred neighborhood
 -- Rank 1  any other routable vendor
 -- Rank 2  the twin neighborhood, when a preference is set

@@ -532,20 +532,24 @@ LC.widgets["decorDetailPanel.cartBtn"] = {
     order = 10, variant = "tertiary",
     visible = "decor.hasSelectedItem",
 }
--- Show on Map / Waypoint: same actions as Shop by Vendor, on the decor's primary vendor.
+-- Show on Map / Waypoint: same actions as Shop by Vendor, on the decor's map vendor
+-- (first with a location, your faction first). Shown for any vendor-sold piece; greyed
+-- with a why-tooltip when no vendor has a location yet (owner 2026-10-15).
 LC.widgets["decorDetailPanel.showOnMapBtn"] = {
-    tooltip = false,
+    tooltip = { recipe = "DecorVendorMap" },
     kind = "button", ["in"] = "decor.detailActionRow", font = "small",
     text = "locale:DECOR_MAP_BTN", width = "fill", height = 22,
     order = 20, variant = "tertiary",
-    visible = "decor.selectedItemHasVendorWaypoint",
+    visible = "decor.selectedItemHasVendor",
+    binding = { enabled = "decor.selectedItemHasVendorWaypoint" },
 }
 LC.widgets["decorDetailPanel.waypointBtn"] = {
-    tooltip = false,
+    tooltip = { recipe = "DecorVendorWay" },
     kind = "button", ["in"] = "decor.detailActionRow", font = "small",
     text = "locale:DECOR_WAYPOINT_BTN", width = "fill", height = 22,
     order = 30, variant = "tertiary",
-    visible = "decor.selectedItemHasVendorWaypoint",
+    visible = "decor.selectedItemHasVendor",
+    binding = { enabled = "decor.selectedItemHasVendorWaypoint" },
 }
 -- Note editbox column (right, 220px; height fills parent).
 LC.widgets["decorDetailPanel.note"] = {

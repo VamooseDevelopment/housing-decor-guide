@@ -296,6 +296,8 @@ local function _buildTrainerRow(trainer, profName, expName, faction)
         dbName   = trainer.name,
         note     = trainer.note,
         zoneEnUS = zone,
+        -- resolved here, not at click: the Map button shows only when it can map
+        mapID    = zone and HDG.ZoneNameResolver.ZONE_MAP_IDS[zone],  -- exception(nullable): curated table; a zone it lacks maps nowhere
         x        = x,
         y        = y,
     }
@@ -391,6 +393,13 @@ Selectors:Register("trainers.sectionRows", {
 -- ============================================================================
 -- Vendor recipes: NPC name/zone/coords from VendorAugment (vendors[1].npcID).
 -- Non-vendor: flat recipeSource fields. Source-column color applied in controller.
+--
+-- Which flat field names the teacher, per type: a trainer entry stores the NPC in
+-- `npc` (and its fee in `cost`), a discovery its `method`, a quest its `quest`, and
+-- drop/event entries `source`. Reading `source` for all of them left every trainer,
+-- discovery and quest Midnight recipe showing "--" (2026-10-15).
+local ORIGIN_FIELD = { trainer = "npc", discovery = "method", quest = "quest" }
+
 local function _buildMidnightRow(itemID, entry)
     local rs  = entry.recipeSource
     local row = {
@@ -414,9 +423,11 @@ local function _buildMidnightRow(itemID, entry)
         -- warned once by HDG.StaticData's recipe-index cross-check.
         row.costLine = HDG.Format.FormatVendorCost(v.cost)
     else
-        -- Drop / discovery / quest / trainer: flat recipeSource fields.
-        row.npcOrigin = rs.source or "--"
+        -- Drop / discovery / quest / trainer / event: flat recipeSource fields.
+        row.npcOrigin = rs[ORIGIN_FIELD[rs.type] or "source"] or "--"  -- exception(nullable): ORIGIN_FIELD lists only the types that differ; the origin itself is optional
         row.zone      = rs.zone   or "--"
+        -- A trainer's fee is a curated string ("60g training fee"); no other flat type has one.
+        if rs.type == "trainer" then row.costLine = rs.cost end
     end
     return row
 end

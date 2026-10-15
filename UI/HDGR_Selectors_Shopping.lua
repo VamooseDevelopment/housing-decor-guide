@@ -247,7 +247,7 @@ local function _resolveWishlistVendor(itemID, preferredMapID)
     if not cv then return nil end  -- exception(nullable): drops/quests/achievements have no vendor
     local npc = HDG.StaticData.VendorAugment:ResolveName(cv.name, cv.zone)
     local aug = npc and HDG.StaticData.VendorAugment:Get(npc)
-    if aug and aug.mapID and aug.mapID > 0 then
+    if aug and HDG.VendorRank.HasLocation(aug.mapID, aug.x, aug.y) then
         -- Coords resolved: mapID present == waypointable (consumers key on it).
         return { npcID = npc, name = aug.name, zone = aug.zone,
                  mapID = aug.mapID, x = aug.x, y = aug.y }

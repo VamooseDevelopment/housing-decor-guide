@@ -1005,14 +1005,20 @@ end
 local function _resolveVendorNpc(v, Aug)
     local npcID = Aug and Aug:ResolveName(v.name, v.zone)
     v.npcID       = npcID
-    v.canWaypoint = npcID ~= nil
+    v.canWaypoint = false   -- true only once a location is known (below): an npcID alone maps nowhere
     if not npcID then return end
     local meta = Aug:Get(npcID)
     if not meta then return end
+    v.canWaypoint = HDG.VendorRank.HasLocation(meta.mapID, meta.x, meta.y)
     v.mapID   = meta.mapID
     v.x       = meta.x
     v.y       = meta.y
     v.faction = v.faction ~= "" and v.faction or (meta.faction or "N")
+    -- Allegiance A/H/N, apart from `faction`: the catalog fills that with a REP name
+    -- ("Gilneas Liberation Front") whenever the item is rep-gated, so it cannot say
+    -- which side may shop here. Picks the decor card's map vendor + the waypoint's
+    -- opposite-faction warning.
+    v.side    = meta.faction or "N"
     -- VendorAugment is authoritative for vendor location: overwrite the (often
     -- wrong) catalog zone. Vendors not in VendorAugment fall through the early
     -- returns above and keep their catalog zone. This makes the zone filter,
@@ -1663,8 +1669,7 @@ end
 --
 -- Emit one vendor record PER zone: byVendor is already keyed (name, zone), and
 -- acq.allVendors already emits a UI row per key, so the whole chain wants this shape.
-local function _flushVendor(vendors, v)
-    if not v then return end
+local function _flushVendorZones(vendors, v)
     local zones = v.zones
     v.zones = nil
     if not zones or #zones == 0 then
@@ -1680,6 +1685,34 @@ local function _flushVendor(vendors, v)
         rec.zone = zones[i]
         vendors[#vendors + 1] = rec
     end
+end
+
+-- A "Vendors:" line (plural) names SEVERAL merchants who share the Zone/Faction/Cost
+-- lines that follow -- "Vendors: Selfira Ambergrove, Sylvia Hartshorn / Zone: Val'sharah".
+-- Kept whole, the pair became one vendor called "Selfira Ambergrove, Sylvia Hartshorn"
+-- that matched no VendorAugment row, so neither could be mapped (2026-10-15). Emit one
+-- vendor per name, each with every zone.
+local function _flushVendor(vendors, v)
+    if not v then return end
+    local names = v.names
+    v.names = nil
+    if not names then return _flushVendorZones(vendors, v) end  -- exception(nullable): only a plural "Vendors:" line sets names
+    for _, name in ipairs(names) do
+        local rec = {}
+        for k, val in pairs(v) do rec[k] = val end
+        rec.name = name
+        _flushVendorZones(vendors, rec)
+    end
+end
+
+-- "A, B" -> { "A", "B" }: the merchants on a plural "Vendors:" line.
+local function _vendorNames(list)
+    local out = {}
+    for piece in list:gmatch("[^,]+") do
+        local name = piece:match("^%s*(.-)%s*$")
+        if name ~= "" then out[#out + 1] = name end
+    end
+    return out
 end
 
 -- Next source-text line at or after `pos`, and the position after it: the
@@ -1737,6 +1770,10 @@ function R:_ParseSourceText(sourceText, row)
         if vName then
             _flushVendor(vendors, current)
             current = { name = vName, zone = "", zones = {}, cost = "", faction = "", standing = "" }
+            if key == "Vendors" then
+                current.names = _vendorNames(vName)
+                current.name  = current.names[1]
+            end
             pendingZoneTarget = nil
         elseif drop then
             -- "Drop: <Source>" optional "Zone:" follows via pendingZoneTarget.

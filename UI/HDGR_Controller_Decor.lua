@@ -787,23 +787,20 @@ function DecorController:_wireCart(rootFrame)
     end)
 end
 
--- Show on Map / Waypoint: reuse the shared Waypoints module against the decor's primary
--- vendor -- identical actions to Shop by Vendor. Buttons are gated visible on a mappable
--- vendor, so vendorOf() is non-nil at click time; the strict read is intentional.
+-- Show on Map / Waypoint: reuse the shared Waypoints module against the decor's map
+-- vendor -- identical actions to Shop by Vendor. Buttons are ENABLED only with a mapped
+-- vendor (decor.selectedItemHasVendorWaypoint), so vendorOf() is non-nil at click time.
 function DecorController:_wireVendorNav(rootFrame)
     local function vendorOf()
-        local item = HDG.Selectors:Call("decor.selectedItem", HDG.Store:GetState(), {})  -- exception(false-positive): top-level controller method (not a row factory)
-        return item and item.vendor
+        return HDG.Selectors:Call("decor.selectedItem", HDG.Store:GetState(), {}).vendor  -- exception(false-positive): top-level controller method (not a row factory)
     end
     HDG.UI.OnClick(rootFrame, "decorDetailPanel.showOnMapBtn", function()
         local v = vendorOf()
-        if not v then return end  -- exception(nullable): selection changed between paint + click
         HDG.Waypoints:ShowOnMap(v.mapID, v.x, v.y, v.name)
     end)
     HDG.UI.OnClick(rootFrame, "decorDetailPanel.waypointBtn", function()
         local v = vendorOf()
-        if not v then return end  -- exception(nullable): selection changed between paint + click
-        HDG.Waypoints:Set(v.mapID, v.x, v.y, v.name, v.faction)
+        HDG.Waypoints:Set(v.mapID, v.x, v.y, v.name, v.side)
     end)
 end
 

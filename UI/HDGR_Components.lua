@@ -89,6 +89,20 @@ function HDG.UI.RowButton(parent, text, w, h)
     return b
 end
 
+-- Hand-built button chrome has no native disabled paint (no DisabledFontObject /
+-- state texture swap) -- SetEnabled alone blocked clicks while the button still
+-- LOOKED live (PTR 2026-07-13). Fade the whole button so disabled reads at a
+-- glance. The ONE disabled look: bound buttons (dispatchButton) and row buttons.
+HDG.UI.DISABLED_ALPHA = 0.45
+function HDG.UI.SetEnabledLook(b, on)
+    -- A disabled button gets no OnEnter otherwise, and its tooltip is the
+    -- only place that says WHY it is greyed (the layout engine does the same
+    -- for its own buttons).
+    b:SetMotionScriptsWhileDisabled(true)
+    b:SetEnabled(on)
+    b:SetAlpha(on and 1 or HDG.UI.DISABLED_ALPHA)
+end
+
 -- Apply a theme color to a texture's vertex tint. No-op if SetVertexColor is absent or color is nil.
 function HDG.UI._TintTexture(texture, color, alpha)
     if not (texture and texture.SetVertexColor and color) then return end
@@ -188,11 +202,8 @@ local function dispatchButton(widget, values)
     end
     if values.enabled ~= nil then
         _applyBoundBool(widget, values.enabled, "SetEnabled")
-        -- Hand-built button chrome has no native disabled paint (no
-        -- DisabledFontObject / state texture swap) -- SetEnabled alone blocked
-        -- clicks while the button still LOOKED live (PTR 2026-07-13). Fade the
-        -- whole widget so disabled reads at a glance.
-        if widget.SetAlpha then widget:SetAlpha(values.enabled and 1 or 0.45) end
+        -- the faded disabled look (HDG.UI.SetEnabledLook says why)
+        if widget.SetAlpha then widget:SetAlpha(values.enabled and 1 or HDG.UI.DISABLED_ALPHA) end
     end
     _applyBoundBool(widget, values.active,  "SetActive")
 end

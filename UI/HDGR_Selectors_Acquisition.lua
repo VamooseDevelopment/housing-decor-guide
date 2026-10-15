@@ -47,8 +47,8 @@ end
 --             Built from catalog row.factionGate per item -- O(1) at filter
 --             time by caching on the vendor record.
 --
--- canWaypoint = VendorAugment entry exists (has real coords for TomTom).
--- Vendors known only by name (no augment match) still appear with canWaypoint=false.
+-- canWaypoint = the vendor has a location (VendorRank.HasLocation). Vendors known
+-- only by name, and new ones with no coords yet, still appear with canWaypoint=false.
 -- Reads session.resolvers.catalog.tick so the list rebuilds on each sweep.
 local FACTION_LABEL = { A = "Alliance", H = "Horde", N = "Neutral" }
 Selectors:Register("acq.allVendors", {
@@ -101,8 +101,8 @@ Selectors:Register("acq.allVendors", {
                 itemCount  = #catalogVendor.items,
                 recipeCount = 0,
                 reps       = reps,
-                canWaypoint = meta ~= nil,
             }
+            row.canWaypoint = HDG.VendorRank.HasLocation(row.mapID, row.x, row.y)
             -- De-dupe by npcID. The catalog sometimes lists ONE vendor under
             -- multiple zone strings (Gina Mudclaw -> "Timeless Isle" + "Valley of
             -- the Four Winds"; only Valley is real) -- both resolve to one npcID,
@@ -138,7 +138,7 @@ Selectors:Register("acq.allVendors", {
                         faction = FACTION_LABEL[factionRaw] or factionRaw,
                         factionRaw = factionRaw, expansion = meta.expansion,
                         itemCount = 0, recipeCount = count, reps = {},
-                        canWaypoint = true,
+                        canWaypoint = HDG.VendorRank.HasLocation(meta.mapID, meta.x, meta.y),
                     }
                 end
                 -- Missing from VendorAugment: skipped. The gap is warned once by
@@ -1325,8 +1325,12 @@ Selectors:Register("acq.mapAllLabel", {
     calls = {"acq.vendors", "acq.viewMode"},
     fn = function(state, ctx)
         if Selectors:Call("acq.viewMode", state, ctx) ~= "vendor" then return "Map Vendors" end
-        local vendors = Selectors:Call("acq.vendors", state, ctx)
-        return string.format("Map %d Vendors", #vendors)
+        -- the count it will PIN: a vendor with no location gets no pin
+        local n = 0
+        for _, v in ipairs(Selectors:Call("acq.vendors", state, ctx)) do
+            if v.canWaypoint then n = n + 1 end
+        end
+        return string.format("Map %d Vendors", n)
     end,
 })
 
@@ -1395,9 +1399,18 @@ Selectors:Register("acq.selectedVendor", {
     end,
 })
 
--- Visibility gate for the action buttons (Waypoint /
--- Show on Map) -- hide when no vendor is selected so the action row
--- collapses to zero height.
+-- Visibility gate for the action buttons (Waypoint / Show on Map) -- hide when
+-- no vendor is selected so the action row collapses to zero height. A VENDOR,
+-- not an npcID: a vendor new to the game has neither an npcID nor a location
+-- yet, and its buttons grey out with the reason rather than vanish (owner
+-- 2026-10-15).
+Selectors:Register("acq.hasSelectedVendor", {
+    calls = {"acq.selectedVendor"},
+    fn = function(state, ctx)
+        return Selectors:Call("acq.selectedVendor", state, ctx) ~= nil
+    end,
+})
+
 Selectors:Register("acq.hasSelectedNpc", {
     calls = {"acq.selectedNpcID"},
     fn = function(state, ctx)
@@ -1431,9 +1444,22 @@ Selectors:Register("acq.selected.headerLine", {
         if v.faction and v.faction ~= "?" and v.faction ~= "" then parts[#parts+1] = v.faction end
         if v.x and v.y and v.x > 0 and v.y > 0 then
             parts[#parts+1] = string.format("%.1f, %.1f", v.x, v.y)
+        else
+            -- where the coords would sit: why Waypoint / Show on Map are greyed
+            parts[#parts+1] = HDG.Locale:Get("VENDOR_LOC_UNKNOWN")
         end
         if v.note and v.note ~= "" then parts[#parts+1] = v.note end
         return table.concat(parts, "  -  ")
+    end,
+})
+
+-- True when the selected vendor has a location: enables Waypoint / Show on Map.
+-- They stay SHOWN for any selected vendor (owner 2026-10-15) and grey out here.
+Selectors:Register("acq.selectedVendorMappable", {
+    calls = {"acq.selectedVendor"},
+    fn = function(state, ctx)
+        local v = Selectors:Call("acq.selectedVendor", state, ctx)
+        return v ~= nil and v.canWaypoint
     end,
 })
 
@@ -1603,6 +1629,7 @@ local function _recipeVendorRows(itemID)
             y          = meta and meta.y,
             faction    = (meta and meta.faction) or "",
             factionRaw = (meta and meta.faction) or "",
+            mappable   = meta ~= nil and HDG.VendorRank.HasLocation(meta.mapID, meta.x, meta.y),
             expansion  = meta and meta.exp,
             costText   = "",
             goldCost   = 0,
@@ -1645,7 +1672,12 @@ Selectors:Register("acq.selectedItem.vendors", {
                 x          = meta and meta.x,
                 y          = meta and meta.y,
                 faction    = v.faction or (meta and meta.faction) or "",
-                factionRaw = v.faction or "",
+                -- A/H/N from VendorAugment, never v.faction: the catalog puts a REP name
+                -- there for rep-gated items, which the opposite-faction warning can't read.
+                factionRaw = (meta and meta.faction) or "",
+                -- Wpt/Map are live only with a location; without one they grey out and
+                -- the meta line says why (owner 2026-10-15) -- never a silent click.
+                mappable   = meta ~= nil and HDG.VendorRank.HasLocation(meta.mapID, meta.x, meta.y),
                 expansion  = meta and meta.exp,
                 costText   = v.cost or "",  -- catalog text (no integer gold available)
                 goldCost   = 0,

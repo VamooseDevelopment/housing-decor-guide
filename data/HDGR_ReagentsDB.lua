@@ -2564,4 +2564,23 @@ HDGR_ReagentsDB = {
     [221858] = {"Crafted", "Whimsical Wiring"},
     [191471] = {"Gathering", "Writhebark"},
     [191472] = {"Gathering", "Writhebark"},
+    -- ========== ADDED 12.1.5 (PT scan 2026-10-15, 16 items) ==========
+    -- Names from ItemSparse; sources from Wowhead item pages (fished / skinned / mined /
+    -- treasure / sold-by). The candies are Hallow's End; two have no source on Wowhead yet.
+    [33226] = {"Drop", "Tricky Treat"},
+    [252990] = {"Drop", "Drustvar Choc-O-Drops"},
+    [253043] = {"Drop", "Duskwood Caramel"},
+    [272392] = {"Drop", "Broken Lynx Leash"},
+    [238376] = {"Gathering", "Lucky Loa"},
+    [274589] = {"Gathering", "Ula'tek Snakehead"},
+    [274590] = {"Gathering", "Sulfurous Sludgefish"},
+    [274591] = {"Gathering", "Coiled Stargorger"},
+    [274594] = {"Gathering", "Polluted Puffer"},
+    [274777] = {"Gathering", "Neutralized Venom Clot"},
+    [274781] = {"Gathering", "Cursebound Globe"},
+    [241304] = {"Crafted", "Silvermoon Health Potion"},
+    [241305] = {"Crafted", "Silvermoon Health Potion"},
+    [245879] = {"Crafted", "Vantus Rune: Radiant"},
+    [245880] = {"Crafted", "Vantus Rune: Radiant"},
+    [284249] = {"Vendor:10000", "Duck-Eye Glass Bead"},
 }

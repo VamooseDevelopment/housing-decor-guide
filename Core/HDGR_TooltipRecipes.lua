@@ -866,3 +866,37 @@ function R.ZoneShowCollected()
         anchor = "ANCHOR_RIGHT",
     }
 end
+
+-- ============================================================================
+-- Map / Waypoint on a vendor (owner 2026-10-15) -- the effect, naming the vendor
+-- it targets (the decor card's may not be the one its source line names), or why
+-- the button is greyed. `vendor` is { name, zone, mapID, x, y } or nil.
+-- ============================================================================
+
+local function _hasLocation(vendor)
+    return vendor ~= nil and HDG.VendorRank.HasLocation(vendor.mapID, vendor.x, vendor.y)
+end
+
+local function _vendorNavTip(vendor, effectKey)
+    if not _hasLocation(vendor) then
+        return { title  = HDG.Locale:Get("VENDOR_LOC_UNKNOWN_TITLE"),
+                 body   = HDG.Locale:Get("VENDOR_LOC_UNKNOWN_BODY"),
+                 anchor = "ANCHOR_TOP" }
+    end
+    local where = (vendor.zone and vendor.zone ~= "") and (vendor.name .. " (" .. vendor.zone .. ")") or vendor.name
+    return { title = vendor.name, body = HDG.Locale:Get(effectKey):format(where), anchor = "ANCHOR_TOP" }
+end
+R.VendorNavTip = _vendorNavTip   -- row buttons (Acquire item view, Zone) build theirs from their own row
+
+local function _decorMapVendor()
+    -- strict: the button only shows with a vendor-sold item selected
+    return HDG.Selectors:Call("decor.selectedItem", HDG.Store:GetState(), {}).vendor
+end
+local function _acqVendor()
+    return HDG.Selectors:Call("acq.selectedVendor", HDG.Store:GetState(), {})
+end
+
+function R.DecorVendorMap() return _vendorNavTip(_decorMapVendor(), "VENDOR_MAP_TIP") end
+function R.DecorVendorWay() return _vendorNavTip(_decorMapVendor(), "VENDOR_WAY_TIP") end
+function R.AcqVendorMap()   return _vendorNavTip(_acqVendor(), "VENDOR_MAP_TIP") end
+function R.AcqVendorWay()   return _vendorNavTip(_acqVendor(), "VENDOR_WAY_TIP") end

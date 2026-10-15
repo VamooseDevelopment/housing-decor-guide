@@ -1,3 +1,49 @@
+## [3.36.0] - 2026-10-15 (October 2026)
+
+### Changed
+- **Map and Waypoint now do different things, everywhere.** Map opens the world map at the vendor
+  with a pin and leaves your waypoint alone. Waypoint sets the waypoint and leaves the map closed,
+  so add-ons that show Blizzard's waypoint in the world pick it up. Before, both did both, and with
+  TomTom installed it was Map, not Waypoint, that set the game's waypoint. The shopping list's
+  "Open vendor on map" now opens the map too, and clicking an HDG pin on the world map sets a
+  waypoint the way the Waypoint button does, TomTom included.
+- **Map All on the Zone tab pins every vendor and opens the map once,** like Map Vendors on Shop
+  by Vendor, and like it replaces the pins from the last Map All. It used to set a waypoint per
+  vendor, each replacing the last, and open the map once per vendor.
+- **The Decor tab's + Map and + Way use the first vendor with a known location,** one your faction
+  can shop at first. They only ever used the first vendor listed, so a piece whose first vendor
+  hasn't been mapped had no buttons even when another vendor had.
+
+### Fixed
+- **Map and Waypoint no longer do nothing on new vendors.** Vendors HDG doesn't have a location
+  for yet, like the ones added in 12.1.5, showed Map and Waypoint buttons that did nothing when
+  clicked. The buttons are now greyed out, hovering them says why, and the vendor's line reads
+  "location not known yet". On Shop by Vendor, a vendor that's new to the game keeps its buttons,
+  greyed, instead of losing them. Every Map and Waypoint click now says what happened, including
+  in combat.
+- **Clicking Map twice on the same vendor no longer stacks a second pin on the first.**
+- **The opposite-faction warning on Waypoint works for reputation vendors.** It read the item's
+  reputation faction instead of the vendor's side, so it never warned on those items.
+- **Map Vendors counts the vendors it will pin,** not every vendor in the list.
+- **Decor sold by two vendors together now shows both.** Pieces the game lists as "Vendors: Selfira
+  Ambergrove, Sylvia Hartshorn" treated the pair as one vendor nobody could find on a map.
+- **The 21 decor recipes added in 12.1.5 are listed for everyone,** with their materials, including
+  Draenei Holo-Junction, the Lightforged pieces and the plushies. Before, HDG only knew them once
+  you'd opened a profession that has them, or scanned your guild. They say where to learn them:
+  which trainer and for how much, which vendor sells the pattern, or, for the Apple Bobbing
+  Bucket and Spidery Witch Hat, the Hallow's End vendors.
+- **The Trainers tab names who teaches each Midnight recipe.** Recipes learned from a trainer,
+  from a quest or by discovery showed "--" where the trainer, quest or method should be. Trainer
+  recipes also show their training fee now.
+- **Recipe materials match 12.1.5.** 220 decor recipes now show the smaller reagent counts the
+  12.1 patches brought in, so Materials and shopping totals no longer ask for more than the recipe
+  takes. Sixteen new reagents are listed too, including the 12.1.5 fish.
+- **35 more vendors have a location,** including the ones added in 12.1.5 around the Shadowlands
+  zones, Draenor and Drustvar, eight vendors in Founder's Point and Razorwind Shores, and the
+  Dragon Isles sellers of the new plushie patterns.
+- **Recipes you learn show as known straight away.** A recipe learned at a trainer or from a
+  scroll stayed in Unknown Recipes until you reloaded.
+
 ## [3.35.0] - 2026-10-13 (October 2026)
 
 ### Added

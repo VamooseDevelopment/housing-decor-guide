@@ -11,10 +11,13 @@
 --                         .professions[*].knownRecipes (filled by alt scanner
 --                         after CHARACTER_PROFESSION_UPDATED fires)
 --
--- Two scan triggers:
+-- Scan triggers:
 --   1. DECOR_CATALOG_READY -- runs Scan() (full selfKnown + altKnown pass).
---      Once per session unless explicit reset.
---   2. CHARACTER_PROFESSION_UPDATED -- runs RecomputeAltKnown() which keeps
+--      Once per session unless Rescan() resets it.
+--   2. NEW_RECIPE_LEARNED / a newly materialized capture -- Rescan(). Without
+--      the learn trigger a recipe learned mid-session stayed "unknown" until
+--      /reload (the Lattice rewrite dropped old HDG's NEW_RECIPE_LEARNED path).
+--   3. CHARACTER_PROFESSION_UPDATED -- runs RecomputeAltKnown() which keeps
 --      existing selfKnown but re-derives altKnown from the fresh
 --      account.characters subtree.
 
@@ -112,8 +115,15 @@ function R:Scan()
         type    = HDG.Constants.ACTIONS.RECIPE_KNOWLEDGE_UPDATED,
         payload = { entries = entries },
     })
-    HDG.Log:Success("recipes_scanned",
-        string.format("Recipe scan complete -- %d decor recipes indexed (capture + seed)", count))
+    -- The rail announces the session's FIRST scan. A rescan follows every recipe
+    -- learned, decor or not, so it goes to the Debug tab only (review 2026-10-15).
+    local line = string.format("Recipe scan complete -- %d decor recipes indexed (capture + seed)", count)
+    if self._announced then
+        HDG.Log:Debug("recipes_rescanned", line)
+    else
+        self._announced = true
+        HDG.Log:Success("recipes_scanned", line)
+    end
     -- One-shot per session: recipe vendors missing from VendorAugment (generated
     -- tables out of step). The facade computes (pure); this module logs -- the
     -- selectors that consume the join skip such vendors silently.
@@ -126,6 +136,12 @@ function R:Scan()
         end
     end
     return count
+end
+
+-- Full re-read of the spellbook: the one place the once-per-session latch is cleared.
+function R:Rescan()
+    self._scanned = false
+    return self:Scan()
 end
 
 -- Re-derive altKnown when an alt's knownRecipes update. Reads entries
@@ -150,9 +166,19 @@ HDG.Modules:Declare({
     -- + Mogul do stateless shared reads (sync, not event subscriptions).
     ownsBlizzardNamespaces = { "C_SpellBook.IsSpellKnown" },
     logTags = {
-        recipes_scanned = { user = true, level = "success", duration = 3 },
+        recipes_scanned   = { user = true, level = "success", duration = 3 },
+        recipes_rescanned = { user = false, level = "debug" },
         data_drift      = { user = false, level = "warn" },
     },
+    blizzardEvents = {
+        -- Trainer, recipe scroll and skill-up learns all fire it, window open or not.
+        -- Debounced: "learn all" bursts coalesce, and IsSpellKnown is read after the
+        -- learn settles (true at fire time is unverified).
+        NEW_RECIPE_LEARNED = { handler = "OnRecipeLearned", debounce = 0.5 },
+    },
+    OnRecipeLearned = function(self)
+        R:Rescan()
+    end,
     onEnable = function(self)
         -- Run on DECOR_CATALOG_READY (fires after both cold+warm paths;
         -- spellbook is populated by then). Token captured for onShutdown.
@@ -170,8 +196,7 @@ HDG.Modules:Declare({
                 local st = HDG.Store:GetState()
                 for itemID in pairs(st.account.recipeCapture) do
                     if not st.account.recipes[itemID] then
-                        R._scanned = false
-                        R:Scan()
+                        R:Rescan()
                         break
                     end
                 end

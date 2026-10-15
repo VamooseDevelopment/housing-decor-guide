@@ -12,11 +12,13 @@
 
 ---
 
-## What's New in v3.35.0
+## What's New in v3.36.0
 
-- **Click an item on the shopping list to see what it takes.** A crafted item opens its recipe on the Recipes tab, and the Materials list shows what that recipe needs even when your craft queue holds other things. If the recipe belongs to a profession this character doesn't have, that profession is added to the Recipes filter so the recipe is there. Anything else opens in the Decor tab. Hover a crafted item to see which profession makes it, whether you know the recipe, where to learn it, and the materials for the number on your list.
-- **Go from a vendor's item to its Decor entry.** On Shop by Vendor, click the name of the item you've picked to open it in the Decor tab. Shift-click an item in a vendor's list to link it in chat, as you can on Shop by Item.
-- **One button adds to the shopping list everywhere: + Cart.** The Decor tab called it + Wish and Shop by Item called it Cart +, so they looked like different lists. They're the same list. Hover the button to see where the item will land.
+- **Updated for 12.1.5.** The 21 decor recipes added in the patch are listed for everyone, with their materials and where to learn them. Recipe materials match the patch's smaller reagent counts, and 35 more vendors have a location, including the ones added in 12.1.5.
+- **Map and Waypoint now do different things.** Map opens the world map at the vendor with a pin and leaves your waypoint alone. Waypoint sets the waypoint and leaves the map closed. The Decor tab's + Map and + Way use the first vendor with a known location, one your faction can shop at first.
+- **Vendors without a location say so.** Their Map and Waypoint buttons are greyed out, and hovering them says why. Before, the buttons did nothing when clicked.
+- **Recipes you learn show as known straight away,** without a reload.
+- **The Trainers tab names who teaches each Midnight recipe,** and shows the training fee.
 
 ## The Decor Catalog
 
@@ -107,7 +109,7 @@ A companion window injects into Blizzard's House Editor so you can **place decor
 ---
 
 **Author:** Vamoose
-**Version:** 3.35.0
+**Version:** 3.36.0
 **Game Version:** 12.1.0 (Midnight)
 **Source / Issues:** https://github.com/VamooseDevelopment/housing-decor-guide
 **Discord:** https://discord.gg/RWZaxJaHFP

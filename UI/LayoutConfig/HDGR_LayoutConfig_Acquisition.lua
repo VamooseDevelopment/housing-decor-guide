@@ -507,17 +507,20 @@ LC.widgets["acquisitionDetailPanel.headerExpansion"] = {
     binding = "acq.detailExpansion",
 }
 -- Vendor-action buttons: beside the map in the action column.
+-- Greyed, with a why-tooltip, for a vendor with no location yet (owner 2026-10-15).
 LC.widgets["acquisitionDetailPanel.waypointBtn"] = {
-    tooltip = false,
+    tooltip = { recipe = "AcqVendorWay" },
     kind = "button", ["in"] = "acq.actionCol", font = "button",
     text = "locale:ACQ_WAYPOINT", width = "fill", height = 22, order = 20, variant = "tertiary",
-    visible = "acq.hasSelectedNpc",
+    visible = "acq.hasSelectedVendor",
+    binding = { enabled = "acq.selectedVendorMappable" },
 }
 LC.widgets["acquisitionDetailPanel.showOnMapBtn"] = {
-    tooltip = false,
+    tooltip = { recipe = "AcqVendorMap" },
     kind = "button", ["in"] = "acq.actionCol", font = "button",
     text = "locale:ACQ_SHOW_ON_MAP", width = "fill", height = 22, order = 30, variant = "tertiary",
-    visible = "acq.hasSelectedNpc",
+    visible = "acq.hasSelectedVendor",
+    binding = { enabled = "acq.selectedVendorMappable" },
 }
 -- Vendor note editbox (full row width). Grid/List toggles in acq.actionCol.viewToggles.
 LC.widgets["acquisitionDetailPanel.vendorNote"] = {

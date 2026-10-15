@@ -13,10 +13,6 @@ local CH = HDG.ControllerHelpers
 -- Re-entrancy guard: set true before auto-select dispatch; cleared on the next valid Refresh.
 local _autoSelectPending = false
 
--- Thin delegate to HDG.Waypoints:OpenWorldMapAt (shared, owns the OnShow hook).
-function AcquisitionController:OpenWorldMapAt(uiMapID)
-    HDG.Waypoints:OpenWorldMapAt(uiMapID)
-end
 
 -- itemRow: item name + profession/expansion meta. Click selects the primary vendor.
 --
@@ -318,7 +314,8 @@ local function _layoutItemVendorRow(row)
     name:SetPoint("RIGHT", meta, "LEFT", -8, 0)
 end
 
--- Per-paint text: cost - zone - faction (each segment omitted when empty).
+-- Per-paint text: cost - zone - faction (each segment omitted when empty), and
+-- "location not known yet" where a vendor without one greys its Wpt/Map.
 local function _paintItemVendorRow(row, ed)
     row._nameFs:SetText(ed.name)
     local parts = {}
@@ -326,24 +323,34 @@ local function _paintItemVendorRow(row, ed)
     if costText ~= "" then parts[#parts+1] = costText end
     if ed.zone    and ed.zone    ~= "?" then parts[#parts+1] = ed.zone end
     if ed.faction and ed.faction ~= "?" then parts[#parts+1] = ed.faction end
+    if not ed.mappable then parts[#parts+1] = HDG.Locale:Get("VENDOR_LOC_UNKNOWN") end
     row._metaFs:SetText(table.concat(parts, "  -  "))
 end
 
 -- Wire Wpt / Map buttons + row click. All close over the per-paint envelope.
+-- Wpt/Map are greyed (not hidden) without a location, and their tooltip says why:
+-- a live-looking button that did nothing was the 2026-10-15 report.
 local function _wireItemVendorRowClicks(row, ed)
     local vName      = ed.name
     local vMapID     = ed.mapID
     local vX, vY     = ed.x, ed.y
     local factionRaw = ed.factionRaw
     local npcID      = ed.npcID
+    local tipVendor  = { name = ed.name, zone = ed.zone, mapID = ed.mapID, x = ed.x, y = ed.y }
 
+    HDG.UI.SetEnabledLook(row._wptBtn, ed.mappable)
+    HDG.UI.SetEnabledLook(row._mapBtn, ed.mappable)
+    HDG.TooltipEngine:Attach(row._wptBtn, function()
+        return HDG.TooltipRecipes.VendorNavTip(tipVendor, "VENDOR_WAY_TIP")
+    end)
+    HDG.TooltipEngine:Attach(row._mapBtn, function()
+        return HDG.TooltipRecipes.VendorNavTip(tipVendor, "VENDOR_MAP_TIP")
+    end)
     row._wptBtn:SetScript("OnClick", function()
-        if not (vMapID and vX and vY) then return end
         HDG.Waypoints:Set(vMapID, vX, vY, vName, factionRaw)
     end)
     row._mapBtn:SetScript("OnClick", function()
-        if not (vMapID and vX and vY) then return end
-        HDG.Waypoints:ShowOnMap(vMapID, vX, vY, vName)  -- hygiene A7: the helper built for this call site
+        HDG.Waypoints:ShowOnMap(vMapID, vX, vY, vName)
     end)
     row:SetScript("OnClick", function()
         if npcID then
@@ -474,15 +481,13 @@ function AcquisitionController:_wireFilterTags(rootFrame)
     end
 end
 
--- Waypoint button: TomTom -> native -> map pin chain via HDG.Waypoints:Set.
+-- Waypoint button: HDG.Waypoints:Set (TomTom per the provider setting, else
+-- Blizzard's super-tracked waypoint). Enabled only with a location
+-- (acq.selectedVendorMappable), so the selected vendor is mapped at click time.
 function AcquisitionController:_wireWaypointButton(rootFrame)
     HDG.UI.OnClick(rootFrame, "acquisitionDetailPanel.waypointBtn", function()
         local state  = HDG.Store:GetState()  -- exception(false-positive): top-level controller method (not a row factory)
         local vendor = HDG.Selectors:Call("acq.selectedVendor", state, {})
-        if not (vendor and vendor.mapID and vendor.x and vendor.y) then
-            HDG.Log:Warn("waypoints_user", "No coordinates available for this vendor.")
-            return
-        end
         HDG.Waypoints:Set(vendor.mapID, vendor.x, vendor.y, vendor.name, vendor.factionRaw)
     end)
 end
@@ -575,15 +580,13 @@ function AcquisitionController:_wireDecorHyperlink(rootFrame)
     hyperHost:SetScript("OnHyperlinkLeave", function() HDG.TooltipEngine:Hide() end)
 end
 
--- Show-on-map: open world map + drop pin via HDG.Waypoints.
+-- Show-on-map: open the world map at the vendor with HDG's pin (HDG.Waypoints, which
+-- reports the result). Enabled only with a location, like the Waypoint button.
 function AcquisitionController:_wireShowOnMap(rootFrame)
     HDG.UI.OnClick(rootFrame, "acquisitionDetailPanel.showOnMapBtn", function()
         local state  = HDG.Store:GetState()  -- exception(false-positive): top-level controller method (not a row factory)
         local vendor = HDG.Selectors:Call("acq.selectedVendor", state, {})
-        if not (vendor and vendor.mapID and vendor.x and vendor.y) then return end
-        if HDG.Waypoints:ShowOnMap(vendor.mapID, vendor.x, vendor.y, vendor.name) ~= false then  -- hygiene A7
-            HDG.Log:Info("waypoints_user", "Showing " .. vendor.name .. " on map")
-        end
+        HDG.Waypoints:ShowOnMap(vendor.mapID, vendor.x, vendor.y, vendor.name)
     end)
 end
 
@@ -734,27 +737,10 @@ function AcquisitionController:Wire(rootFrame)
             (item.name or "Item") .. " added to shopping list")
     end)
 
-    -- Map All: pin every filtered vendor with coords; open map at the first.
+    -- Map All: pin every filtered vendor with a location, open the map once (HDG.Waypoints:MapAll).
     HDG.UI.OnClick(rootFrame, "acquisitionListPanel.mapAllBtn", function()
-        if InCombatLockdown() then return end
-        local state   = HDG.Store:GetState()  -- exception(false-positive): top-level controller method (not a row factory)
-        local vendors = HDG.Selectors:Call("acq.vendors", state, {})
-        local placed  = HDG.Waypoints:SetMultiple(vendors)
-        if placed == 0 then
-            HDG.Log:Warn("waypoints", "No vendors with coordinates in the current filter.")
-            return
-        end
-        -- Open world map at the first vendor with coords.
-        for _, v in ipairs(vendors) do
-            if v.mapID and v.x and v.y then
-                local uiMapID = (HDG.Waypoints.ZonePctToMap(v.mapID, v.x, v.y))
-                if uiMapID then
-                    HDG.Waypoints:OpenWorldMapAt(uiMapID)
-                    break
-                end
-            end
-        end
-        HDG.Log:Info("waypoints_user", string.format("Mapped %d vendor%s.", placed, placed == 1 and "" or "s"))
+        local state = HDG.Store:GetState()  -- exception(false-positive): top-level controller method (not a row factory)
+        HDG.Waypoints:MapAll(HDG.Selectors:Call("acq.vendors", state, {}))
     end)
 
     HDG.UI.OnClick(rootFrame, "acquisitionListPanel.clearPinsBtn", function()

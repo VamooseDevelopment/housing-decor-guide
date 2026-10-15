@@ -303,10 +303,25 @@ Selectors:Register("decor.destroyProgress", {
     end,
 })
 
+-- The vendor + Map / + Way target: the first vendor with a known location, one your
+-- faction can shop at first (yours or neutral), else any with a location (owner
+-- 2026-10-15). vendors[1] alone left a mappable second vendor unreachable. nil when
+-- no vendor has a location -- the buttons grey and the source line says why.
+local function _mapVendor(vendors, side)
+    local fallback
+    for _, v in ipairs(vendors) do
+        if v.canWaypoint then
+            if v.side == side or v.side == "N" then return v end
+            fallback = fallback or v
+        end
+    end
+    return fallback
+end
+
 Selectors:Register("decor.selectedItem", {
     memoized = true,
     calls = {"decor.selectedItemID", "decor.selectedVariantKey", "decor.destroyTarget"},
-    reads = {"session.resolvers.catalog.tick"},
+    reads = {"session.resolvers.catalog.tick", "session.identity.factionGroup"},
     fn = function(state, ctx)
         local id = Selectors:Call("decor.selectedItemID", state, ctx)
         if not id then return nil end
@@ -317,6 +332,7 @@ Selectors:Register("decor.selectedItem", {
         -- its own vendor-first sourceType while the bake ran quest-first, so the
         -- detail panel and the tooltip for one piece could name different sources.
         local firstVendor = row.vendors and row.vendors[1]
+        local mapVendor   = row.vendors and _mapVendor(row.vendors, state.session.identity.factionGroup)
 
         -- Destroy identity: the selected row's own variant (decor.destroyTarget).
         local vEntryID, vDestroyable = Selectors:Call("decor.destroyTarget", state, ctx)(
@@ -331,13 +347,13 @@ Selectors:Register("decor.selectedItem", {
             sourceName    = row.sourceName,
             sourceDetail  = row.sourceDetail,  -- exception(nullable): vendor zone only; non-vendor sources have no detail
             sourceNpcID   = firstVendor and firstVendor.npcID or nil,  -- exception(nullable): non-vendor sources have no npc; drives the source-line vendor hyperlink
-            -- Primary vendor's location for the detail-panel Show on Map / Waypoint buttons
-            -- (same shape Shop-by-Vendor feeds HDG.Waypoints). nil => no mappable vendor.
-            vendor        = (firstVendor and firstVendor.canWaypoint and firstVendor.mapID
-                             and firstVendor.x and firstVendor.y)
-                            and { mapID = firstVendor.mapID, x = firstVendor.x, y = firstVendor.y,
-                                  name = firstVendor.name or "", faction = firstVendor.faction }
-                            or nil,  -- exception(nullable): non-vendor decor / vendor lacks coords
+            -- Sold by a vendor at all: + Map / + Way show (greyed when `vendor` is nil).
+            hasVendor     = firstVendor ~= nil,
+            -- The Map / Way target (same shape Shop-by-Vendor feeds HDG.Waypoints).
+            vendor        = mapVendor
+                            and { mapID = mapVendor.mapID, x = mapVendor.x, y = mapVendor.y,
+                                  name = mapVendor.name, zone = mapVendor.zone, side = mapVendor.side }
+                            or nil,  -- exception(nullable): non-vendor decor / no vendor has a location
             sourceTags    = row.sourceTags,   -- full baked tag list for the detail chip strip
             canCustomize  = row.canCustomize or false,
             isOwned       = row.isOwned or false,
@@ -365,7 +381,16 @@ Selectors:Register("decor.hasSelectedItem", {
     end,
 })
 
--- True when the selected decor has a vendor with coordinates -> Show on Map / Waypoint gate.
+-- True when the selected decor is sold by a vendor -> + Map / + Way are shown.
+Selectors:Register("decor.selectedItemHasVendor", {
+    calls = {"decor.selectedItem"},
+    fn = function(state, ctx)
+        local sel = Selectors:Call("decor.selectedItem", state, ctx)
+        return sel ~= nil and sel.hasVendor
+    end,
+})
+
+-- True when one of those vendors has a location -> + Map / + Way are enabled.
 Selectors:Register("decor.selectedItemHasVendorWaypoint", {
     calls = {"decor.selectedItem"},
     fn = function(state, ctx)
@@ -481,6 +506,11 @@ Selectors:Register("decor.selectedItem.sourceLabel", {
         end
         if v.sourceDetail and v.sourceDetail ~= "" and v.sourceDetail ~= v.sourceName then
             pieces[#pieces + 1] = "(" .. v.sourceDetail .. ")"
+        end
+        -- why + Map / + Way are greyed: sold by a vendor, none of them mapped yet
+        if v.hasVendor and not v.vendor then
+            pieces[#pieces + 1] = HDG.Theme:ColorCode("text.dim") .. "- "
+                .. HDG.Locale:Get("VENDOR_LOC_UNKNOWN") .. "|r"
         end
         -- chip alone is fine when no name/detail
         return table.concat(pieces, "  ")

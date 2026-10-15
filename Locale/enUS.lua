@@ -89,6 +89,13 @@ HDG.Locale:Register("enUS", {
     DECOR_DESTROY_BTN      = "Destroy a stored copy",
     DECOR_MAP_BTN          = "+ Map",
     DECOR_WAYPOINT_BTN     = "+ Way",
+    -- A vendor HDG has no coordinates for yet (new vendors until the data catches up):
+    -- the note on its line, and the greyed Map / Waypoint buttons' tooltip.
+    VENDOR_LOC_UNKNOWN       = "location not known yet",
+    VENDOR_LOC_UNKNOWN_TITLE = "Location not known yet",
+    VENDOR_LOC_UNKNOWN_BODY  = "HDG doesn't have this vendor's coordinates yet, so there is nothing to map or waypoint. New vendors are added as they're found.",
+    VENDOR_MAP_TIP           = "Opens the world map at %s, with a pin.",
+    VENDOR_WAY_TIP           = "Sets a waypoint to %s.",
     DECOR_NOTE_PLACEHOLDER = "Add a personal note...",
 
     -- ===== Acquisition =====

@@ -195,7 +195,10 @@ Selectors:Register("zone.entriesByVendor", {
                 uncollectedCount = v.uncollectedCount,
                 collectedCount   = v.collectedCount,
                 shoppingListCount = v.shoppingListCount,
-                mapID = v.mapID, x = v.x, y = v.y,
+                mapID = v.mapID, x = v.x, y = v.y, zone = v.zone,
+                -- the pin greys without a location (owner 2026-10-15); a few
+                -- neighborhood vendors have a zone but no coords yet
+                mappable = HDG.VendorRank.HasLocation(v.mapID, v.x, v.y),
                 collapsed = not isExpanded,
             }
             if isExpanded then

@@ -50,14 +50,13 @@ local function formatCoords(x, y)
     return string.format("%.1f, %.1f", x, y)
 end
 
-local function setWaypoint(trainerRow)
-    local zoneEnUS, x, y = trainerRow.zoneEnUS, trainerRow.x, trainerRow.y
-    if not (zoneEnUS and x and y) then return end   -- trainer-data boundary
-    local mapID = HDG.ZoneNameResolver.ZONE_MAP_IDS[zoneEnUS]
+-- The Map button: the shared show-on-map action (map + pin, no waypoint). Shown only
+-- for rows that resolved a mapID and coords (selector-baked), so all three are set.
+local function showTrainerOnMap(trainerRow)
     local label = trainerRow.dbName or ("npc " .. tostring(trainerRow.npcID))
     -- ShowOnMap: coords are zone-pct (0-100); ShowOnMap normalizes to 0-1
     -- (passing x/100 manually landed every waypoint in the corner).
-    HDG.Waypoints:ShowOnMap(mapID, x, y,
+    HDG.Waypoints:ShowOnMap(trainerRow.mapID, trainerRow.x, trainerRow.y,
         label .. " (" .. (trainerRow.profName or "?") .. ")")
 end
 
@@ -86,6 +85,7 @@ end
 local _MN_SRC_TOKEN = {
     vendor = "VENDOR", drop = "DROP", quest = "QUEST",
     discovery = "LEARNED", trainer = "PROFESSION",
+    event = "EVENT",   -- world-event vendor recipes (Hallow's End), 2026-10-15
 }
 local function _midnightSourceColor(srcType)
     return HDG.Palette:ColorCode("source." .. (_MN_SRC_TOKEN[srcType] or "UNKNOWN"))
@@ -163,7 +163,7 @@ local function _onMidnightHeaderClick()
     })
 end
 
-local function _onMidnightWaypoint(mapID, x, y, title)
+local function _onMidnightShowOnMap(mapID, x, y, title)
     return function()
         -- Show-on-map (standard "Map" action). Coords are zone-pct (0-100).
         HDG.Waypoints:ShowOnMap(mapID, x, y, title)
@@ -225,10 +225,10 @@ local function _configureTrainerRow(row, ed, cc)
         or ""
     row._subFs:SetText(cc.dim .. zoneLoc .. "|r")
     row._rightFs:SetText(formatCoords(ed.x, ed.y))
-    if ed.x and ed.y then
+    if ed.mapID and ed.x and ed.y then
         row._mapBtn:Show()
         local capture = ed
-        row._mapBtn:SetScript("OnClick", function() setWaypoint(capture) end)
+        row._mapBtn:SetScript("OnClick", function() showTrainerOnMap(capture) end)
     end
     row:SetScript("OnClick", _onTrainerRowClick(ed.npcID))
 end
@@ -285,7 +285,7 @@ local function _configureMidnightRow(row, ed, cc)
     if ed.mapID and ed.x and ed.y then
         row._mapBtn:Show()
         row._mapBtn:SetScript("OnClick",
-            _onMidnightWaypoint(ed.mapID, ed.x, ed.y, ed.recipeName))
+            _onMidnightShowOnMap(ed.mapID, ed.x, ed.y, ed.recipeName))
     end
 end
 

@@ -1,0 +1,29 @@
+# Keep bulk data and art out of diffs and language stats (spec section 7).
+#
+# *DB.lua / *Data.lua are generated or curated bulk tables, frequently 8000+
+# entries. Marking them linguist-generated keeps them out of language stats and
+# collapses them in review, where a 9000-line diff hides the one line that
+# mattered.
+
+*.lua      text eol=lf
+*.toc      text eol=lf
+*.xml      text eol=lf
+*.md       text eol=lf
+*.sh       text eol=lf
+*.json     text eol=lf
+
+# Binary: never diffed, never line-ending-converted.
+*.tga      binary
+*.blp      binary
+*.png      binary
+*.jpg      binary
+*.ogg      binary
+*.mp3      binary
+*.ttf      binary
+*.zip      binary
+
+# Bulk data -- collapsed in review, excluded from language stats.
+*DB.lua           linguist-generated=true
+*Data.lua         linguist-generated=true
+art/**            linguist-vendored=true
+**/Libs/**        linguist-vendored=true
