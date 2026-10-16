@@ -72,7 +72,7 @@ local RESETTABLE_KEYS = {
     "merchantDecorOverlay", "merchantQtyPicker", "catalogDecorOverlay", "autoDepositLumber", "hideInCombat", "waypointProvider", "scale",
     "debug", "mockTSM", "locale", "fontFamily",
     "zoneScannerEnabled", "zoneScannerPopup", "zoneScannerPopupShopping",
-    "zoneScannerChat", "zoneScannerSound",
+    "zoneScannerChat", "zoneScannerSound", "zoneScannerTrackShopping",
 }
 
 -- ===== Search tags (synonyms for Blizzard's settings search) =================

@@ -164,7 +164,7 @@ end
 -- Fixed / fill / nil slots are checked -- they won't grow to rescue overruns.
 local function _warnLabelOverflow(widget, text)
     if not widget._intrinsicWidth then return end  -- nothing measured
-    if widget._hdgrWrap then return end
+    if widget._hdgrWrap or widget._hdgrTruncates then return end
     local specWidth = widget._hdgrSpecWidth
     if specWidth == "auto" or specWidth == "content" then return end
     local alloc = widget._lastRect and widget._lastRect.width
@@ -334,6 +334,11 @@ function HDG.UI:Label(parent, text, font, justifyH, optsTable)
     if opts.wrap and fs.SetWordWrap then
         fs:SetWordWrap(true)
         fs._hdgrWrap = true   -- dispatchText skips overflow detection on wrap-enabled labels.
+    elseif opts.wrap == false and fs.SetWordWrap then
+        -- One line, cut with "..." at the slot edge. Cutting is the point, so the
+        -- overflow warning stays quiet too.
+        fs:SetWordWrap(false)
+        fs._hdgrTruncates = true
     end
 
     HDG.Theme:Register(fs, role)
@@ -2303,6 +2308,19 @@ local function buildCheckbox(parent, spec)
 
     -- Click also lands on the label
     check:SetHitRectInsets(0, -label:GetStringWidth() - 8, 0, 0)
+
+    -- The layout hooks a declared tooltip onto the wrapper, but the wrapper never
+    -- takes the mouse -- the CheckButton does, its hit rect stretched over the
+    -- label. Hand hover hooks to the check, still called with the wrapper, which
+    -- is where TooltipEngine keeps the tooltip def.
+    local origHookScript = container.HookScript
+    function container:HookScript(event, fn)
+        if event == "OnEnter" or event == "OnLeave" then
+            check:HookScript(event, function(_, ...) fn(container, ...) end)
+        else
+            origHookScript(self, event, fn)
+        end
+    end
 
     return container
 end

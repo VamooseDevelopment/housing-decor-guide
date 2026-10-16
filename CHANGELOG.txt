@@ -1,3 +1,17 @@
+## [3.37.0] - 2026-10-17 (October 2026)
+
+### Added
+- **The Zone Scanner names the zone you're in,** in its title: "Zone Scanner: Eversong Woods". Inside
+  a building or a cave with its own map, it names the zone around you.
+- **A shopping cart tick beside Map All on the Zone Scanner.** Untick it and the scanner sticks to
+  decor you haven't collected: shopping-list items drop out of its list, and a zone with nothing but
+  shopping-list items no longer alerts you.
+- **Click the HDG icon on the Zone Scanner to open the main window.**
+
+### Fixed
+- **Tick boxes show their tooltips when you hover them.** Missing on Shop by Vendor, Queued only on
+  the Lumber Tracker, Hide automatic saves on Blueprints and Auto-open Lumber Tracker showed nothing.
+
 ## [3.36.0] - 2026-10-15 (October 2026)
 
 ### Changed

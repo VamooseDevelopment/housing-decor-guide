@@ -12,13 +12,12 @@
 
 ---
 
-## What's New in v3.36.0
+## What's New in v3.37.0
 
-- **Updated for 12.1.5.** The 21 decor recipes added in the patch are listed for everyone, with their materials and where to learn them. Recipe materials match the patch's smaller reagent counts, and 35 more vendors have a location, including the ones added in 12.1.5.
-- **Map and Waypoint now do different things.** Map opens the world map at the vendor with a pin and leaves your waypoint alone. Waypoint sets the waypoint and leaves the map closed. The Decor tab's + Map and + Way use the first vendor with a known location, one your faction can shop at first.
-- **Vendors without a location say so.** Their Map and Waypoint buttons are greyed out, and hovering them says why. Before, the buttons did nothing when clicked.
-- **Recipes you learn show as known straight away,** without a reload.
-- **The Trainers tab names who teaches each Midnight recipe,** and shows the training fee.
+- **The Zone Scanner names the zone you're in** in its title, such as "Zone Scanner: Eversong Woods". Inside a building or a cave with its own map, it names the zone around you.
+- **A shopping cart tick beside Map All on the Zone Scanner.** Untick it and the scanner shows only decor you haven't collected. Shopping-list items drop out of its list, and a zone with nothing but shopping-list items no longer alerts you.
+- **Click the HDG icon on the Zone Scanner to open the main window.**
+- **Tick boxes show their tooltips when you hover them,** including Missing on Shop by Vendor and Hide automatic saves on Blueprints.
 
 ## The Decor Catalog
 
@@ -84,7 +83,7 @@ A companion window injects into Blizzard's House Editor so you can **place decor
 ## Tools
 
 - **Shopping** -- a floating, multi-list shopping manager grouped by zone and vendor, with "Waypoint All" and share/import codes. Click an item to open its recipe, or its Decor entry if it isn't crafted. At a vendor, "Buy All" purchases every gold-priced list item in one paced pass, and right-clicking a gold-priced decor item opens a quantity picker. Items come off the list as you buy them.
-- **Zone alerts** -- entering a zone with a decor vendor (selling something you're missing or have listed) can pop a window, ping chat, and play a sound -- each toggle optional.
+- **Zone alerts** -- entering a zone with a decor vendor (selling something you're missing or have listed) can pop a window, ping chat, and play a sound -- each toggle optional. The Zone Scanner window names the zone, and a cart tick turns shopping-list matching on or off.
 - **Your Data** -- collection KPIs, achievement progress (decor, coupons, lumber milestones), and full crafting/farming history.
 - **Config** -- multiple color themes with a live preview, UI scaling, and account profiles.
 - **Helpers** -- optional collection marks on Blizzard's own windows: a collected/needed mark on vendor items and in the Housing catalog, and a reagent mark on bag slots, plus a decor-sourcing block on catalog tooltips. Each toggles under Settings > Helpers.
@@ -109,7 +108,7 @@ A companion window injects into Blizzard's House Editor so you can **place decor
 ---
 
 **Author:** Vamoose
-**Version:** 3.36.0
+**Version:** 3.37.0
 **Game Version:** 12.1.0 (Midnight)
 **Source / Issues:** https://github.com/VamooseDevelopment/housing-decor-guide
 **Discord:** https://discord.gg/RWZaxJaHFP

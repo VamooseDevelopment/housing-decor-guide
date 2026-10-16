@@ -29,6 +29,26 @@ Selectors:Register("zone.showCollected", {
 })
 
 
+-- The cart tick on the Map All row: whether the scanner matches the shopping list.
+Selectors:Register("zone.trackShopping", {
+    reads = { "account.config.zoneScannerTrackShopping" },
+    fn = function(state, ctx)
+        return state.account.config.zoneScannerTrackShopping
+    end,
+})
+
+-- Window title: "Zone Scanner: <zone>", or just "Zone Scanner" before the first
+-- zone probe lands.
+Selectors:Register("zone.title", {
+    reads = { "session.zone.zoneLevelName" },
+    fn = function(state, ctx)
+        local title = HDG.Locale:Get("ZONE_TITLE")
+        local zone  = state.session.zone.zoneLevelName
+        if zone == "" then return title end
+        return title .. ": " .. zone
+    end,
+})
+
 Selectors:Register("zone.popupShown", {
     reads = { "account.ui.zonePopupShown" },
     fn = function(state, ctx)
@@ -113,6 +133,7 @@ Selectors:Register("zone.vendorsInZone", {
         "account.collection.ownedDecorIDs",
         "account.vendorShoppingLists",
         "account.activeShoppingListId",
+        "account.config.zoneScannerTrackShopping",
     },
     fn = function(state, ctx)
         local mapID = state.session.zone.currentMapID
@@ -122,8 +143,13 @@ Selectors:Register("zone.vendorsInZone", {
         local npcIDsInZone = HDG.StaticData.VendorAugment:GetVendorsByMap(mapID)
         if not npcIDsInZone then return {} end
 
-        local shoppingHash = _buildShoppingListHash(
-            state.account.vendorShoppingLists, state.account.activeShoppingListId)
+        -- Cart tick off: an empty hash matches nothing, so every shopping-list
+        -- count, marker and alert downstream reads zero from this one place.
+        local shoppingHash = {}
+        if state.account.config.zoneScannerTrackShopping then
+            shoppingHash = _buildShoppingListHash(
+                state.account.vendorShoppingLists, state.account.activeShoppingListId)
+        end
 
         -- Faction tag stamped by SessionIdentity at onEnable.
         -- Empty string (pre-stamp boot race) -> treat as "N" (Neutral = show everything).

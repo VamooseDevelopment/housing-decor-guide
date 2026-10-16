@@ -217,6 +217,13 @@ function ZoneController:Wire(rootFrame)
         HDG.Store:Dispatch({ type = A.ZONE_POPUP_TOGGLE })
     end)
 
+    -- HDG icon: open the main window. Only ever opens -- a toggle would shut a
+    -- main window that is already up.
+    HDG.UI.OnClick(rootFrame, "zoneHeaderPanel.icon", function()
+        if HDG.Store:GetState().account.ui.mainWindowShown then return end  -- exception(false-positive): top-level controller method (not a row factory)
+        HDG.Store:Dispatch({ type = A.MAIN_WINDOW_TOGGLE })
+    end)
+
     -- Controllers:WireAll fires against every frame; bail early when
     -- zonePanel widgets are absent (standalone lumber/shopping windows).
     local sb = HDG.UI.W(rootFrame, "zonePanel.searchBox")
@@ -232,6 +239,12 @@ function ZoneController:Wire(rootFrame)
     -- Dynamic tooltip: reads showCollected at hover so the text never goes stale.
     local scBtn = HDG.UI.W(rootFrame, "zonePanel.showCollectedBtn")
     if scBtn then HDG.TooltipEngine:Attach(scBtn, HDG.TooltipRecipes.ZoneShowCollected) end
+
+    -- Cart tick: whether the scanner matches the shopping list (list + alerts).
+    HDG.UI.OnClick(rootFrame, "zonePanel.trackShoppingToggle", function()
+        local on = HDG.Store:GetState().account.config.zoneScannerTrackShopping  -- exception(false-positive): top-level controller method (not a row factory)
+        HDG.Config:Set("ZONE_SCANNER_TRACK_SHOPPING", not on)
+    end)
 
     -- Map All -- pin every visible vendor and open the map once: the same meaning as
     -- Acquire's Map Vendors (owner 2026-10-15). It used to set a waypoint per vendor, each

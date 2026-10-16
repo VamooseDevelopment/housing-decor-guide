@@ -67,6 +67,10 @@ local function NewConfig()
         zoneScannerPopupShopping = false,   -- popup for shopping-list items specifically
         zoneScannerChat    = true,
         zoneScannerSound   = false,
+        -- Off: the scanner stops matching the shopping list -- its list and
+        -- its alerts go by uncollected decor alone (the cart tick on the
+        -- scanner's Map All row).
+        zoneScannerTrackShopping = true,
         -- tooltipDecorTag: show the HDG catalog line on item tooltips.
         tooltipDecorTag        = true,
         -- catalogTooltip: append HDG's decor-sourcing block to the Housing
@@ -698,8 +702,10 @@ end
 
 -- Zone state: current mapID (stamped by ZONE_CHANGED; 0 = not yet probed).
 -- Lives at session.zone, not session.ui.*, as it's the canonical player-location fact.
+-- currentZoneName is the best map's OWN name, which can be a sub-map (an indoor or
+-- micro map); zoneLevelName is the zone that map sits in -- what the Zone Scanner names.
 local function NewZoneState()
-    return { currentMapID = 0, currentZoneName = "" }
+    return { currentMapID = 0, currentZoneName = "", zoneLevelName = "" }
 end
 
 -- Lumber Tracker state layout:
@@ -4355,14 +4361,16 @@ HDG.Actions:Register{ name = "ZONE_CHANGED",
     persists = false, combatUnsafe = false,
             invalidates = { "session.zone.currentMapID",
                             "session.zone.currentZoneName",
+                            "session.zone.zoneLevelName",
                             "session.ui.zoneScanner.expanded" },
     reduce = function(state, payload)
         -- ZoneObserver:Probe coerces mapID to a number (0 sentinel on
-        -- API miss) and mapName to a string ("" sentinel) before dispatch,
-        -- so this reducer reads both strictly. Defensive `or 0` / `or ""`
+        -- API miss) and mapName / zoneName to strings ("" sentinel) before
+        -- dispatch, so this reducer reads them strictly. Defensive `or 0` / `or ""`
         -- here would mask producer regressions instead of surfacing them.
         state.session.zone.currentMapID    = payload.mapID
         state.session.zone.currentZoneName = payload.mapName
+        state.session.zone.zoneLevelName   = payload.zoneName
         state.session.ui.zoneScanner.expanded = {}
     end }
 

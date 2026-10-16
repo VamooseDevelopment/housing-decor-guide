@@ -56,6 +56,7 @@ setting("ZONE_SCANNER_POPUP", "zoneScannerPopup", false, Scope.Profile)
 setting("ZONE_SCANNER_POPUP_SHOPPING", "zoneScannerPopupShopping", false, Scope.Profile)
 setting("ZONE_SCANNER_CHAT", "zoneScannerChat", true, Scope.Profile)
 setting("ZONE_SCANNER_SOUND", "zoneScannerSound", false, Scope.Profile)
+setting("ZONE_SCANNER_TRACK_SHOPPING", "zoneScannerTrackShopping", true, Scope.Profile)
 
 -- ===== Waypoint provider ===================================================
 setting("WAYPOINT_PROVIDER", "waypointProvider", "auto", Scope.Profile)

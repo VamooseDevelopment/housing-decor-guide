@@ -14,7 +14,7 @@
 --   zone.body             vertical container
 --   zone.filterBar        search + showCollected toggle row
 --   zone.entries          scrollbox container (height = fill)
---   zone.actionBar        bottom action row (Map All)
+--   zone.actionBar        bottom action row (Map All + shopping-list cart tick)
 
 HDG = HDG or {}
 local LC = HDG.LayoutConfig
@@ -36,7 +36,7 @@ LC.window.views.zoneScanner = {
 }
 
 -- ===== Panels ===============================================================
--- Header title is static "Zone Scanner"; zone name + summary display inside the content area.
+-- Header: HDG icon (opens the main window) + "Zone Scanner: <zone>" title + close.
 LC.panels.zoneHeaderPanel = {
     kind = "panel",
     cell = { zoneScanner = "header" },
@@ -92,23 +92,21 @@ LC.sections["zone.actionBar"] = {
 }
 
 -- ===== Widgets -- window chrome header =======================================
--- Icon mirrors NAV_TREE's "Zone" launcher glyph.
+-- The HDG icon is the way back to the main window from the floating scanner.
 LC.widgets["zoneHeaderPanel.icon"] = {
-    tooltip = false,
-    kind = "atlas", ["in"] = "zoneHeaderPanel", slot = "header",
-    atlas = "UI-WorldMapArrow",
-    width = 16, height = 16, order = 5,
+    tooltip = { recipe = "ZoneOpenMain" },
+    kind = "button", ["in"] = "zoneHeaderPanel", slot = "header",
+    normalTexture = "Interface/AddOns/HousingDecorGuide/textures/Vamoose_HDG_400_trans",
+    size = 20, width = 20, height = 20, order = 5,
 }
+-- Fills the row and never wraps: a long zone name is cut with "..." before the
+-- close button.
 LC.widgets["zoneHeaderPanel.title"] = {
     tooltip = false,
     kind = "label", role = "TextHeading", ["in"] = "zoneHeaderPanel", slot = "header",
-    text = "locale:ZONE_TITLE", font = "heading",
-    height = 18, width = "auto", order = 10,
-}
-LC.widgets["zoneHeaderPanel.spacer"] = {
-    tooltip = false,
-    kind = "spacer", ["in"] = "zoneHeaderPanel", slot = "header",
-    width = "fill", height = 18, order = 15,
+    font = "heading", wrap = false,
+    height = 18, width = "fill", order = 10,
+    binding = "zone.title",
 }
 LC.widgets["zoneHeaderPanel.close"] = {
     tooltip = { recipe = "Close" },
@@ -161,6 +159,14 @@ LC.widgets["zonePanel.actionSpacer"] = {
     tooltip = false,
     kind = "spacer", ["in"] = "zone.actionBar",
     width = "fill", height = 22, order = 20,
+}
+-- Cart tick: off = the scanner stops matching the shopping list (list + alerts).
+LC.widgets["zonePanel.trackShoppingToggle"] = {
+    tooltip = { recipe = "ZoneTrackShopping" },
+    kind = "checkbox", ["in"] = "zone.actionBar", font = "small",
+    text = "|A:" .. HDG.Constants.SHOPPING_LIST_ICON_ATLAS .. ":16:16|a",
+    width = 48, height = 22, order = 30,
+    binding = { checked = "zone.trackShopping" },
 }
 
 -- ===== Satellite window (HDG-ADR-025 step 5) ===============================

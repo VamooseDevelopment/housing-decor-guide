@@ -159,6 +159,8 @@ R.BlueprintMeterInteriorPet = { title = "locale:TIP_BP_METER_INTERIOR_PET", anch
 R.BlueprintMeterExteriorPet = { title = "locale:TIP_BP_METER_EXTERIOR_PET", anchor = "ANCHOR_TOP" }
 R.VendorJump           = { title = "locale:TIP_VENDOR_JUMP_TITLE",           body = "locale:TIP_VENDOR_JUMP_BODY",    anchor = "ANCHOR_RIGHT" }
 R.ZoneMapOpen          = { title = "locale:TIP_ZONE_MAP_TITLE",              body = "locale:TIP_ZONE_MAP_BODY" }
+R.ZoneOpenMain         = { title = "locale:TIP_ZONE_OPEN_MAIN_TITLE",        body = "locale:TIP_ZONE_OPEN_MAIN_BODY" }
+R.ZoneTrackShopping    = { title = "locale:TIP_ZONE_TRACK_SHOPPING_TITLE",   body = "locale:TIP_ZONE_TRACK_SHOPPING_BODY", anchor = "ANCHOR_TOP" }
 
 -- Layouts tab actions (effect-focused -- what each does, not just the label).
 R.LayoutLoad      = { title = "locale:TIP_LAYOUT_LOAD_TITLE",      body = "locale:TIP_LAYOUT_LOAD_BODY",      anchor = "ANCHOR_TOP" }

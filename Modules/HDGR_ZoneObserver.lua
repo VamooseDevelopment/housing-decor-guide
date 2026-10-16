@@ -42,6 +42,16 @@ HDG.Modules:Declare({
     end,
 })
 
+-- The zone the player's map sits in, which is what the Zone Scanner names. The best
+-- map can be an indoor or micro map below its zone; Blizzard's walk-up finds the
+-- zone-type map at or above it. A map with no zone above it (a continent, or a map
+-- that stands alone) is named as itself.
+function Z:_ZoneLevelName(mapID, mapName)
+    local zone = _G.MapUtil.GetMapParentInfo(mapID, _G.Enum.UIMapType.Zone)
+    if zone then return zone.name end   -- exception(nullable): no zone-type map above a continent or a standalone map
+    return mapName
+end
+
 -- Resolve current map and dispatch ZONE_CHANGED when map ID changes.
 function Z:Probe()
     local mapID = _G.C_Map and _G.C_Map.GetBestMapForUnit
@@ -52,13 +62,14 @@ function Z:Probe()
     self._lastDispatched = mapID
     -- Resolve human-readable zone name. Sub-zones return their own name
     -- (e.g. "The Slag Pit"); Lumber Tracker reads this directly.
-    local mapName = ""
+    local mapName, zoneName = "", ""
     if mapID ~= 0 and _G.C_Map and _G.C_Map.GetMapInfo then
         local info = _G.C_Map.GetMapInfo(mapID)  -- exception(boundary): C_Map nil off-map / no zone
         if info and info.name then mapName = info.name end
+        zoneName = self:_ZoneLevelName(mapID, mapName)
     end
     HDG.Store:Dispatch({
         type    = HDG.Constants.ACTIONS.ZONE_CHANGED,
-        payload = { mapID = mapID, mapName = mapName },
+        payload = { mapID = mapID, mapName = mapName, zoneName = zoneName },
     })
 end
