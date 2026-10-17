@@ -702,7 +702,7 @@ Selectors:Register("acq.items", {
     memoized = true,  -- perf: filtered+built item list (~3.8ms walk); shared per flush by the list binding + blankItem + hasResults
     -- acq.selectedItemID retired -- selection owned by SelectionBehaviorMixin
     -- on acquisitionListPanel.itemList. Row factory reads ed.selected.
-    calls = {"acq.allItems", "acq.filterQuery", "acq.matchesItemFilters",
+    calls = {"acq.allItems", "acq.filterQuery", "acq.matchesItemFilters", "acq.matchesCurrency",
              "acq.repFilter", "acq.zoneFilter", "acq.factionFilter", "decor.isCollected"},
     -- Status ticks + account.questCompletions + rep tick: re-stamp questDone/achEarned/
     -- repMet (the row-list chip-dim signals) when completion or rep changes. Gate the
@@ -714,6 +714,7 @@ Selectors:Register("acq.items", {
         local all       = Selectors:Call("acq.allItems",           state, ctx)
         local q         = Selectors:Call("acq.filterQuery",        state, ctx)
         local matchItem = Selectors:Call("acq.matchesItemFilters", state, ctx)
+        local matchCurrency = Selectors:Call("acq.matchesCurrency", state, ctx)
         local isColl    = Selectors:Call("decor.isCollected",      state, ctx)
         local repSet     = Selectors:Call("acq.repFilter",     state, ctx)
         local zoneSet    = Selectors:Call("acq.zoneFilter",    state, ctx)
@@ -730,6 +731,7 @@ Selectors:Register("acq.items", {
                 pass = _matchesNeedle(item, needle) and true or false
             end
             if pass and not matchItem(item.itemID) then pass = false end
+            if pass and not matchCurrency(item) then pass = false end
             if pass and (hasRep or hasZone or hasFaction) then
                 pass = _passesVendorAxes(item, hasRep, hasZone, hasFaction,
                                          repSet, zoneSet, factionSet, Aug)
@@ -831,6 +833,162 @@ Selectors:Register("acq.factionMenuItems", {
             { kind = "checkbox", value = "Neutral",  text = "Neutral"  },
         }
     end,
+})
+
+-- ===== Currency axis ==========================================================
+-- What decor is sold for, so the dropdown never lists a currency nothing costs.
+-- Keys are Format.CostKey ("currency:1813", "item:33226"). Gold stays out: the
+-- "Gold, no unlocks" chip covers it. Currency names and icons come from the
+-- House dashboard's curated HOUSING_DECOR_CURRENCY_DATA, so this selector makes no
+-- client call; a currency missing from that table shows its id, which is the cue to
+-- add it there. Item tokens (Tricky Treats, Mark of Honor) are named through
+-- ItemNameResolver, the boundary for item names, with the icon the catalog's Cost:
+-- link carried.
+Selectors:Register("acq.currencyFilter", {
+    reads = {"session.ui.acquisition.currencyFilter"},
+    fn = function(state)
+        return state.session.ui.acquisition.currencyFilter   -- multi-select SET ({} = all)
+    end,
+})
+
+local _curatedCurrency
+local function _curatedCurrencyByID()
+    if not _curatedCurrency then
+        _curatedCurrency = {}
+        for _, c in ipairs(HDG.Constants.HOUSING_DECOR_CURRENCY_DATA) do _curatedCurrency[c.id] = c end
+    end
+    return _curatedCurrency
+end
+
+local function _costOption(e)
+    if e.itemID then
+        return { key = HDG.Format.CostKey(e), name = (HDG.ItemNameResolver:ResolveName(e.itemID)), icon = e.icon }
+    end
+    local c = _curatedCurrencyByID()[e.currencyID]
+    if c then return { key = HDG.Format.CostKey(e), name = c.name, icon = c.icon } end
+    return { key = HDG.Format.CostKey(e), name = "Currency #" .. e.currencyID, icon = e.icon }
+end
+
+local function _addCostOptions(entries, byKey)
+    for _, e in ipairs(entries) do
+        if e.currencyID ~= HDG.Constants.CURRENCY_GOLD and not byKey[HDG.Format.CostKey(e)] then
+            local opt = _costOption(e)
+            byKey[opt.key] = opt
+        end
+    end
+end
+
+-- Every price one catalog row shows, gold left out, into byKey: the row's own
+-- costEntries (what the price column reads -- vendor 1's price, or the override
+-- sources when no vendor block carries one) and each vendor block's price.
+local function _collectCostOptions(row, byKey)
+    _addCostOptions(row.costEntries, byKey)
+    for _, v in ipairs(row.vendors or {}) do                 -- exception(nullable): a vendorless row has no vendors
+        if v.costEntries then _addCostOptions(v.costEntries, byKey) end  -- exception(nullable): priceless vendor block
+    end
+end
+
+local function _anyEntryIn(entries, set)
+    for _, e in ipairs(entries) do
+        if set[HDG.Format.CostKey(e)] then return true end
+    end
+    return false
+end
+
+-- One vendor's price for a row: its own block's when that block carries one, else
+-- the row's shown price (row.costEntries).
+local function _priceAt(row, vendorName, catalogZone)
+    for _, b in ipairs(row.vendors or {}) do  -- exception(nullable): a vendorless row has no vendors
+        if b.name == vendorName and b.zone == catalogZone and b.costEntries then return b.costEntries end  -- exception(nullable): priceless vendor block
+    end
+    return row.costEntries
+end
+
+Selectors:Register("acq.currencyOptions", {
+    reads    = {"session.resolvers.catalog.tick", "session.itemNames.names"},
+    memoized = true,
+    fn = function()
+        local byKey, list, nameByKey = {}, {}, {}
+        if not HDG.HousingCatalogObserver:IsReady() then return { list = list, nameByKey = nameByKey } end
+        HDG.HousingCatalogObserver:IterateRows(function(_, row) _collectCostOptions(row, byKey) end)
+        for key, opt in pairs(byKey) do
+            list[#list + 1] = opt
+            nameByKey[key] = opt.name
+        end
+        table.sort(list, function(a, b) return a.name < b.name end)
+        return { list = list, nameByKey = nameByKey }
+    end,
+})
+
+Selectors:Register("acq.currencyMenuItems", {
+    calls = {"acq.currencyOptions"},
+    fn = function(state, ctx)
+        local items = { { kind = "checkbox", isAll = true, value = "all", text = "All Currencies" } }
+        for _, opt in ipairs(Selectors:Call("acq.currencyOptions", state, ctx).list) do
+            -- exception(nullable): an item token's Cost: link can lack its icon; the name still reads
+            local text = opt.icon and ("|T%s:14:14|t %s"):format(opt.icon, opt.name) or opt.name
+            items[#items + 1] = { kind = "checkbox", value = opt.key, text = text }
+        end
+        return items
+    end,
+})
+
+-- Find Decor: an item passes when any price it shows uses a picked currency.
+-- Shop by Vendor asks each vendor's own price instead (_vendorSellsFor).
+local function _soldForAnyOf(row, set)
+    if not row then return false end  -- exception(boundary): GetRow nil pre-bake
+    if _anyEntryIn(row.costEntries, set) then return true end
+    for _, v in ipairs(row.vendors or {}) do  -- exception(nullable): a vendorless row has no vendors
+        if v.costEntries and _anyEntryIn(v.costEntries, set) then return true end  -- exception(nullable): priceless vendor block
+    end
+    return false
+end
+
+-- Find Decor's currency predicate (acq.items). Shop by Vendor reads acq.currencyFilter
+-- itself, because there the question is the vendor's own price.
+Selectors:Register("acq.matchesCurrency", {
+    reads = {"session.resolvers.catalog.tick"},
+    calls = {"acq.currencyFilter"},
+    fn = function(state, ctx)
+        local set = Selectors:Call("acq.currencyFilter", state, ctx)
+        if next(set) == nil then return function() return true end end
+        return function(row) return _soldForAnyOf(HDG.HousingCatalogObserver:GetRow(row.itemID), set) end
+    end,
+})
+
+-- ===== Current zone button ====================================================
+-- The Zone filter values for where the player stands: the zone the Zone Scanner
+-- names, the map's own name (Sinfall, a building with a map of its own), and the
+-- zone each vendor standing on this map is filed under (Torv Dubstomp stands on
+-- Thunder Totem's map, filed under Highmountain). Only values the Zone dropdown
+-- lists are kept, so the set never holds a zone that filters to nothing. Empty
+-- where HDG knows no vendors: the button greys out.
+Selectors:Register("acq.currentZones", {
+    reads    = {"session.zone.currentMapID", "session.zone.currentZoneName",
+                "session.zone.zoneLevelName", "session.resolvers.staticData.tick"},
+    calls    = {"acq.axisMenuItems"},
+    memoized = true,
+    fn = function(state, ctx)
+        local listed = {}
+        for _, item in ipairs(Selectors:Call("acq.axisMenuItems", state, ctx).zone) do
+            if not item.isAll then listed[item.value] = true end
+        end
+        local zone, out = state.session.zone, {}
+        local function add(name) if listed[name] then out[name] = true end end
+        add(zone.zoneLevelName)
+        add(zone.currentZoneName)
+        if zone.currentMapID == 0 then return out end   -- 0 = the game gave no map: no vendors stand on it
+        local Aug = HDG.StaticData.VendorAugment
+        for _, npcID in ipairs(Aug:GetVendorsByMap(zone.currentMapID) or {}) do  -- exception(nullable): a map with no vendors has no bucket
+            add(Aug:Get(npcID).zone)
+        end
+        return out
+    end,
+})
+
+Selectors:Register("acq.hasCurrentZones", {
+    calls = {"acq.currentZones"},
+    fn = function(state, ctx) return next(Selectors:Call("acq.currentZones", state, ctx)) ~= nil end,
 })
 
 -- ===== Advanced filters: collapsible state + per-axis dropdowns ============
@@ -1007,10 +1165,15 @@ Selectors:Register("acq.hasMissingFilter", {
     fn = function(state, ctx) return Selectors:Call("acq.missingOnly", state, ctx) end,
 })
 
+Selectors:Register("acq.hasCurrencyFilter", {
+    calls = {"acq.currencyFilter"},
+    fn = function(state, ctx) return next(Selectors:Call("acq.currencyFilter", state, ctx)) ~= nil end,
+})
+
 Selectors:Register("acq.anyFilterActive", {
     calls = {"acq.hasSearchFilter", "acq.hasFactionFilter", "acq.hasExpansionFilter",
              "acq.hasZoneFilter", "acq.hasRepFilter", "acq.hasPresetFilter",
-             "acq.hasMissingFilter", "acq.hasSourceFilter"},
+             "acq.hasMissingFilter", "acq.hasSourceFilter", "acq.hasCurrencyFilter"},
     fn = function(state, ctx)
         return Selectors:Call("acq.hasSearchFilter",    state, ctx)
             or Selectors:Call("acq.hasFactionFilter",   state, ctx)
@@ -1020,6 +1183,7 @@ Selectors:Register("acq.anyFilterActive", {
             or Selectors:Call("acq.hasPresetFilter",    state, ctx)
             or Selectors:Call("acq.hasMissingFilter",   state, ctx)
             or Selectors:Call("acq.hasSourceFilter",    state, ctx)
+            or Selectors:Call("acq.hasCurrencyFilter",  state, ctx)
     end,
 })
 
@@ -1114,6 +1278,14 @@ Selectors:Register("acq.tagSource", {
         return tagText("Source", _joinSet(set, labels))
     end,
 })
+Selectors:Register("acq.tagCurrency", {
+    calls = {"acq.currencyFilter", "acq.currencyOptions"},
+    fn = function(state, ctx)
+        local set = Selectors:Call("acq.currencyFilter", state, ctx)
+        if next(set) == nil then return "" end
+        return tagText("Currency", _joinSet(set, Selectors:Call("acq.currencyOptions", state, ctx).nameByKey))
+    end,
+})
 
 -- Filtered vendors: AND-join across every axis. Adding a new axis adds
 -- one local + one xxxOK guard -- pattern is mechanical, debugging stays
@@ -1136,6 +1308,22 @@ local function _vendorSellsMatchingItem(v, itemPred)
     if not (catalogVendor and catalogVendor.items) then return false end
     for _, itemID in ipairs(catalogVendor.items) do
         if itemPred(itemID) then return true end
+    end
+    return false
+end
+
+-- Currency in vendor mode: the vendor passes if it sells >=1 item for a picked
+-- currency at ITS OWN price -- the same item can cost gold here and anima at the
+-- next vendor -- and that item also passes the item filters (itemPred nil = none).
+local function _vendorSellsFor(v, set, itemPred)
+    local catalogVendor = _vendorEntry(v)
+    if not (catalogVendor and catalogVendor.items) then return false end  -- exception(nullable): byVendor lookup can miss
+    for _, itemID in ipairs(catalogVendor.items) do
+        local row = HDG.HousingCatalogObserver:GetRow(itemID)
+        if row and (not itemPred or itemPred(itemID))  -- exception(boundary): GetRow nil pre-bake
+            and _anyEntryIn(_priceAt(row, v.name, v.catalogZone), set) then
+            return true
+        end
     end
     return false
 end
@@ -1181,7 +1369,7 @@ Selectors:Register("acq.vendors", {
     calls = {"acq.allVendors", "acq.filterQuery", "acq.factionFilter",
              "acq.zoneFilter", "acq.repFilter", "acq.sourceFilter",
              "acq.expansionFilter", "acq.preset", "acq.missingOnly",
-             "acq.matchesItemFilters"},
+             "acq.currencyFilter", "acq.matchesItemFilters"},
     fn = function(state, ctx)
         local all       = Selectors:Call("acq.allVendors",      state, ctx)
         local q         = Selectors:Call("acq.filterQuery",     state, ctx)
@@ -1192,6 +1380,7 @@ Selectors:Register("acq.vendors", {
         local expSet     = Selectors:Call("acq.expansionFilter", state, ctx)
         local preset    = Selectors:Call("acq.preset",          state, ctx)
         local missingOnly = Selectors:Call("acq.missingOnly",   state, ctx)
+        local currencySet = Selectors:Call("acq.currencyFilter", state, ctx)
         -- Vendor-intrinsic axes (multi-select SETs) -- checked per-vendor below.
         local hasSearch  = q       ~= ""
         local hasFaction = next(factionSet) ~= nil
@@ -1208,7 +1397,8 @@ Selectors:Register("acq.vendors", {
         local hasItemFilter = (next(sourceSet) ~= nil) or (next(expSet) ~= nil)
             or (preset ~= nil and not recipesPreset)
             or (missingOnly and not recipesPreset)
-        if not (hasSearch or hasFaction or hasZone or hasRep or hasItemFilter or recipesPreset) then
+        local hasCurrency = next(currencySet) ~= nil
+        if not (hasSearch or hasFaction or hasZone or hasRep or hasItemFilter or recipesPreset or hasCurrency) then
             return all
         end
         local itemPred = hasItemFilter
@@ -1227,6 +1417,8 @@ Selectors:Register("acq.vendors", {
                 for r in pairs(repSet) do if v.reps[r] then repOK = true; break end end
             end
             local itemOK    = (not hasItemFilter) or _vendorSellsMatchingItem(v, itemPred)
+            -- Currency asks this vendor's own price, on an item the item filters pass too.
+            local currencyOK = (not hasCurrency) or _vendorSellsFor(v, currencySet, itemPred)
             -- Rep preset also matches a vendor selling a rep-gated RECIPE (the
             -- catalog only knows rep-gated decor; recipe gates live in recipeSource).
             if not itemOK and preset == "reputation" and _vendorHasRepGatedRecipe(v.npcID) then
@@ -1242,7 +1434,7 @@ Selectors:Register("acq.vendors", {
             else
                 recipeOK = v.recipeCount > 0
             end
-            if searchOK and factionOK and zoneOK and repOK and itemOK and recipeOK then
+            if searchOK and factionOK and zoneOK and repOK and itemOK and recipeOK and currencyOK then
                 out[#out + 1] = v
             end
         end

@@ -83,6 +83,9 @@ local function NewConfig()
         -- merchantQtyPicker: right-click decor at a vendor -> quantity picker (Helpers > Vendors).
         -- Ships OFF (opt-in): the picker changes right-click behaviour on every vendor decor row.
         merchantQtyPicker      = false,
+        -- merchantQtyPickerAutoClose: the picker closes itself once every item is
+        -- bought (its own tick box). Off = it stays open on "Close", as it always did.
+        merchantQtyPickerAutoClose = false,
         -- materialTooltipItemData: render Blizzard's item tooltip above HDG's stock
         -- roster on material rows, which also lets other addons' item-data processors
         -- add their lines there. Ships OFF -- it makes every material hover much
@@ -226,6 +229,7 @@ local function NewAcquisitionSessionUI()
         zoneFilter          = {},
         repFilter           = {},
         sourceFilter        = {},
+        currencyFilter      = {},      -- Format.CostKey strings ("currency:1813", "item:33226")
     }
 end
 
@@ -2097,6 +2101,24 @@ HDG.Actions:Register{ name = "ACQ_TOGGLE_FACTION",
     invalidates = { "session.ui.acquisition.factionFilter" },
     reduce = function(state, payload)
         _acqToggleFilter(state.session.ui.acquisition.factionFilter, payload.faction)
+    end }
+
+HDG.Actions:Register{ name = "ACQ_TOGGLE_CURRENCY",
+    persists = false, combatUnsafe = false,
+    invalidates = { "session.ui.acquisition.currencyFilter" },
+    reduce = function(state, payload)
+        _acqToggleFilter(state.session.ui.acquisition.currencyFilter, payload.currency)
+    end }
+
+HDG.Actions:Register{ name = "ACQ_SET_ZONE_FILTER",
+    persists = false, combatUnsafe = false,
+    invalidates = { "session.ui.acquisition.zoneFilter" },
+    reduce = function(state, payload)
+        -- A new table: the controller hands over the set acq.currentZones built,
+        -- and the filter must not share it with that selector's result.
+        local zones = {}
+        for zone in pairs(payload.zones) do zones[zone] = true end
+        state.session.ui.acquisition.zoneFilter = zones
     end }
 
 HDG.Actions:Register{ name = "MAIN_WINDOW_OPENING",
@@ -5449,6 +5471,7 @@ HDG.Actions:Register{ name = "UI_FILTER_RESET",
             acq.zoneFilter      = {}
             acq.repFilter       = {}
             acq.sourceFilter    = {}
+            acq.currencyFilter  = {}
         elseif tab == "recipes" then
             local r = state.session.ui.recipes
             r.searchQuery         = ""

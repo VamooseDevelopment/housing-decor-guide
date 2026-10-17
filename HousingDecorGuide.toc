@@ -2,7 +2,7 @@
 ## Title: Vamoose's Housing Decor Guide
 ## Notes: Track, craft, preview, and acquire housing decorations across all professions
 ## Author: Vamoose
-## Version: 3.37.0
+## Version: 3.38.0
 ## SavedVariables: HDG_DB
 ## SavedVariablesPerCharacter: HDG_DB_CURRENT_PROFILE
 ## IconTexture: Interface\AddOns\HousingDecorGuide\textures\Vamoose_HDG_400_trans

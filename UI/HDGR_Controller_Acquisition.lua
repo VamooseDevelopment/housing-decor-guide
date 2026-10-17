@@ -469,6 +469,7 @@ function AcquisitionController:_wireFilterTags(rootFrame)
             end
         end,
         source    = function() HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.ACQ_TOGGLE_SOURCE, payload = { source = "all" } }) end,
+        currency  = function() HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.ACQ_TOGGLE_CURRENCY, payload = { currency = "all" } }) end,
         -- Missing tag is only visible when missingOnly is true, so a toggle
         -- dispatch clears it back off.
         missing   = function() HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.ACQ_TOGGLE_MISSING }) end,
@@ -659,6 +660,13 @@ function AcquisitionController:Wire(rootFrame)
     -- Missing toggle: orthogonal to source chips; ANDs with active source filter.
     HDG.UI.OnClick(rootFrame, "acquisitionListPanel.missingToggle", function()
         HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.ACQ_TOGGLE_MISSING })
+    end)
+
+    -- Current zone: the Zone filter, set once to where the player stands. Enabled
+    -- only when acq.currentZones holds a zone, so the set is never empty here.
+    HDG.UI.OnClick(rootFrame, "acquisitionListPanel.currentZone", function()
+        local zones = HDG.Selectors:Call("acq.currentZones", HDG.Store:GetState(), {})  -- exception(false-positive): top-level controller method (not a row factory)
+        HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.ACQ_SET_ZONE_FILTER, payload = { zones = zones } })
     end)
 
     -- Advanced filters toggle: flips the open flag; `visible` binding cascades to children.

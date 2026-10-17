@@ -1,3 +1,30 @@
+## [3.38.0] - 2026-10-18 (October 2026)
+
+### Added
+- **The vendor quantity picker has an "Auto-close when complete" tick box.** Tick it and the picker
+  closes itself once everything is bought; a purchase that stops early stays open. It remembers
+  your choice.
+- **Current zone, on Shop by Vendor and Find Decor.** The button at the end of the second chip row
+  filters the list to the zone you're standing in, buildings with a map of their own included: in
+  the Heart of the Forest it picks Ardenweald. It works with the chips beside it, so Gold, no
+  unlocks plus Current zone is what you can buy right where you are. Clear it with Reset or its
+  Zone tag. Greyed out where HDG knows no vendors. Suggested by Vectality.
+- **Filter by currency.** Advanced Filters has a Currency dropdown listing every currency decor is
+  sold for, from War Resources and Apexis Crystal to tokens like Tricky Treats. Pick one and the
+  list shows only what costs it; pick several to see any of them. Suggested by Vectality.
+
+### Fixed
+- **The House tab's currency widget lists Field Accolade and Corrosive Coin,** two decor
+  currencies from 12.1.5 it didn't know.
+- **Dragon Isles Supplies and Garrison Resources show their own icons.** Dragon Isles Supplies
+  showed a green square, and Garrison Resources borrowed Order Resources' icon.
+- **Lunelle and Acquirer Ta'gosh have locations.** Both showed "location not known yet". Map and
+  Waypoint now take you to Lunelle on the Trunk floor of the Heart of the Forest in Ardenweald, and
+  to Ta'gosh on Oribos's Ring of Fates.
+- **The Heartsbane decor's Hallow's End vendors have locations.** Cordula Wolfgang in Founder's
+  Point and Spew Gutsout in Razorwind Shores showed "location not known yet". Map and Waypoint now
+  take you to each neighborhood's holiday hut.
+
 ## [3.37.0] - 2026-10-17 (October 2026)
 
 ### Added

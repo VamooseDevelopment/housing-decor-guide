@@ -374,6 +374,16 @@ LC.widgets["acquisitionListPanel.factionDropdown"] = {
     binding      = { menu = "acq.factionMenuItems", current = "acq.factionFilter" },
     dispatch     = { type = "ACQ_TOGGLE_FACTION", payloadKey = "faction" },
 }
+-- Currency: what the decor is sold for (acq.currencyOptions -- only currencies some
+-- decor costs, gold left to the "Gold, no unlocks" chip).
+LC.widgets["acquisitionListPanel.currencyDropdown"] = {
+    tooltip = false,
+    kind = "dropdown", ["in"] = "acq.advancedSourceRow", variant = "filter", multi = true,
+    width = "fill", height = 22, order = 30, minWidth = 130,
+    placeholder  = "locale:ACQ_ALL_CURRENCIES",
+    binding      = { menu = "acq.currencyMenuItems", current = "acq.currencyFilter" },
+    dispatch     = { type = "ACQ_TOGGLE_CURRENCY", payloadKey = "currency" },
+}
 -- Advanced-filters toggle: label flips between "+ / - Advanced Filters".
 LC.widgets["acquisitionListPanel.advancedToggle"] = {
     tooltip = false,
@@ -694,6 +704,7 @@ local ACTIVE_FILTER_TAGS = {
     { axis = "preset",    visibleSel = "acq.hasPresetFilter",    textSel = "acq.tagPreset"    },
     { axis = "missing",   visibleSel = "acq.hasMissingFilter",   textSel = "acq.tagMissing"   },
     { axis = "source",    visibleSel = "acq.hasSourceFilter",    textSel = "acq.tagSource"    },
+    { axis = "currency",  visibleSel = "acq.hasCurrencyFilter",  textSel = "acq.tagCurrency"  },
 }
 for i, tag in ipairs(ACTIVE_FILTER_TAGS) do
     LC.widgets["acquisitionListPanel.tag_" .. tag.axis] = {
@@ -729,4 +740,18 @@ LC.widgets["acquisitionListPanel.missingToggle"] = {
     kind = "checkbox", ["in"] = "acq.presetStrip", font = "button",
     text = "locale:ACQ_MISSING_TOGGLE", width = 86, height = 22, order = 21,
     binding = { checked = "acq.missingOnly" },
+}
+-- Row 2's end mirrors row 1's: vdivider + Current zone. Not a preset -- one click
+-- sets the Zone filter to where the player stands (ACQ_SET_ZONE_FILTER), and that
+-- filter ANDs with whichever chip is lit. Greyed where HDG knows no vendors.
+LC.widgets["acquisitionListPanel.zoneDivider"] = {
+    tooltip = false,
+    kind = "vdivider", ["in"] = "acq.presetStrip2",
+    width = 1, height = 16, order = 20,
+}
+LC.widgets["acquisitionListPanel.currentZone"] = {
+    tooltip = { recipe = "AcqCurrentZone" },
+    kind = "button", ["in"] = "acq.presetStrip2", font = "button",
+    text = "locale:ACQ_CURRENT_ZONE", width = "auto", height = 22, order = 21, variant = "tertiary",
+    binding = { enabled = "acq.hasCurrentZones" },
 }

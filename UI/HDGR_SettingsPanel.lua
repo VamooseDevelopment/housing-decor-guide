@@ -69,7 +69,7 @@ local SCALE_MAX  = 1.5
 local RESETTABLE_KEYS = {
     "showMinimapButton", "showCompartment", "showProfessionButtons", "tooltipDecorTag",
     "catalogTooltip", "bagBadge", "materialTooltipItemData",
-    "merchantDecorOverlay", "merchantQtyPicker", "catalogDecorOverlay", "autoDepositLumber", "hideInCombat", "waypointProvider", "scale",
+    "merchantDecorOverlay", "merchantQtyPicker", "merchantQtyPickerAutoClose", "catalogDecorOverlay", "autoDepositLumber", "hideInCombat", "waypointProvider", "scale",
     "debug", "mockTSM", "locale", "fontFamily",
     "zoneScannerEnabled", "zoneScannerPopup", "zoneScannerPopupShopping",
     "zoneScannerChat", "zoneScannerSound", "zoneScannerTrackShopping",

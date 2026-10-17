@@ -161,6 +161,7 @@ R.VendorJump           = { title = "locale:TIP_VENDOR_JUMP_TITLE",           bod
 R.ZoneMapOpen          = { title = "locale:TIP_ZONE_MAP_TITLE",              body = "locale:TIP_ZONE_MAP_BODY" }
 R.ZoneOpenMain         = { title = "locale:TIP_ZONE_OPEN_MAIN_TITLE",        body = "locale:TIP_ZONE_OPEN_MAIN_BODY" }
 R.ZoneTrackShopping    = { title = "locale:TIP_ZONE_TRACK_SHOPPING_TITLE",   body = "locale:TIP_ZONE_TRACK_SHOPPING_BODY", anchor = "ANCHOR_TOP" }
+R.QtyPickerAutoClose   = { title = "locale:TIP_QTYPICKER_AUTO_CLOSE_TITLE",  body = "locale:TIP_QTYPICKER_AUTO_CLOSE_BODY", anchor = "ANCHOR_TOP" }
 
 -- Layouts tab actions (effect-focused -- what each does, not just the label).
 R.LayoutLoad      = { title = "locale:TIP_LAYOUT_LOAD_TITLE",      body = "locale:TIP_LAYOUT_LOAD_BODY",      anchor = "ANCHOR_TOP" }
@@ -335,6 +336,24 @@ R.AcqPreset_recipes     = { title = "locale:TIP_ACQ_PRESET_REC_TITLE",  body = "
 R.AcqPreset_neighborhood = { title = "locale:TIP_ACQ_PRESET_NBH_TITLE", body = "locale:TIP_ACQ_PRESET_NBH_BODY", anchor = "ANCHOR_BOTTOM" }
 R.AcqPreset_ungated      = { title = "locale:TIP_ACQ_PRESET_UNG_TITLE", body = "locale:TIP_ACQ_PRESET_UNG_BODY", anchor = "ANCHOR_BOTTOM" }
 R.AcqMissingToggle      = { title = "locale:TIP_ACQ_MISSING_TITLE",     body = "locale:TIP_ACQ_MISSING_BODY",     anchor = "ANCHOR_BOTTOM" }
+-- Current zone: names the zones a click sets, or why the button is greyed.
+function R.AcqCurrentZone()
+    local state = HDG.Store:GetState()
+    local L     = HDG.Locale
+    local zones = HDG.Selectors:Call("acq.currentZones", state, {})
+    local names = {}
+    for zone in pairs(zones) do names[#names + 1] = zone end
+    if #names == 0 then
+        local here = state.session.zone.zoneLevelName
+        local body = (here ~= "") and L:Get("TIP_ACQ_CURRENT_ZONE_NONE"):format(here)
+            or L:Get("TIP_ACQ_CURRENT_ZONE_NOWHERE")   -- "" = the game names no zone here
+        return { title = L:Get("TIP_ACQ_CURRENT_ZONE_TITLE"), body = body, anchor = "ANCHOR_BOTTOM" }
+    end
+    table.sort(names)
+    return { title = L:Get("TIP_ACQ_CURRENT_ZONE_TITLE"),
+             body  = L:Get("TIP_ACQ_CURRENT_ZONE_BODY"):format(table.concat(names, ", ")),
+             anchor = "ANCHOR_BOTTOM" }
+end
 
 -- ===== + Cart (Decor, Shop by Item, Shop by Vendor) =========================
 -- One word on all three buttons: a player who met "+ Wish" in one tab and

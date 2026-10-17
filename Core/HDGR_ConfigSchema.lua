@@ -40,6 +40,7 @@ setting("CATALOG_TOOLTIP", "catalogTooltip", true, Scope.Profile)
 setting("BAG_BADGE", "bagBadge", true, Scope.Profile)
 setting("MERCHANT_DECOR_OVERLAY", "merchantDecorOverlay", true, Scope.Profile)
 setting("MERCHANT_QTY_PICKER", "merchantQtyPicker", false, Scope.Profile)
+setting("MERCHANT_QTY_PICKER_AUTO_CLOSE", "merchantQtyPickerAutoClose", false, Scope.Profile)
 -- Off by default: SetItemByID on a material row pulls in Blizzard's whole item
 -- block plus every other addon's TooltipDataProcessor lines, which is the
 -- visibility problem the title-only material tooltip was chosen to avoid.

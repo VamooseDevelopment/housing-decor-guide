@@ -2263,8 +2263,11 @@ HDG.WidgetTypes:Register("scrollingTextBox", {
 --     text = "Debug mode",
 --     binding = { checked = "config.debug" },
 --     options = { width = 24 } }
+--
+-- HDG.UI:Checkbox is the one builder: the kind below calls it, and bespoke
+-- frames (the vendor quantity picker) call it directly and size it themselves.
 
-local function buildCheckbox(parent, spec)
+function HDG.UI:Checkbox(parent, labelText, font)
     -- Wrapping Frame fills the layout slot's full width. The inner CheckButton
     -- stays at its template's natural size (24x24) so the textures don't
     -- stretch into smeared squiggles. The label sits to the right of the
@@ -2277,12 +2280,11 @@ local function buildCheckbox(parent, spec)
     check:SetSize(24, 24)
     check:SetPoint("LEFT", container, "LEFT", 0, 0)
 
-    local labelText = spec.text
     local label = container:CreateFontString(nil, "OVERLAY")
     -- Theme the label (scheme font + Text color via the registry) instead of
     -- the Blizzard GameFontNormal default, which renders gold and ignores the
-    -- scheme. Font role from spec.font, defaulting to "body".
-    applyFontToFS(label, spec.font or "body")
+    -- scheme. Font role from the caller, defaulting to "body".
+    applyFontToFS(label, font or "body")   -- exception(optional): font declared in checkbox specFields; absent = body
     label:SetPoint("LEFT", check, "RIGHT", 4, 0)
     label:SetPoint("RIGHT", container, "RIGHT", -4, 0)
     label:SetJustifyH("LEFT")
@@ -2332,7 +2334,7 @@ local function dispatchCheckbox(widget, values)
 end
 
 HDG.WidgetTypes:Register("checkbox", {
-    build    = function(parent, spec) return buildCheckbox(parent, spec) end,
+    build    = function(parent, spec) return HDG.UI:Checkbox(parent, spec.text, spec.font) end,
     dispatch = { fields = { "checked" }, push = dispatchCheckbox },
     -- input.events advertises the OnClick handler controllers attach.
     input    = { events = { OnClick = true } },

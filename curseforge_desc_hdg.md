@@ -12,12 +12,13 @@
 
 ---
 
-## What's New in v3.37.0
+## What's New in v3.38.0
 
-- **The Zone Scanner names the zone you're in** in its title, such as "Zone Scanner: Eversong Woods". Inside a building or a cave with its own map, it names the zone around you.
-- **A shopping cart tick beside Map All on the Zone Scanner.** Untick it and the scanner shows only decor you haven't collected. Shopping-list items drop out of its list, and a zone with nothing but shopping-list items no longer alerts you.
-- **Click the HDG icon on the Zone Scanner to open the main window.**
-- **Tick boxes show their tooltips when you hover them,** including Missing on Shop by Vendor and Hide automatic saves on Blueprints.
+- **Current zone, on Shop by Vendor and Find Decor.** One click filters the list to the zone you're standing in, including buildings with a map of their own: in the Heart of the Forest it picks Ardenweald. It works with the chips beside it, so Gold, no unlocks plus Current zone shows what you can buy right where you are.
+- **Filter by currency.** Advanced Filters has a Currency dropdown listing every currency decor is sold for, from War Resources and Apexis Crystal to tokens like Tricky Treats. Pick one and the list shows only what costs it.
+- **The vendor quantity picker can close itself.** Tick "Auto-close when complete" and it closes once everything is bought. A purchase that stops early stays open.
+- **More vendors have locations:** Lunelle in the Heart of the Forest, Acquirer Ta'gosh in Oribos, and the Hallow's End vendors Cordula Wolfgang and Spew Gutsout in the neighborhoods. Map and Waypoint now take you to them.
+- **The House tab's currency widget lists Field Accolade and Corrosive Coin,** and Dragon Isles Supplies and Garrison Resources show their own icons.
 
 ## The Decor Catalog
 
@@ -33,7 +34,7 @@
 
 ## Acquire -- where every piece comes from
 
-**Shop by Vendor:** browse every decor vendor (searchable; filter by faction, expansion, zone, reputation, or source). Each vendor shows what they sell -- items *and* recipe scrolls -- with gold/currency costs, multiple payment options, and live **[QUEST] / [ACH] / [REP]** gate chips that brighten as you meet them. A map thumbnail plus **Waypoint** and **Map** buttons get you there; **Map N Vendors** pins a whole filtered list at once.
+**Shop by Vendor:** browse every decor vendor (searchable; filter by faction, expansion, zone, reputation, source, or the currency they take, and one click narrows it to the zone you're in). Each vendor shows what they sell -- items *and* recipe scrolls -- with gold/currency costs, multiple payment options, and live **[QUEST] / [ACH] / [REP]** gate chips that brighten as you meet them. A map thumbnail plus **Waypoint** and **Map** buttons get you there; **Map N Vendors** pins a whole filtered list at once.
 
 **Find Decor:** search any piece and see exactly how to get it -- a typed source line with the reputation faction *and your live progress*, a clickable achievement link, the **alt who completed the quest** (account-wide), craft/drop tags, and an "Available from" list of every vendor that sells it. **+ Cart**, copy Wowhead links, or jump straight to a vendor.
 
@@ -82,7 +83,7 @@ A companion window injects into Blizzard's House Editor so you can **place decor
 
 ## Tools
 
-- **Shopping** -- a floating, multi-list shopping manager grouped by zone and vendor, with "Waypoint All" and share/import codes. Click an item to open its recipe, or its Decor entry if it isn't crafted. At a vendor, "Buy All" purchases every gold-priced list item in one paced pass, and right-clicking a gold-priced decor item opens a quantity picker. Items come off the list as you buy them.
+- **Shopping** -- a floating, multi-list shopping manager grouped by zone and vendor, with "Waypoint All" and share/import codes. Click an item to open its recipe, or its Decor entry if it isn't crafted. At a vendor, "Buy All" purchases every gold-priced list item in one paced pass, and right-clicking a gold-priced decor item opens a quantity picker, which can close itself once it's done. Items come off the list as you buy them.
 - **Zone alerts** -- entering a zone with a decor vendor (selling something you're missing or have listed) can pop a window, ping chat, and play a sound -- each toggle optional. The Zone Scanner window names the zone, and a cart tick turns shopping-list matching on or off.
 - **Your Data** -- collection KPIs, achievement progress (decor, coupons, lumber milestones), and full crafting/farming history.
 - **Config** -- multiple color themes with a live preview, UI scaling, and account profiles.
@@ -108,7 +109,7 @@ A companion window injects into Blizzard's House Editor so you can **place decor
 ---
 
 **Author:** Vamoose
-**Version:** 3.37.0
+**Version:** 3.38.0
 **Game Version:** 12.1.0 (Midnight)
 **Source / Issues:** https://github.com/VamooseDevelopment/housing-decor-guide
 **Discord:** https://discord.gg/RWZaxJaHFP

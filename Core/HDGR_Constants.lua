@@ -221,7 +221,7 @@ HDG.Constants = {
     -- Expansion string must match a Palette `expansion.<name>` color key.
     HOUSING_DECOR_CURRENCY_DATA = {
         { id =  823, name = "Apexis Crystal",       icon = 1061300, expansion = "Warlords of Draenor" },
-        { id =  824, name = "Garrison Resources",   icon = 1397630, expansion = "Warlords of Draenor" },
+        { id =  824, name = "Garrison Resources",   icon = 1005027, expansion = "Warlords of Draenor" },
         { id = 1155, name = "Ancient Mana",         icon = 1377394, expansion = "Legion"              },
         { id = 1220, name = "Order Resources",      icon = 1397630, expansion = "Legion"              },
         { id = 1508, name = "Veiled Argunite",      icon = 1064188, expansion = "Legion"              },
@@ -231,7 +231,7 @@ HDG.Constants = {
         { id = 1792, name = "Honor",                icon = 1455894, expansion = "Classic"             },
         { id = 1803, name = "Echoes of Ny'alotha",  icon = 3069889, expansion = "Battle for Azeroth"  },
         { id = 1813, name = "Reservoir Anima",      icon = 3528288, expansion = "Shadowlands"         },
-        { id = 2003, name = "Dragon Isles Supplies",icon = 2006578, expansion = "Dragonflight"        },
+        { id = 2003, name = "Dragon Isles Supplies",icon = 2065578, expansion = "Dragonflight"        },
         { id = 2118, name = "Elemental Overflow",   icon =  134388, expansion = "Dragonflight"        },
         { id = 2657, name = "Mysterious Fragment",  icon = 1362650, expansion = "Dragonflight"        },
         { id = 2803, name = "Undercoin",            icon =  133858, expansion = "Midnight"            },
@@ -244,6 +244,9 @@ HDG.Constants = {
         { id = 3379, name = "Brimming Arcana",      icon =  132849, expansion = "Midnight"            },
         { id = 3392, name = "Remnant of Anguish",   icon = 4554435, expansion = "Midnight"            },
         { id = 3393, name = "Illusionary Coin",     icon = 1717106, expansion = "Midnight"            },
+        -- From the 12.1.5 catalog's Cost: lines (2026-10-18); name + icon from DB2 CurrencyTypes.
+        { id = 3405, name = "Field Accolade",       icon = 2459456, expansion = "Midnight"            },
+        { id = 3448, name = "Corrosive Coin",       icon = 8032876, expansion = "Midnight"            },
     },
 
     -- ===== Menagerie (House > Pets) =====
@@ -821,6 +824,9 @@ HDG.Constants = {
         ACQ_TOGGLE_REP              = "HDGR_ACQ_TOGGLE_REP",         -- payload: { rep }
         ACQ_TOGGLE_SOURCE           = "HDGR_ACQ_TOGGLE_SOURCE",      -- payload: { source }
         ACQ_TOGGLE_FACTION          = "HDGR_ACQ_TOGGLE_FACTION",     -- payload: { faction }
+        ACQ_TOGGLE_CURRENCY         = "HDGR_ACQ_TOGGLE_CURRENCY",    -- payload: { currency } (a Format.CostKey)
+        -- Current zone button: replaces the whole Zone set at once. payload: { zones = set }
+        ACQ_SET_ZONE_FILTER         = "HDGR_ACQ_SET_ZONE_FILTER",
 
         -- ===== Structured logging =====
         LOG_PUSH            = "HDGR_LOG_PUSH",            -- payload: { tag, level, text, timestamp, duration, metadata }

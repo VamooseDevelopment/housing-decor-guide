@@ -55,9 +55,9 @@ end
 local FRAME_W = 360
 local function _build()
     local f = HDG.UI:Frame(_G.UIParent)
-    -- 256 tall: room for a two-line decor name AND a two-line stopped-run note
-    -- above the buttons.
-    f:SetSize(FRAME_W, 256)
+    -- 284 tall: room for a two-line decor name AND a two-line stopped-run note
+    -- above the auto-close row and the buttons.
+    f:SetSize(FRAME_W, 284)
     f:SetPoint("CENTER")
     f:SetFrameStrata("DIALOG")
     f:EnableMouse(true)                     -- swallow clicks so the merchant behind doesn't get them
@@ -137,6 +137,17 @@ local function _build()
     cancel:SetSize(90, 24); cancel:SetPoint("BOTTOMRIGHT", -24, 16)
     cancel:SetScript("OnClick", function() QP:_Close(true) end)   -- stop any running buy, then close
 
+    -- Auto-close: its own row just above the buttons, below where a stopped-run
+    -- note can wrap to. A setting, so it is remembered between vendors and sessions.
+    local autoClose = HDG.UI:Checkbox(f, HDG.Locale:Get("QTYPICKER_AUTO_CLOSE"), "small")
+    autoClose:SetSize(FRAME_W - 48, 24)
+    autoClose:SetPoint("BOTTOMLEFT", 24, 46)
+    autoClose:SetScript("OnClick", function()
+        HDG.Config:Set("MERCHANT_QTY_PICKER_AUTO_CLOSE", autoClose:GetChecked())
+    end)
+    HDG.TooltipEngine:Attach(autoClose, { recipe = "QtyPickerAutoClose" })
+    f._autoClose = autoClose
+
     -- Defensive: any hide path stops the timer + clears buying state.
     f:SetScript("OnHide", function(self)
         self:SetScript("OnUpdate", nil)
@@ -191,6 +202,9 @@ function QP:_OnProgress()
             for i = 1, WHEEL_COUNT do f._numFS[i]:SetText("0") end
             f._buy:SetText(_G.CLOSE or "Close")
             QP:_RenderStats()
+            -- Only a run that bought everything closes itself: a stopped one stays
+            -- open with the remainder dialled in.
+            if HDG.Store:GetState().account.config.merchantQtyPickerAutoClose then QP:_Close(false) end
         else
             -- Stopped/stalled mid-batch: stay open, pre-fill the wheels with the
             -- REMAINING count so one more Buy click continues from here.
@@ -251,6 +265,7 @@ function QP:Open(itemID)
     f._buying, f._done, f._stopReason = false, false, nil   -- fresh dialog: not in a buy
     f:SetScript("OnUpdate", nil)
     f._stats:SetText("")
+    f._autoClose:SetChecked(st.account.config.merchantQtyPickerAutoClose)
     f._title:SetText(stock.name or "?")
     -- Opens on 1, not 0: nobody opens this dialog to buy nothing, and 000 meant
     -- the Buy button read "Buy 0" and sat disabled until you clicked a wheel.
