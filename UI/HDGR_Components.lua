@@ -39,6 +39,28 @@ local function SetDataProvider(scrollBox, provider, retainScroll)
     end
 end
 
+-- ===== List data while the window is closed ==================================
+-- A list keeps its data provider, and with it every item table, after its window
+-- closes: Blizzard's per-row accessor closures share the view, so nothing frees
+-- until the rows themselves are released (memory census 2026-10-19: 9.4 MB after
+-- browsing). Removing the provider through the ScrollBox releases the rows;
+-- clearing _sameItems' record makes the next push refill the list, which then
+-- scrolls back to where it was. Used by the list kinds' `release`.
+function HDG.UI.ReleaseListData(widget, scrollBox)
+    if not scrollBox:HasDataProvider() then return end
+    widget._hdgrReleasedScroll = scrollBox:GetScrollPercentage()
+    scrollBox:RemoveDataProvider()
+    widget._hdgrLastItems = nil
+end
+
+-- After a refill, put a released list back at its scroll position.
+function HDG.UI.RestoreListScroll(widget, scrollBox)
+    local pct = widget._hdgrReleasedScroll
+    if not pct then return end
+    widget._hdgrReleasedScroll = nil
+    scrollBox:SetScrollPercentage(pct, ScrollBoxConstants.NoScrollInterpolation)
+end
+
 -- Apply a Theme font role to a widget. Errors loudly if role is missing.
 -- No-ops when SetFontObject is absent (test mock; production always has it).
 local function applyFontRole(widget, role)
@@ -58,14 +80,30 @@ local function applyFontRole(widget, role)
 end
 HDG.UI.applyFontRole = applyFontRole
 
+-- A font-face change re-renders text in place through the shared font objects,
+-- but auto-sized widgets measured their text once (at build, or when their
+-- binding last pushed), so labels overflowed their slots until /reload.
+-- Re-measure every widget of one window that measures itself, before Theme's
+-- re-layout of it.
+function HDG.UI.RefreshIntrinsicWidths(root)
+    if not root then return end  -- exception(nullable): the main window is built on first open
+    for _, widget in pairs(root.widgets) do
+        -- exception(false-positive): heterogeneous widget walk -- RefreshIntrinsicWidth marks the kinds that measure text
+        if widget.RefreshIntrinsicWidth then widget:RefreshIntrinsicWidth() end
+    end
+end
+
 -- Column header backdrop: surface.panel_header rect behind a FontString cell.
 -- Hidden by default; caller calls bg:Show() for header rows.
 function HDG.UI.makeColumnHeaderBg(parent, anchor)
     local bg = parent:CreateTexture(nil, "BACKGROUND")
     bg:SetPoint("TOPLEFT",     anchor, "TOPLEFT",     -2, 1)
     bg:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT",  2, -1)
-    local c = HDG.Theme:GetColor("surface.panel_header")
-    bg:SetColorTexture(c.r, c.g, c.b, c.a)
+    -- White fill tinted by ToneTexture, so a scheme switch re-tints it: a baked
+    -- SetColorTexture kept the old scheme's header colour until /reload.
+    bg:SetColorTexture(1, 1, 1, 1)
+    bg._hdgrToneToken = "surface.panel_header"
+    HDG.Theme:Register(bg, "ToneTexture")
     bg:Hide()
     return bg
 end
@@ -247,13 +285,17 @@ end
 -- selector hands back the SAME table on a hit. Rebuilding Blizzard's
 -- DataProvider for an identical table released and re-acquired every visible
 -- row for nothing (2026-09-13 allocation audit). Identity is the right test
--- and the only one allowed: a selector that changed its answer returns a new
+-- for the data: a selector that changed its answer returns a new
 -- table (purity), so a same-object push carries no new information. The
 -- provider already holds a reference to the items table, so remembering it on
 -- the widget retains nothing extra.
+-- Same table but painted under an older scheme/font is NOT the same: rows bake
+-- Theme colours (ColorCode) into their text at Configure, and a memoized list
+-- selector hands back the same table across a scheme switch.
 local function _sameItems(widget, items)
-    if widget._hdgrLastItems == items then return true end
-    widget._hdgrLastItems = items
+    local gen = HDG.Theme.paintGeneration
+    if widget._hdgrLastItems == items and widget._hdgrLastPaintGen == gen then return true end
+    widget._hdgrLastItems, widget._hdgrLastPaintGen = items, gen
     return false
 end
 
@@ -342,7 +384,8 @@ function HDG.UI:Label(parent, text, font, justifyH, optsTable)
     end
 
     HDG.Theme:Register(fs, role)
-    _updateLabelIntrinsicWidth(fs)   -- seed _intrinsicWidth for "auto" layout sizing
+    fs.RefreshIntrinsicWidth = _updateLabelIntrinsicWidth   -- re-measured on a font-face change
+    fs:RefreshIntrinsicWidth()   -- seed _intrinsicWidth for "auto" layout sizing
     return fs
 end
 
@@ -839,30 +882,67 @@ end
 -- Menu items: { text, value } (radio default) + { kind="title"|"divider"|"checkbox" }.
 -- See Reference/UI_HOW_TO.md s34 for the full spec.
 
-local function buildDropdownOnSelect(spec)
-    -- Exactly one dispatch shortcut required (closed-schema, loud at build time).
-    local hasTransient = spec.setTransient ~= nil
-    local hasConfig    = spec.setConfig    ~= nil
-    local hasDispatch  = spec.dispatch     ~= nil
-    local count = (hasTransient and 1 or 0) + (hasConfig and 1 or 0) + (hasDispatch and 1 or 0)
-    if count ~= 1 then
-        error("dropdown spec: exactly one of {setTransient, setConfig, dispatch} required", 2)
-    end
-    if hasTransient then
-        local view = spec.setTransient.view
-        local key  = spec.setTransient.key
-        if type(view) ~= "string" or type(key) ~= "string" then
-            error("dropdown spec: setTransient requires { view = string, key = string }", 2)
+-- The select shortcut of a dropdown or radioGroup spec: its fields, and what
+-- each must name.
+local ON_SELECT_FIELDS = {
+    setTransient = { view = true, key = true },
+    setConfig    = { key = true },
+    dispatch     = { type = true, payloadKey = true },
+}
+local ON_SELECT_CHECKS = {
+    setTransient = function(s)
+        if type(s.view) ~= "string" or type(s.key) ~= "string" then
+            return "setTransient requires { view = string, key = string }"
         end
+    end,
+    -- CONFIG_SET errors on a key the schema does not hold.
+    setConfig = function(s)
+        if type(s.key) ~= "string" then return "setConfig requires { key = string }" end
+        if HDG.ConfigSchema.ScopeBy[s.key] == nil then
+            return ("setConfig.key %q is not in HDG.ConfigSchema"):format(s.key)
+        end
+    end,
+    dispatch = function(s)
+        if type(s.type) ~= "string" or type(s.payloadKey) ~= "string" then
+            return "dispatch requires { type = string, payloadKey = string }"
+        end
+        if not HDG.Constants.ACTIONS[s.type] then
+            return ("dispatch.type %q is not in HDG.Constants.ACTIONS"):format(s.type)
+        end
+    end,
+}
+
+-- Exactly one shortcut, naming a real action or config key. Returns the problem
+-- or nil: the build errors on it, and Layout:Validate (the kinds' checkSpec)
+-- reports it before the tab is ever opened.
+local function checkOnSelectSpec(spec)
+    local named
+    for field in pairs(ON_SELECT_FIELDS) do
+        if spec[field] ~= nil then
+            if named then return "exactly one of {setTransient, setConfig, dispatch} required" end
+            named = field
+        end
+    end
+    if not named then return "exactly one of {setTransient, setConfig, dispatch} required" end
+    local shortcut = spec[named]
+    if type(shortcut) ~= "table" then return ("%s must be a table"):format(named) end
+    for k in pairs(shortcut) do
+        if not ON_SELECT_FIELDS[named][k] then return ("%s has unknown field %q"):format(named, tostring(k)) end
+    end
+    return ON_SELECT_CHECKS[named](shortcut)
+end
+
+local function buildDropdownOnSelect(spec)
+    local problem = checkOnSelectSpec(spec)
+    if problem then error("dropdown spec: " .. problem, 2) end
+    if spec.setTransient then
+        local view, key = spec.setTransient.view, spec.setTransient.key
         return function(value)
             HDG.ControllerHelpers.Mechanics.SetUITransientView(view, key, value)
         end
     end
-    if hasConfig then
+    if spec.setConfig then
         local key = spec.setConfig.key
-        if type(key) ~= "string" then
-            error("dropdown spec: setConfig requires { key = string }", 2)
-        end
         local resolved = HDG.Constants.ACTIONS.CONFIG_SET
         return function(value)
             HDG.Store:Dispatch({
@@ -871,18 +951,8 @@ local function buildDropdownOnSelect(spec)
             })
         end
     end
-    local actType    = spec.dispatch.type
+    local resolved   = HDG.Constants.ACTIONS[spec.dispatch.type]
     local payloadKey = spec.dispatch.payloadKey
-    if type(actType) ~= "string" or type(payloadKey) ~= "string" then
-        error("dropdown spec: dispatch requires { type = string, payloadKey = string }", 2)
-    end
-    -- Resolve the canonical ACTION string at build time -- crashes loud here
-    -- if the constant doesn't exist, not silently on first click.
-    local resolved = HDG.Constants.ACTIONS[actType]
-    if not resolved then
-        error(("dropdown spec: dispatch.type %q is not in HDG.Constants.ACTIONS"):format(
-            tostring(actType)), 2)
-    end
     return function(value)
         HDG.Store:Dispatch({
             type    = resolved,
@@ -1071,7 +1141,11 @@ local function buildDropdown(parent, spec)
     end
 
     local onSelect = buildDropdownOnSelect(spec)
-    dd:SetupMenu(buildDropdownGenerator(spec.binding.menu, spec.binding.current, onSelect))
+    dd._hdgrMenuGenerator = buildDropdownGenerator(spec.binding.menu, spec.binding.current, onSelect)
+    -- Born released: the first push sets the menu up (dispatchDropdown). SetupMenu
+    -- generates at once for a shown frame and a new one is born shown, so setting
+    -- it up here built the menu at build and again at the first push.
+    dd._hdgrMenuReleased = true
     return dd
 end
 
@@ -1106,6 +1180,26 @@ local function resolveMultiFilterLabel(menu, set, placeholder)
     return noun .. " [" .. n .. "]"
 end
 
+-- Does this push leave the menu showing what it already shows? A GenerateMenu builds
+-- every option's element description again, and a push comes on any change to the
+-- menu's read closure, mostly not to the options. Compared option by option: most menu
+-- selectors aren't memoized, so a fresh table can carry the same options. Records this
+-- push as the last one either way.
+local function _sameMenu(widget, menu, current)
+    local gen = HDG.Theme.paintGeneration
+    local last, lastCurrent, lastGen = widget._hdgrLastMenu, widget._hdgrLastCurrent, widget._hdgrLastMenuGen
+    widget._hdgrLastMenu, widget._hdgrLastCurrent, widget._hdgrLastMenuGen = menu, current, gen
+    if type(menu) ~= "table" or type(last) ~= "table" then return false end   -- exception(nullable): a menu selector can answer nil (resolveFilterLabel takes it too)
+    if #menu ~= #last or lastCurrent ~= current or lastGen ~= gen then return false end
+    for i, opt in ipairs(menu) do
+        local was = last[i]
+        if opt.kind ~= was.kind or opt.text ~= was.text or opt.value ~= was.value or opt.isAll ~= was.isAll then
+            return false
+        end
+    end
+    return true
+end
+
 local function dispatchDropdown(widget, values)
     if not widget then return end
     -- RADIO (single-select) menus snapshot `current` at generate time, so they need a
@@ -1114,7 +1208,13 @@ local function dispatchDropdown(widget, values)
     -- WITHOUT a rebuild -- and rebuilding an OPEN *scrolling* checkbox menu re-lays-out the
     -- scrollbox on every toggle, which re-fires UpdateToMenuSelections -> UpdateText and
     -- garbles the trigger text (the scroll-bar-only corruption). So skip it for multi.
-    if not widget._hdgrMulti then
+    if widget._hdgrMenuReleased then
+        -- Released while the window was closed: put the generator back. SetupMenu
+        -- generates at once for a shown dropdown, so nothing more to do here.
+        widget._hdgrMenuReleased = nil
+        widget:SetupMenu(widget._hdgrMenuGenerator)
+        _sameMenu(widget, values.menu, values.current)   -- record what that generated
+    elseif not widget._hdgrMulti and not _sameMenu(widget, values.menu, values.current) then
         widget:GenerateMenu()
     end
     if widget._hdgrVariant == "filter" then
@@ -1446,6 +1546,19 @@ local function dispatchModelPreview(widget, values)
     widget:LoadPreviewInfo(info, dyes)
 end
 
+-- The scene is inset by all four sides, read unconditionally at build.
+local INSET_SIDES = { top = true, right = true, bottom = true, left = true }
+local function checkModelPreviewSpec(spec)
+    local insets = spec.sceneInsets
+    if type(insets) ~= "table" then return "sceneInsets is required ({ top, right, bottom, left })" end
+    for side in pairs(insets) do
+        if not INSET_SIDES[side] then return ("sceneInsets has unknown side %q"):format(tostring(side)) end
+    end
+    for side in pairs(INSET_SIDES) do
+        if type(insets[side]) ~= "number" then return ("sceneInsets.%s must be a number"):format(side) end
+    end
+end
+
 HDG.WidgetTypes:Register("modelPreview", {
     build    = function(parent, spec) return buildModelPreview(parent, spec) end,
     -- speciesID: the Pets browser's binding. Everything else (registered-scene
@@ -1455,6 +1568,7 @@ HDG.WidgetTypes:Register("modelPreview", {
     dispatch = { fields = { "itemID", "variantKey", "bg", "speciesID" }, push = dispatchModelPreview },
     -- No skin: atlas bg owns the chrome; theme tinting would fight catalog-list atlas.
     requiresFont = function() return false end,
+    checkSpec = checkModelPreviewSpec,
     destroy = destroyWidget,
     specFields = { "showControls", "showCorbels", "showAtlas", "bgTile",
                    "sceneInsets", "placeholder", "defaultSceneID", "configurableBg" },
@@ -1987,11 +2101,20 @@ function HDG.UI:PetStage()
 end
 
 HDG.WidgetTypes:Register("dropdown", {
+    -- Closed window: drop the generated menu (Blizzard keeps every option's element
+    -- description on the button; 2.5 MB over 22 dropdowns, memory census 2026-10-19).
+    -- Opening a menu always regenerates it, and the next push sets the generator back.
+    release = function(widget)
+        widget:ClearMenuState()
+        widget._hdgrMenuReleased = true
+        widget._hdgrLastMenu = nil   -- the reopen push regenerates and records again
+    end,
     build = buildDropdown,
     -- Both fields trigger GenerateMenu so the open popup repaints on external state change.
     dispatch = { fields = { "menu", "current" }, push = dispatchDropdown },
     destroy = destroyWidget,
     requiresFont = function() return false end,
+    checkSpec = checkOnSelectSpec,
     specFields = {
         "placeholder", "selectionPrefix", "selectionStripSuffix", "variant", "multi",
         "minWidth", "width", "height",
@@ -2034,24 +2157,32 @@ local function _makeRadio(group, value, label)
     return btn
 end
 
+-- Lay the radios out left to right at their labels' natural width, then stamp the
+-- content width (item widths + inter-item gaps, no trailing gap) so a
+-- width="auto" radioGroup gets a real slot on the next layout pass. Without this,
+-- getAlong treats an unreported intrinsic as "fill". Fixed-width radios ignore it.
+-- Re-run as RefreshIntrinsicWidth when the font face changes.
+local function _placeRadios(group)
+    local x = 0
+    for _, r in ipairs(group._radios) do
+        r:ClearAllPoints()
+        r:SetPoint("LEFT", group, "LEFT", x, 0)
+        local w = 16 + 4 + (_naturalTextWidth(r.label, r.label:GetText()) or 30)
+        r:SetWidth(w)
+        x = x + w + group._spacing
+    end
+    group._intrinsicWidth = (x > 0) and (x - group._spacing) or 0
+end
+
 -- Build radios once (static options), then only repaint dots.
 local function _ensureRadios(group, items)
     if group._built then return end
-    local x = 0
     for _, opt in ipairs(items) do
-        local r = _makeRadio(group, opt.value, opt.text)
-        r:ClearAllPoints()
-        r:SetPoint("LEFT", group, "LEFT", x, 0)
-        local w = 16 + 4 + (_naturalTextWidth(r.label, opt.text) or 30)
-        r:SetWidth(w)
-        x = x + w + group._spacing
-        group._radios[#group._radios + 1] = r
+        group._radios[#group._radios + 1] = _makeRadio(group, opt.value, opt.text)
     end
     group._built = true
-    -- Stamp the content width (item widths + inter-item gaps, no trailing gap) so a
-    -- width="auto" radioGroup gets a real slot on the next layout pass. Without this,
-    -- getAlong treats an unreported intrinsic as "fill". Fixed-width radios ignore it.
-    group._intrinsicWidth = (x > 0) and (x - group._spacing) or 0
+    group.RefreshIntrinsicWidth = _placeRadios
+    _placeRadios(group)
 end
 
 local function buildRadioGroup(parent, spec)
@@ -2077,6 +2208,7 @@ HDG.WidgetTypes:Register("radioGroup", {
     dispatch = { fields = { "menu", "current" }, push = dispatchRadioGroup },
     destroy  = destroyWidget,
     requiresFont = function() return true end,   -- radio labels need a font role
+    checkSpec = checkOnSelectSpec,
     specFields = {
         "orientation", "spacing", "font", "width", "height",
         "dispatch", "setTransient", "setConfig",
@@ -3330,6 +3462,7 @@ function HDG.UI:ScrollBox(parent, opts)
         local newProvider = CreateDataProvider(items or {})
         SetDataProvider(self.scrollBox, newProvider, retainScroll and ScrollBoxConstants and ScrollBoxConstants.RetainScrollPosition or nil)
         self.provider = newProvider
+        HDG.UI.RestoreListScroll(self, self.scrollBox)
         -- Selection re-sync: behavior's internal pointer is now stale (old
         -- eds gone, new eds in their place). Controllers that want to restore
         -- a Store-tracked selection after a filter change call
@@ -3486,7 +3619,25 @@ function HDG.UI:ScrollBox(parent, opts)
     return host
 end
 
+-- `selection` on a scrollbox or treeList: true, or the SelectionBehavior flags
+-- it sets, as booleans.
+local SELECTION_FIELDS = { deselectable = true, multi = true }
+local function checkSelectionSpec(spec)
+    local sel = spec.selection
+    if sel == nil or sel == true then return nil end
+    if type(sel) ~= "table" then return "selection must be true or { deselectable, multi }" end
+    for k, v in pairs(sel) do
+        if not SELECTION_FIELDS[k] or type(v) ~= "boolean" then
+            return ("selection.%s: only deselectable and multi, each true or false"):format(tostring(k))
+        end
+    end
+end
+
 HDG.WidgetTypes:Register("scrollbox", {
+    release = function(widget)
+        HDG.UI.ReleaseListData(widget, widget.scrollBox)
+        widget.provider = nil
+    end,
     build = function(parent, spec)
         local rowKind = spec.rowKind
 
@@ -3533,6 +3684,7 @@ HDG.WidgetTypes:Register("scrollbox", {
     end,
     dispatch = { fields = { "items" }, push = dispatchScrollbox },
     skin = "Frame",
+    checkSpec = checkSelectionSpec,
     specFields = { "rowKind", "rowHeight", "spacing", "template", "selection" },
 })
 
@@ -3575,6 +3727,7 @@ local function dispatchCardGrid(widget, values, dispatchCtx)
 end
 
 HDG.WidgetTypes:Register("cardGrid", {
+    release = function(widget) HDG.UI.ReleaseListData(widget, widget._scrollBox) end,
     build = function(parent, spec)
         if not (HDG.CardGrid.Create) then
             error("cardGrid factory: HDG.CardGrid module not loaded", 2)
@@ -3592,6 +3745,7 @@ HDG.WidgetTypes:Register("cardGrid", {
     end,
     dispatch = { fields = { "items" }, push = dispatchCardGrid },
     skin = "Frame",
+    resolveCellKind = function(name) return HDG.CardGrid:GetCellKind(name) end,
     specFields = { "cellKind", "cellSize", "cellSpacing", "rowSpacing", "cellsPerRow" },
 })
 
@@ -3717,6 +3871,7 @@ HDG.WidgetTypes:Register("filmstrip", {
     destroy = destroyWidget,
     -- No skin: the enclosing inset section provides the chrome; the cells carry
     -- their own visuals (a ScrollFrame has no SetBackdrop for the Frame skin).
+    resolveCellKind = function(name) return HDG.CardGrid:GetCellKind(name) end,
     specFields = { "cellKind", "cellSize", "cellSpacing" },
 })
 
@@ -3738,16 +3893,14 @@ local function dispatchTreeList(widget, values, dispatchCtx)
     if values.items == nil or not widget._treeListCfg then return end
     if _sameItems(widget, values.items) then return end
     if HDG.TreeList then  -- exception(false-positive): HDG.TreeList is TOC-guaranteed at runtime; headless test mock omits it
-        local actionType = dispatchCtx and dispatchCtx.actionType
-        local meta = actionType and HDG.Store:GetActionMeta(actionType)
         HDG.TreeList:SetItems(widget, values.items, {
             retainScroll = _shouldRetainScroll(dispatchCtx),
-            collapseOnly = meta and meta.treeCollapseOnly == true,
         })
     end
 end
 
 HDG.WidgetTypes:Register("treeList", {
+    release = function(widget) HDG.UI.ReleaseListData(widget, widget._scrollBox) end,
     build = function(parent, spec)
         if not (HDG.TreeList.Create) then
             error("treeList factory: HDG.TreeList module not loaded", 2)
@@ -3769,6 +3922,7 @@ HDG.WidgetTypes:Register("treeList", {
     end,
     dispatch = { fields = { "items" }, push = dispatchTreeList },
     skin = "Frame",
+    checkSpec = checkSelectionSpec,
     specFields = { "indent", "rowHeight", "rowSpacing", "selection", "fixedGutter", "noScrollBar" },
 })
 
@@ -3814,6 +3968,7 @@ HDG.WidgetTypes:Register("chipStrip", {
     end,
     dispatch = { fields = { "items" }, push = dispatchChipStrip },
     skin = "Frame",
+    resolveCellKind = function(name) return HDG.ChipStrip:GetCellKind(name) end,
     specFields = { "cellKind", "chipHeight", "chipMinWidth", "chipPadH",
                    "horizontalSpacing", "verticalSpacing", "orientation",
                    "chipConstructor", "chipBinder", "chipSizer" },

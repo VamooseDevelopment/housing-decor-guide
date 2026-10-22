@@ -12,13 +12,15 @@
 
 ---
 
-## What's New in v3.38.0
+## What's New in v3.39.0
 
-- **Current zone, on Shop by Vendor and Find Decor.** One click filters the list to the zone you're standing in, including buildings with a map of their own: in the Heart of the Forest it picks Ardenweald. It works with the chips beside it, so Gold, no unlocks plus Current zone shows what you can buy right where you are.
-- **Filter by currency.** Advanced Filters has a Currency dropdown listing every currency decor is sold for, from War Resources and Apexis Crystal to tokens like Tricky Treats. Pick one and the list shows only what costs it.
-- **The vendor quantity picker can close itself.** Tick "Auto-close when complete" and it closes once everything is bought. A purchase that stops early stays open.
-- **More vendors have locations:** Lunelle in the Heart of the Forest, Acquirer Ta'gosh in Oribos, and the Hallow's End vendors Cordula Wolfgang and Spew Gutsout in the neighborhoods. Map and Waypoint now take you to them.
-- **The House tab's currency widget lists Field Accolade and Corrosive Coin,** and Dragon Isles Supplies and Garrison Resources show their own icons.
+- **HDG uses far less memory.** It does less when you log in, keeps the catalog in a much more compact form, and closing the window gives back what its lists and menus were holding. Everything looks and works the same.
+- **The zone alert works from login.** Log in to a zone with decor you haven't collected and the alert and the Zone Scanner's list appear about 30 seconds later, without opening HDG first.
+- **Find Decor shows each crafted decor's profession,** and searching for a profession, such as Tailoring, finds the decor it makes.
+- **Decor you've just collected shows as collected,** at vendors too, without a reload.
+- **Switching colour scheme or font updates everything at once,** instead of waiting for a reload.
+- **Keys still reach the game in combat** when Hide in combat is turned off.
+- **Updating straight from HDG 2.x (before 3.0, June 2026) now starts you fresh.** Anyone who has run 3.0 or later keeps everything.
 
 ## The Decor Catalog
 
@@ -109,7 +111,7 @@ A companion window injects into Blizzard's House Editor so you can **place decor
 ---
 
 **Author:** Vamoose
-**Version:** 3.38.0
+**Version:** 3.39.0
 **Game Version:** 12.1.0 (Midnight)
 **Source / Issues:** https://github.com/VamooseDevelopment/housing-decor-guide
 **Discord:** https://discord.gg/RWZaxJaHFP

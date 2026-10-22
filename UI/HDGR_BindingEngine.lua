@@ -93,17 +93,33 @@ local function processResolveAsync(widget, resolved)
     end
 end
 
--- Resolve binding, run async middleware, call dispatcher. The one push path:
--- Engine:Apply, the OnShow hook and Engine:PushIfStale all land here, so a
--- completed push always leaves the widget current (not stale).
-local function pushOne(widget, state, ctx)
-    if not (widget._hdgrBound and widget._hdgrBinding and widget._hdgrDispatcher) then return end
+-- A push's two halves, apart so the profiler can sample each: the data (the
+-- binding's selectors, then the resolver kicks for what they returned) and
+-- the paint (the kind's dispatcher).
+local function _resolveAll(widget, state, ctx)
     local resolved = {}
     for field, selectorSpec in pairs(widget._hdgrBinding) do
         resolved[field] = resolve(selectorSpec, state, ctx)
     end
     processResolveAsync(widget, resolved)
+    return resolved
+end
+
+local function _paint(widget, resolved, ctx)
     widget._hdgrDispatcher(widget, resolved, ctx or {})
+end
+
+-- Resolve binding, run async middleware, call dispatcher. The one push path:
+-- Engine:Apply, the OnShow hook and Engine:PushIfStale all land here, so a
+-- completed push always leaves the widget current (not stale).
+local function pushOne(widget, state, ctx)
+    if not (widget._hdgrBound and widget._hdgrBinding and widget._hdgrDispatcher) then return end
+    local perf = HDG.Perf
+    if perf:Enabled() then
+        perf:SamplePush(widget, _resolveAll, _paint, state, ctx)
+    else
+        _paint(widget, _resolveAll(widget, state, ctx), ctx)
+    end
     widget._hdgrStale = false
 end
 
@@ -161,9 +177,14 @@ local function _bindWidget(widget, id, spec)
             if Engine._showingForPipeline then return end
             local bw, bh = self._intrinsicWidth, self._intrinsicHeight
             pushOne(self, HDG.Store:GetState(), { actionType = "ON_SHOW" })
-            if self._hdgrAutoSized and (self._intrinsicWidth ~= bw or self._intrinsicHeight ~= bh)
-               and HDG.RequestReflow then
-                HDG:RequestReflow()
+            if self._hdgrAutoSized and (self._intrinsicWidth ~= bw or self._intrinsicHeight ~= bh) then
+                if Engine._revealing then
+                    -- Layout is showing it right now: hand the move back through
+                    -- PushIfStale so this pass re-solves (any window).
+                    self._hdgrRevealMoved = true
+                elseif HDG.RequestReflow then  -- exception(nullable): RequestReflow registered at init time; nil in headless mock + early boot
+                    HDG:RequestReflow()
+                end
             end
         end)
     end
@@ -173,6 +194,15 @@ end
 -- descendant stay silent because the same pass paints them all through Apply.
 -- Apply clears the flag too, so a handler that throws inside Show cannot
 -- leave every later OnShow push disabled for the session.
+-- Layout marks the stretch of its Apply that shows widgets. An OnShow push in
+-- that stretch reports a moved auto-size through PushIfStale instead of asking
+-- for a reflow. Apply clears it too, as it does _showingForPipeline, so a throw
+-- mid-reveal cannot leave later OnShow pushes reporting to a pass that is over.
+Engine._revealing = false
+function Engine:SetRevealing(on)
+    self._revealing = on
+end
+
 Engine._showingForPipeline = false
 function Engine:ShowForPipeline(frame)
     self._showingForPipeline = true
@@ -190,20 +220,44 @@ end
 -- solve that placed it is out of date (Layout:LayoutWindow re-solves).
 local REVEAL_CTX = { actionType = "ON_SHOW" }
 function Engine:PushIfStale(widget)
+    -- Its OnShow hook pushed it as this reveal showed it, and that push moved its
+    -- size. Reported here, the solve that placed it re-runs in this pass; left to
+    -- the hook's reflow request, a Frame laid out one frame against its old size
+    -- in the main window, and never re-solved in a satellite.
+    if widget._hdgrRevealMoved then
+        widget._hdgrRevealMoved = nil
+        return true
+    end
     if not widget._hdgrStale then return false end
     local bw, bh = widget._intrinsicWidth, widget._intrinsicHeight
     pushOne(widget, HDG.Store:GetState(), REVEAL_CTX)
     return widget._hdgrAutoSized and (widget._intrinsicWidth ~= bw or widget._intrinsicHeight ~= bh)
 end
 
--- Bind all widgets with a `binding` spec. Call once at build time.
+-- The window closed: every bound widget whose kind declares `release` (scroll
+-- lists, dropdowns) drops the data it holds, and stays stale so the next push
+-- refills it. Only bound widgets: nothing else would refill. Lists held 9.4 MB
+-- after the window closed (memory census 2026-10-19).
+function Engine:Release(rootFrame)
+    for _, widget in pairs(rootFrame.widgets) do
+        local release = HDG.WidgetTypes:Get(widget._hdgrKind).release
+        if release and widget._hdgrBound then
+            release(widget)
+            widget._hdgrStale = true
+        end
+    end
+end
+
+-- Bind every built widget with a `binding` spec that is not bound yet.
 -- Stamps _hdgrBound, normalised binding, dispatcher, and read-closure.
 -- Also installs the OnShow hook (per Lattice cookbook 18 + ADR-043).
+-- The main window builds each tab on its first visit and calls this again then;
+-- binding a widget twice would hook its OnShow twice, so a bound one is skipped.
 function Engine:Build(rootFrame, config)
     if not (rootFrame and rootFrame.widgets and config and config.widgets) then return end
     for id, spec in pairs(config.widgets) do
         local widget = rootFrame.widgets[id]
-        if widget and spec.binding then
+        if widget and spec.binding and not widget._hdgrBound then
             _bindWidget(widget, id, spec)
         end
     end
@@ -245,6 +299,7 @@ end
 -- the walk; nil defaults to "*".
 function Engine:Apply(rootFrame, state, ctx, invalidation)
     self._showingForPipeline = false   -- see ShowForPipeline
+    self._revealing = false            -- see SetRevealing
     if not (rootFrame and rootFrame.widgets and state) then return end
     invalidation = invalidation or "*"
 

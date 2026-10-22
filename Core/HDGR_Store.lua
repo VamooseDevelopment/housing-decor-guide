@@ -698,7 +698,6 @@ local function NewSessionUI()
         projects     = NewProjectsSessionUI(),
         removalist   = NewRemovalistSessionUI(),    -- Removalist plot-move planner
         data         = NewDataSessionUI(),         -- Your Data tab: achievement-group collapse
-        catalogIntro = { phase = "hidden" },        -- initial-load overlay: "hidden"|"loading"|"success"
         blueprints   = NewBlueprintsSessionUI(),    -- Blueprints tab transients (12.1)
         menagerie    = NewMenagerieSessionUI(),     -- House > Pets (the Menagerie)
     }
@@ -1234,6 +1233,25 @@ end
 -- Shopping list shape ensurance. Reseeds the monotonic counter past any
 -- existing list ID so a partial DB (deleted entries followed by reload)
 -- doesn't risk colliding with a previously-used slot. ID format: "L<n>".
+-- Seed a default list when the account has none, so "Add to Cart" works out of
+-- the box: a brand-new account at load, and SHOPPING_LIST_DELETE removing the
+-- last list (both would otherwise sit at vendorShoppingLists = {} +
+-- activeShoppingListId = "" -- the "No active shopping list" dead-end, which
+-- once lasted until /reload because only load ran this). Mirrors the
+-- SHOPPING_LIST_CREATE reducer's record shape + auto-activate.
+local function SeedDefaultShoppingList(account)
+    if next(account.vendorShoppingLists) ~= nil or account.activeShoppingListId ~= "" then return end
+    account.shoppingListSeq = account.shoppingListSeq + 1
+    local id = "L" .. tostring(account.shoppingListSeq)
+    account.vendorShoppingLists[id] = {
+        name      = "Shopping List",
+        items     = {},
+        meta      = {},
+        createdAt = _G.time(),  -- exception(boundary): wall-clock stamp
+    }
+    account.activeShoppingListId = id
+end
+
 local function EnsureShopping(account)
     if type(account.vendorShoppingLists) ~= "table" then
         account.vendorShoppingLists = NewVendorShoppingLists()
@@ -1249,23 +1267,9 @@ local function EnsureShopping(account)
         end
         account.shoppingListSeq = maxN
     end
-    -- Seed a default list when the account has none, so "Add to Cart" works out
-    -- of the box. Covers brand-new accounts AND any account that deleted its last
-    -- list (both land at vendorShoppingLists = {} + activeShoppingListId = "" ->
-    -- the "No active shopping list" dead-end). Runs after the seq reseed above so
-    -- the new ID can't collide with a previously-used slot. Mirrors the
-    -- SHOPPING_LIST_CREATE reducer's record shape + auto-activate.
-    if next(account.vendorShoppingLists) == nil and account.activeShoppingListId == "" then
-        account.shoppingListSeq = account.shoppingListSeq + 1
-        local id = "L" .. tostring(account.shoppingListSeq)
-        account.vendorShoppingLists[id] = {
-            name      = "Shopping List",
-            items     = {},
-            meta      = {},
-            createdAt = _G.time(),  -- exception(boundary): wall-clock stamp
-        }
-        account.activeShoppingListId = id
-    end
+    -- Runs after the seq reseed above so the new ID can't collide with a
+    -- previously-used slot.
+    SeedDefaultShoppingList(account)
 end
 
 local function EnsureSession(state)
@@ -1287,7 +1291,6 @@ local function EnsureSession(state)
     state.session.ui.styles = state.session.ui.styles or NewStylesSessionUI()
     state.session.ui.houseTab = state.session.ui.houseTab or NewHouseTabSessionUI()
     state.session.ui.data = state.session.ui.data or NewDataSessionUI()  -- Your Data collapse bucket
-    state.session.ui.catalogIntro = state.session.ui.catalogIntro or { phase = "hidden" }  -- exception(boundary): session-shape backfill
     state.session.ui.shoppingList = state.session.ui.shoppingList or NewShoppingSessionUI()
     state.session.ui.zoneScanner  = state.session.ui.zoneScanner  or NewZoneScannerSessionUI()
     state.session.ui.removalist    = state.session.ui.removalist    or NewRemovalistSessionUI()
@@ -1482,6 +1485,7 @@ HDG.Store = {
     _loggedSubscriberErrors = {},   -- message -> true; _callSubscriber logs each once per session
     _saveTimer = nil,
     _saveDelay = 1,   -- seconds to coalesce saves
+    _hydrated = false,   -- true once LoadFromSavedVariables has adopted the saved account; Flush refuses to write before
 }
 
 -- Public accessor for the action-meta table stamped by HDGR_Init.lua at
@@ -1704,22 +1708,63 @@ end
 
 -- ===== SavedVariables I/O ====================================================
 
+-- HDG 2.x kept everything at the top of HDG_DB. The 3.0 upgrade copied what it
+-- kept into HDG_DB.account and left the originals; nothing has read them since,
+-- and on an account that came from 2.x they were 6.7 MB of HDG's 39 MB at login
+-- (memory census 2026-10-19). These are every top-level name a 1.x or 2.x release
+-- saved (from their tags), plus the 3.0 upgrade notice's flag. Never give a new
+-- saved key one of these names: it would be wiped at every load.
+local RETIRED_ROOT_KEYS = {
+    "__premigration_backup_v1", "_migrated", "_migrationVersion", "activeShoppingListId",
+    "activeTab", "altsViewMode", "bgOpacity", "catalogExport", "characterProfessionFilter",
+    "characters", "closeProfWindowAfterCraft", "collapsedMaterials", "collection",
+    "collections", "config", "craftQuotesEnabled", "craftableFilter", "craftingHistory",
+    "craftingQueue", "customDyeThemes", "customStyleOrder", "customStyles", "daily",
+    "dbVersion", "debug", "defaultTab", "directPriceCache", "directPriceCacheTime",
+    "dyeReplaceBlizzard", "dyeableItems", "expansionFilter", "farmingHistory", "favorites",
+    "fontFamily", "fontScale", "framePosition", "hiddenCharacters", "houseTab", "knownFilter",
+    "layout", "localeOverride", "lumberAutoShow", "lumberCollapsed", "lumberCoordinates",
+    "lumberHUDEnabled", "lumberHUDPosition", "lumberHUDVisible", "lumberPinned",
+    "lumberQuotesEnabled", "lumberRadarPinToTracker", "materialSortMode",
+    "materialsListPinned", "materialsListPosition", "migrations", "minimap", "mogul",
+    "myMaterialsMode", "ownedAuctions", "pinnedLumberPosition", "preferredPriceAddon",
+    "professionFilter", "projects", "quotesEnabled", "quotesOnlyChat", "recentActivity",
+    "recentActivityCap", "records", "scale", "schemaVersion", "searchReagents",
+    "shopListAutoDecrement", "shoppingList", "showLumberMaterials", "showMinimapButton",
+    "showProfessionButtons", "showRawMaterials", "styleShoppingList", "stylesCollapsed",
+    "theme", "tooltipDecorTag", "trackedReagents", "trainersCollapsed", "tsmPriceMode", "ui",
+    "uncollectedFilter", "upgradeNoticeShown", "userNotes", "vamooseChatOutput",
+    "vamooseChattiness", "vendorCurrencyCache", "vendorListPinned", "vendorListPosition",
+    "vendorNameCache", "vendorNotes", "vendorShoppingList", "vendorShoppingListMeta",
+    "vendorShoppingLists", "zoneScannerChat", "zoneScannerEnabled", "zoneScannerPopup",
+    "zoneScannerSound", "zoneScannerSquirrels",
+}
+
+-- exception(boundary): SavedVariables of unknown vintage. Clearing a name that
+-- is not there costs nothing, so this runs at every load rather than keeping a
+-- done-flag in the save.
+local function RetireOldRootKeys(db)
+    for _, key in ipairs(RETIRED_ROOT_KEYS) do db[key] = nil end
+end
+
 function HDG.Store:LoadFromSavedVariables()
     _G.HDG_DB = _G.HDG_DB or {}
-    -- Run in-place migration BEFORE adopting account. For existing HDG users,
-    -- HDG_DB is actually the old HDG_DB (same table after the P2 rename);
-    -- HDG.Migration:Run transforms flat HDG keys -> HDG account.* shape.
-    -- No-op when DB is already at HDG schema or when Migration module is absent.
-    if HDG.Migration and HDG.Migration.Run then  -- exception(boundary): module absent in early-boot tests that load only Store
-        -- Stash the result so the one-time upgrade notice can fire at OnEnable.
-        HDG.Migration.lastResult = HDG.Migration:Run(_G.HDG_DB)
-    end
+    RetireOldRootKeys(_G.HDG_DB)
     self.state = NewDefaultState()
-    if _G.HDG_DB.account then
+    local saved = _G.HDG_DB.account
+    -- exception(boundary): SavedVariables of unknown vintage. Every account 3.0 or
+    -- later saved is stamped with a schemaVersion. One without is HDG 2.x's (its
+    -- house cockpit, not decor data), and the 2.x -> 3.0 conversion was retired in
+    -- 2026-10, four months after 3.0: that save starts fresh, and Flush replaces
+    -- the 2.x table at logout.
+    if saved and type(saved.schemaVersion) == "number" then
         -- Adopt persisted account verbatim, then merge defaults so newly
         -- added keys land for upgraded users (schema migration runs here).
-        self.state.account = _G.HDG_DB.account
+        self.state.account = saved
     end
+    -- From here state.account IS the saved account (or a fresh one for a new
+    -- install), so a Flush writes the player's data back, never a placeholder.
+    self._hydrated = true
     EnsureStateShape(self.state)
     HDG.StoreFurnishings.ScrubFossilPlacements(self.state)   -- hydrate-only: drop pre-v8 room-keyed placements (shape-gated, not version-gated)
     HDG.StoreFurnishings.RebuildIndexes(self.state)   -- hydrate-only: session-derived; reducer cases maintain incrementally
@@ -1742,6 +1787,11 @@ end
 -- Flush: by-reference write -- state.account IS HDG_DB.account (no DeepCopy).
 -- WoW serializes whatever HDG_DB points at on logout; re-link is a cheap safety check.
 function HDG.Store:Flush()
+    -- exception(boundary): SavedVariables write. If OnInitialize threw before hydrate
+    -- adopted the saved account, state is still the file-load placeholder, and the
+    -- PLAYER_LOGOUT handler (registered at file load, so it runs anyway) would write
+    -- that empty default over the player's save.
+    if not self._hydrated then return end
     _G.HDG_DB = _G.HDG_DB or {}
     _G.HDG_DB.account = self.state.account
 end
@@ -1761,9 +1811,13 @@ HDG.Actions:Register{ name = "CONFIG_SET",
             -- `reads = { "account.config.X" }` working unchanged.
             -- Scope resolution: explicit payload.scope wins; otherwise
             -- look it up from the schema. Keys absent from both are a
-            -- schema-drift bug -- we crash loudly rather than silently
-            -- mis-route the write.
+            -- schema-drift bug -- crash loudly rather than mis-route the write
+            -- (_GetSourceForScope(nil) answers with the profile table, so
+            -- without this an unknown key landed there silently).
             local scope = payload.scope or HDG.ConfigSchema.ScopeBy[payload.key]
+            if scope == nil then
+                error(("CONFIG_SET: %q is not in HDG.ConfigSchema"):format(tostring(payload.key)), 2)
+            end
             local src = HDG.Config:_GetSourceForScope(scope)
             src[payload.key] = payload.value
             -- Account-scoped settings (one-time migration flags) live at
@@ -1836,20 +1890,30 @@ HDG.Actions:Register{ name = "PROFILE_DELETE",
         end
     end }
 
+-- The one way the top tab changes -- every "leave this tab" passes through it.
+-- Leaving the Decor tab lets the Destroy decor list re-sort when the player
+-- comes back (the pin only holds it still while they are on it). The Styles
+-- Import/Export launchers once wrote account.ui.view themselves and skipped the
+-- reset, so the list stayed pinned after a visit there.
+local function SwitchView(state, view)
+    state.account.ui.view = view
+    state.session.ui.decor.pinnedSortCounts = nil
+end
+
 HDG.Actions:Register{ name = "UI_SET_PERSISTENT",
     persists = true,  combatUnsafe = false,
             invalidates = function(action)
                 local key = action.payload and action.payload.key
                 local paths = { HDG.Paths.Join("account.ui", key) }
-                -- A tab switch is the one moment every "leave this tab" passes through.
                 if key == "view" then paths[2] = "session.ui.decor.pinnedSortCounts" end
                 return paths
             end,
     reduce = function(state, payload)
-        if payload.key ~= nil then state.account.ui[payload.key] = payload.value end
-        -- Leaving the Decor tab lets the Destroy decor list re-sort when the
-        -- player comes back (the pin only holds it still while they are on it).
-        if payload.key == "view" then state.session.ui.decor.pinnedSortCounts = nil end
+        if payload.key == "view" then
+            SwitchView(state, payload.value)
+        elseif payload.key ~= nil then
+            state.account.ui[payload.key] = payload.value
+        end
     end }
 
 HDG.Actions:Register{ name = "UI_SET_TRANSIENT",
@@ -1935,12 +1999,6 @@ HDG.Actions:Register{ name = "MAIN_WINDOW_TOGGLE",
 
 HDG.Actions:Register{ name = "NAV_TOGGLE_GROUP",
     persists = true,  combatUnsafe = false,
-    -- A fold changes one node's isCollapsed and nothing else, so the treeList
-    -- widget can mutate the live provider in place instead of rebuilding every
-    -- TreeNode (HDG.TreeList:SetItems honours this flag; it falls back to a full
-    -- rebuild if the root count changed). The path existed and no action ever
-    -- declared the flag, so every fold paid the rebuild (2026-09-13 audit).
-    treeCollapseOnly = true,
             invalidates = { "account.ui.nav.collapsedGroups" },
     reduce = function(state, payload)
         -- Flip a sidebar parent group's collapsed state (keyed by hub view).
@@ -1985,7 +2043,7 @@ HDG.Actions:Register{ name = "HARD_RESET",
         EnsureStateShape(state)
         -- Fresh SV root: drops profiles + characterSpecific too ("wipes ALL HDG
         -- data"). Seed the active/default profile buckets and the char bucket so
-        -- Config reads stay valid until the /reload the reset UX already requires.
+        -- Config reads stay valid until the reload HDG:HardReset runs next.
         local active = _G.HDG_DB_CURRENT_PROFILE or "DEFAULT"  -- exception(boundary): per-char SV, absent on first boot
         _G.HDG_DB = { account = state.account,
                       profiles = { [active] = {}, DEFAULT = {} },
@@ -2130,7 +2188,8 @@ HDG.Actions:Register{ name = "MAIN_WINDOW_OPENING",
 
 HDG.Actions:Register{ name = "LOG_PUSH",
     persists = false, combatUnsafe = false, 
-    invalidates = { "session.log.entries" },
+    invalidates = { "session.log.entries",
+                    "session.log.nextID", "session.log.dispatchN" },
     reduce = function(state, payload)
         -- Pure append + cap. entry.id is a raw integer (no "log_" prefix needed).
         local log = state.session.log
@@ -2172,7 +2231,7 @@ HDG.Actions:Register{ name = "LOG_PUSH",
 
 HDG.Actions:Register{ name = "LOG_CLEAR",
     persists = false, combatUnsafe = false, 
-    invalidates = { "session.log.entries" },
+    invalidates = { "session.log.entries", "session.log.dispatchN" },
     reduce = function(state, payload)
         local log = state.session.log
         if payload.tag and payload.tag ~= "all" and payload.tag ~= "*" then
@@ -2362,7 +2421,9 @@ HDG.Actions:Register{ name = "FAVORITE_TOGGLE",
 
 HDG.Actions:Register{ name = "NOTE_SET",
     persists = true, combatUnsafe = false,
-            invalidates = function(action) return { HDG.Paths.Join("account.userNotes", action.payload and action.payload.itemID) } end,
+            -- The whole table, not the one note: past the 500 cap the reducer
+            -- evicts the oldest note too, and which one is unknown until it runs.
+            invalidates = { "account.userNotes" },
     reduce = function(state, payload)
         if payload.itemID and payload.text ~= nil then
             state.account.userNotes[payload.itemID] = {
@@ -2402,7 +2463,9 @@ HDG.Actions:Register{ name = "NOTE_CLEAR",
 
 HDG.Actions:Register{ name = "VENDOR_NOTE_SET",
     persists = true, combatUnsafe = false,
-            invalidates = function(action) return { HDG.Paths.Join("account.vendorNotes", action.payload and action.payload.npcID) } end,
+            -- The whole table, not the one note: past the cap the reducer evicts
+            -- the oldest note too, and which one is unknown until it runs.
+            invalidates = { "account.vendorNotes" },
     reduce = function(state, payload)
         if payload.npcID and payload.text ~= nil then
             state.account.vendorNotes[payload.npcID] = {
@@ -3957,7 +4020,8 @@ HDG.Actions:Register{ name = "STYLES_SMARTSET_CLEAR_ALL",
 HDG.Actions:Register{ name = "STYLES_SMARTSET_SAVE",
     persists = false, combatUnsafe = false, 
     invalidates = { "account.collections",
-                                                   "session.ui.styles.smartset" },
+                                                   "session.ui.styles.smartset",
+                    "account.collectionSeq" },
     reduce = function(state, payload)
         -- Commit the draft to account.collections. New drafts get a fresh
         -- "smartset:<sluggedName>" id; edits write through the existing
@@ -4088,7 +4152,8 @@ HDG.Actions:Register{ name = "RECENT_DECOR_PLACED",
     end }
 
 HDG.Actions:Register{ name = "STYLES_SNAPSHOT_PLACED",
-    persists = true, combatUnsafe = false, invalidates = { "account.collections" },
+    persists = true, combatUnsafe = false, invalidates = { "account.collections",
+                    "account.collectionSeq" },
     reduce = function(state, payload)
         -- Account-wide snapshot of everything the player has placed. The controller
         -- scans the catalog (numPlaced>0) and passes distinct itemIDs in payload.items
@@ -4257,7 +4322,8 @@ HDG.Actions:Register{ name = "STYLES_IMPORT_COMMIT_AS_STYLE",
 -- Mirrors FURN_SET_CREATE's record shape (id/name/items/createdAt + session.furn bump).
 HDG.Actions:Register{ name = "STYLES_IMPORT_COMMIT_AS_SET",
     persists = true,  combatUnsafe = false,  -- writes account.furnishingSets -> must QueueSave
-    invalidates = { "account.furnishingSets", "session.furn", "session.ui.styles.import" },
+    invalidates = { "account.furnishingSets", "session.furn", "session.ui.styles.import",
+                    "account.furnishingSetSeq" },
     reduce = function(state, payload)
         local imp = state.session.ui.styles.import
         local preview = imp.previewItems
@@ -4297,9 +4363,10 @@ HDG.Actions:Register{ name = "STYLES_OPEN_IMPORT",
     persists = true,  combatUnsafe = false,
     -- Writes the persistent top-tab (account.ui.view) AND the transient sub-view, so the
     -- Tools > Import launcher (which doesn't go through setView) can land the user in one dispatch.
-    invalidates = { "account.ui.view", "session.ui.styles.view", "session.ui.styles.import" },
+    invalidates = { "account.ui.view", "session.ui.decor.pinnedSortCounts",
+                    "session.ui.styles.view", "session.ui.styles.import" },
     reduce = function(state, payload)
-        state.account.ui.view = "styles"
+        SwitchView(state, "styles")
         state.session.ui.styles.view = "import"
         local imp = state.session.ui.styles.import
         imp.urlText, imp.previewItems, imp.parseError       = "", nil, nil
@@ -4312,9 +4379,10 @@ HDG.Actions:Register{ name = "STYLES_OPEN_IMPORT",
 -- selection/format/search. SELECT/SET_FORMAT/SET_SEARCH are transient (no persist).
 HDG.Actions:Register{ name = "STYLES_OPEN_EXPORT",
     persists = true,  combatUnsafe = false,
-    invalidates = { "account.ui.view", "session.ui.styles.view", "session.ui.styles.export" },
+    invalidates = { "account.ui.view", "session.ui.decor.pinnedSortCounts",
+                    "session.ui.styles.view", "session.ui.styles.export" },
     reduce = function(state, payload)
-        state.account.ui.view = "styles"
+        SwitchView(state, "styles")
         state.session.ui.styles.view = "export"
         local exp = state.session.ui.styles.export
         exp.selectedKey, exp.format, exp.search = nil, "hdg", ""
@@ -4652,7 +4720,8 @@ HDG.Actions:Register{ name = "SHOPPING_LIST_CREATE",
 
 HDG.Actions:Register{ name = "SHOPPING_LIST_DELETE",
     persists = true, combatUnsafe = false,
-            invalidates = { "account.vendorShoppingLists", "account.activeShoppingListId" },
+            invalidates = { "account.vendorShoppingLists", "account.activeShoppingListId",
+                            "account.shoppingListSeq" },
     reduce = function(state, payload)
         local id = payload.id
         state.account.vendorShoppingLists[id] = nil
@@ -4664,6 +4733,8 @@ HDG.Actions:Register{ name = "SHOPPING_LIST_DELETE",
             end
             state.account.activeShoppingListId = nextId
         end
+        -- The last list gone: a fresh default takes its place, as at load.
+        SeedDefaultShoppingList(state.account)
     end }
 
 HDG.Actions:Register{ name = "SHOPPING_LIST_RENAME",
@@ -4935,15 +5006,8 @@ HDG.Actions:Register{ name = "CATALOG_LOAD_FAILED",
         state.session.catalog.status = "error"
     end }
 
--- Initial-load overlay phase: "hidden" | "loading" | "success". Driven by the
--- catalogIntro controller (window-open + DECOR_CATALOG_READY + 0.5s success hold).
-HDG.Actions:Register{ name = "CATALOG_INTRO_SET_PHASE",
-    persists = false, combatUnsafe = false,
-    invalidates = { "session.ui.catalogIntro" },
-    reduce = function(state, payload) state.session.ui.catalogIntro.phase = payload.phase end }
-
--- Signal-only: the loading overlay's Refresh button. The observer reacts (forces a
--- fresh sweep past the in-flight coalesce + idle guard); no state mutation here.
+-- Signal-only: `/hdgr refresh`. The observer reacts (rebuilds every row in a fresh
+-- sweep past the in-flight coalesce + idle guard); no state mutation here.
 HDG.Actions:Register{ name = "CATALOG_FORCE_RELOAD",
     persists = false, combatUnsafe = false,
     invalidates = {},
@@ -5030,7 +5094,8 @@ HDG.Actions:Register{ name = "PROJECTS_UPSERT_HOUSE",
 HDG.Actions:Register{ name = "PROJECTS_CAPTURE_COMMIT",
     persists = true, combatUnsafe = false,
             invalidates = { "account.projects.houses", "account.projects.layouts", "account.rooms",
-                            "session.furn", "session.furnIndex" },
+                            "session.furn", "session.furnIndex",
+                    "account.projects.versionSeq" },
     reduce = function(state, payload)
         -- Atomic apply of a finalized capture; observer pre-computes matched/new/orphan + connections.
         local p = state.account.projects

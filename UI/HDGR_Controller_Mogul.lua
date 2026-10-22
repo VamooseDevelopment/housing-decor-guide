@@ -15,7 +15,6 @@ local dispatch = HDG.ControllerHelpers.Mechanics.DispatchNamed  -- hygiene A13
 -- Supply Impact numeric param editbox (commits on Enter / FocusLost).
 function MogulController:_wireSupplyImpact(rootFrame)
     local box = HDG.UI.W(rootFrame, "mogulPanel.supplyParam")
-    if not (box and box.SetScript) then return end  -- exception(boundary): widget may be absent
     local function commit()
         local mode = HDG.Store:GetState().session.ui.mogul.supplyImpact.mode  -- exception(false-positive): top-level controller read
         local n = tonumber((box.GetText and box:GetText()) or "")

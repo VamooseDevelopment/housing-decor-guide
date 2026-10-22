@@ -135,6 +135,9 @@ Selectors:Register("zone.vendorsInZone", {
         "account.activeShoppingListId",
         "account.config.zoneScannerTrackShopping",
     },
+    -- The zone alert asks three questions of this list per check, and in a big
+    -- decor zone each build was ~245 KB (memory plan 2026-10-22).
+    memoized = true,
     fn = function(state, ctx)
         local mapID = state.session.zone.currentMapID
         if not mapID or mapID == 0 then return {} end

@@ -19,7 +19,7 @@ local FILTER_BAR_HEIGHT  = 89    -- decor filter strip: 3 rows (top chips+BG dro
 -- ===== View ==================================================================
 
 LC.window.views.decor = {
-    explicit = true,
+    controllers = { "decor", "pets" },
     width    = "auto",       -- 4 + 360 + 4 + 540 + 4 = 912
     height   = "auto",       -- chrome + status now come from the window's slots
     columns  = { 360, 540 },
@@ -612,7 +612,7 @@ LC.widgets["decorPanel.tagsLabel"] = {
 }
 
 -- Tag-row chip slots: N pre-allocated, bound to decor.tagSlot.*. Empty slots hidden via visible.
-for slot = 1, (HDG.Constants.TAG_SLOT_COUNT or 12) do
+for slot = 1, HDG.Constants.TAG_SLOT_COUNT do
     LC.widgets["decorPanel.tagSlot_" .. slot] = {
     tooltip = false,
         kind = "button", ["in"] = "decor.tagsChips", font = "button",

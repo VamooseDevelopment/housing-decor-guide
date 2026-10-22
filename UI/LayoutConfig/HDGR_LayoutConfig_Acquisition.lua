@@ -18,7 +18,7 @@ local LC = HDG.LayoutConfig
 -- 2-column master/detail. Detail panel holds unified info + 3D preview + alsoSells grid.
 
 LC.window.views.acquisition = {
-    explicit = true,
+    controllers = { "acquisition" },
     width    = "auto",       -- 4 + 480 + 4 + 480 + 4 = 972
     height   = "auto",       -- chrome + status now come from the window's slots
     columns  = { 480, 480 },

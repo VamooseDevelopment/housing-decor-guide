@@ -1462,25 +1462,36 @@ Selectors:Register("styles.smartset.axisRows", {
 })
 
 -- ===== Tag taxonomy + per-axis counts ======================================
--- FacetDB encoding keys: axis name -> per-item encoding field.
-local FACETDB_ENC_KEYS = {
-    room     = "rm",  category = "cat", subject   = "sub", mood     = "mod",
-    material = "mat", color    = "col", culture   = "cul", motif    = "mot",
-    formality= "frm", condition= "con", light     = "lit", palette  = "pal",
-    seasonal = "sea",
-}
+-- FacetDB records are byte strings (Facets:GetAxes): byte k is where axis k's
+-- tags start, byte k+1 where they end (exclusive), each tag one byte holding its
+-- vocab index. string.byte allocates nothing, which matters because the scorer
+-- walks every record on each Smart Set click. As tables the records held 5.1 MB
+-- (memory census 2026-10-19).
+local byte = string.byte
+
+-- axis name -> record slot, from the shipped axis order. Built on first use.
+local _slotByAxis
+local function _axisSlots()
+    if not _slotByAxis then
+        _slotByAxis = {}
+        for k, axis in ipairs(HDG.StaticData.Facets:GetAxes()) do _slotByAxis[axis] = k end
+    end
+    return _slotByAxis
+end
+
+-- First and last byte of one axis's tags; an empty span when the axis is absent.
+local function _span(rec, slot)
+    if not slot then return 1, 0 end   -- exception(nullable): imported rules can name an axis FacetDB doesn't ship
+    local first, stop = byte(rec, slot, slot + 1)
+    return first, stop - 1
+end
 
 -- Walk FacetDB: visitorFn(axisName, tagStr, itemID) per (axis x tag x item).
--- rec[encKey] is a table of vocab indices (multi-tag) or a single number index.
 -- _visitRecordTags extracted so the outer loop is a flat axis x item double-loop.
-local function _visitRecordTags(axisVocab, axisName, itemID, v, visitorFn)
-    if type(v) == "table" then
-        for _, idx in ipairs(v) do
-            local tagStr = axisVocab[idx]
-            if tagStr then visitorFn(axisName, tagStr, itemID) end
-        end
-    elseif type(v) == "number" then
-        local tagStr = axisVocab[v]
+local function _visitRecordTags(axisVocab, axisName, itemID, rec, slot, visitorFn)
+    local first, last = _span(rec, slot)
+    for p = first, last do
+        local tagStr = axisVocab[byte(rec, p)]
         if tagStr then visitorFn(axisName, tagStr, itemID) end
     end
 end
@@ -1488,40 +1499,45 @@ end
 local function _walkFacetDB(visitorFn)
     local vocab = HDG.StaticData.Facets:GetVocab()
     local db    = HDG.StaticData.Facets:GetAll()
-    if not (vocab and db) then return false end
-    for axisName, encKey in pairs(FACETDB_ENC_KEYS) do
+    for axisName, slot in pairs(_axisSlots()) do
         local axisVocab = vocab[axisName]
         if axisVocab then
             for itemID, rec in pairs(db) do
-                _visitRecordTags(axisVocab, axisName, itemID, rec[encKey], visitorFn)
+                _visitRecordTags(axisVocab, axisName, itemID, rec, slot, visitorFn)
             end
         end
     end
-    return true
 end
 
--- Reverse facet index built in ONE FacetDB walk. Lazy, keyed on changeSeq
--- (ADR-003a carve-out). Tag tallies from #_reverseIndex[axis][tag]. The
--- scorer reads each item's ENCODED record straight from FacetDB (rules are
--- translated to vocab indices once per resolve); a decoded per-item copy of
--- every facet used to sit beside this index for the session, 23,000 tables
--- duplicating the shipped data (2026-09-13 audit).
-local _reverseIndex   = {}     -- [axis] = { [tagStr] = { itemID, ... } }
-local _facetIdxTick   = nil
-local _EMPTY          = {}
+local _EMPTY = {}
 
-local function _ensureFacetIndexes()
-    local tick = HDG.Store:GetState().session.styles.changeSeq  -- seeded by NewStylesSession
-    if _facetIdxTick == tick and next(_reverseIndex) then return end
-    _reverseIndex, _facetIdxTick = {}, tick
-    _walkFacetDB(function(axisName, tagStr, itemID)
-        local ax = _reverseIndex[axisName]
-        if not ax then ax = {}; _reverseIndex[axisName] = ax end
-        local list = ax[tagStr]
-        if not list then list = {}; ax[tagStr] = list end
-        list[#list + 1] = itemID
-    end)
-end
+-- Reverse facet index, [axis][tagStr] = { itemID, ... }, built in ONE FacetDB
+-- walk; tag tallies are #index[axis][tag]. A memo, so a close lets it go with the
+-- other memos (InvalidateMemos("*")) and the next Styles visit walks FacetDB
+-- again: as a file local it stayed for the session, 785 KB after one Styles
+-- visit (offline walker, 2026-10-22). The scorer reads each item's ENCODED
+-- record straight from FacetDB (rules are translated to vocab indices once per
+-- resolve); a decoded per-item copy of every facet used to sit beside this index
+-- for the session, 23,000 tables duplicating the shipped data (2026-09-13 audit).
+Selectors:Register("styles.smartset._facetIndex", {
+    memoized = true,
+    reads = {
+        "session.resolvers.staticData.tick",  -- ADR-003c StaticData marker (sweep rule 4c)
+        "session.styles.changeSeq",
+    },
+    fn = function(state)
+        local _ = state.session.styles.changeSeq   -- the index's key since ADR-003a: a change rebuilds it
+        local index = {}
+        _walkFacetDB(function(axisName, tagStr, itemID)
+            local ax = index[axisName]
+            if not ax then ax = {}; index[axisName] = ax end
+            local list = ax[tagStr]
+            if not list then list = {}; ax[tagStr] = list end
+            list[#list + 1] = itemID
+        end)
+        return index
+    end,
+})
 
 -- [axis][tagStr] = vocab index, the inverse of HDGR_FacetVocab, built once per
 -- vocab table (static shipped data).
@@ -1541,13 +1557,12 @@ end
 -- Does this FacetDB record carry at least one tag the vocab knows? Items that
 -- carry none are not scored (they were never indexed before either).
 local function _hasAnyFacet(rec, vocab)
-    for axisName, encKey in pairs(FACETDB_ENC_KEYS) do
-        local v, axisVocab = rec[encKey], vocab[axisName]
+    for axisName, slot in pairs(_axisSlots()) do
+        local axisVocab = vocab[axisName]
         if axisVocab then
-            if type(v) == "table" then
-                for i = 1, #v do if axisVocab[v[i]] then return true end end
-            elseif type(v) == "number" and axisVocab[v] then
-                return true
+            local first, last = _span(rec, slot)
+            for p = first, last do
+                if axisVocab[byte(rec, p)] then return true end
             end
         end
     end
@@ -1555,15 +1570,13 @@ local function _hasAnyFacet(rec, vocab)
 end
 
 -- Number of vocab-known tags an item carries on one axis, or nil when it has none.
-local function _axisTagCount(v, axisVocab)
-    if type(v) == "table" then
-        local n = 0
-        for i = 1, #v do if axisVocab[v[i]] then n = n + 1 end end
-        return n > 0 and n or nil
-    elseif type(v) == "number" and axisVocab[v] then
-        return 1
+local function _axisTagCount(rec, slot, axisVocab)
+    local first, last = _span(rec, slot)
+    local n = 0
+    for p = first, last do
+        if axisVocab[byte(rec, p)] then n = n + 1 end
     end
-    return nil
+    return n > 0 and n or nil
 end
 
 -- activeAxisTags: tag rows for the middle column.
@@ -1577,7 +1590,7 @@ Selectors:Register("styles.smartset.activeAxisTags", {
         "session.ui.styles.smartset.rules",
         "session.styles.changeSeq",
     },
-    calls = { "styles.smartset.affinity" },
+    calls = { "styles.smartset.affinity", "styles.smartset._facetIndex" },
     fn = function(state, ctx)
         local axis  = state.session.ui.styles.smartset.activeAxis or "room"
         local rules = state.session.ui.styles.smartset.rules
@@ -1587,8 +1600,7 @@ Selectors:Register("styles.smartset.activeAxisTags", {
         local axisVocab = vocab and vocab[axis]
         if not axisVocab then return {} end
 
-        _ensureFacetIndexes()
-        local axisIndex = _reverseIndex[axis] or _EMPTY
+        local axisIndex = Selectors:Call("styles.smartset._facetIndex", state, ctx)[axis] or _EMPTY
         local affinity  = Selectors:Call("styles.smartset.affinity", state, ctx)
 
         local out = {}
@@ -1644,29 +1656,29 @@ local function _rulesToDef(rules, tagIndex)
     return def
 end
 
--- Does the encoded axis value (one index or a list) carry `idx`?
-local function _hasIdx(v, idx)
-    if type(v) == "table" then
-        for i = 1, #v do if v[i] == idx then return true end end
-        return false
+-- Does the record carry vocab index `idx` on this axis?
+local function _hasIdx(rec, slot, idx)
+    local first, last = _span(rec, slot)
+    for p = first, last do
+        if byte(rec, p) == idx then return true end
     end
-    return v == idx
+    return false
 end
 
 -- Boolean intersection for boost/anti predicates.
-local function _intersects(v, idxs)
+local function _intersects(rec, slot, idxs)
     for i = 1, #idxs do
-        if _hasIdx(v, idxs[i]) then return true end
+        if _hasIdx(rec, slot, idxs[i]) then return true end
     end
     return false
 end
 
 -- Count query matches for one axis: hits, total (#qidxs), itemCount (tags the item carries).
-local function _intersectCount(v, qidxs, itemCount)
+local function _intersectCount(rec, slot, qidxs, itemCount)
     if not itemCount then return 0, #qidxs, 0 end
     local hits = 0
     for i = 1, #qidxs do
-        if _hasIdx(v, qidxs[i]) then hits = hits + 1 end
+        if _hasIdx(rec, slot, qidxs[i]) then hits = hits + 1 end
     end
     return hits, #qidxs, itemCount
 end
@@ -1674,13 +1686,13 @@ end
 -- Score one FacetDB record against a def. query = linear proportion x specificity;
 -- non-matching value in a queried axis scores ANTI_WEIGHT.
 -- Normalized by query-facet count so tiers stay stable as facets are added.
-local function _scoreItem(rec, def, vocab)
+local function _scoreItem(rec, def, vocab, slots)
     local score, queryHits, queryTotal = 0, 0, 0
     if def.query then
         for axis, qvals in pairs(def.query) do
             queryTotal = queryTotal + 1
-            local fvals = rec[FACETDB_ENC_KEYS[axis]]
-            local hits, total, itemCount = _intersectCount(fvals, qvals, _axisTagCount(fvals, vocab[axis] or _EMPTY))
+            local slot = slots[axis]
+            local hits, total, itemCount = _intersectCount(rec, slot, qvals, _axisTagCount(rec, slot, vocab[axis] or _EMPTY))
             if hits > 0 then
                 if hits == total then
                     local spec = math.min(1, total * 2 / itemCount)
@@ -1696,12 +1708,12 @@ local function _scoreItem(rec, def, vocab)
     end
     if def.boost then
         for axis, bvals in pairs(def.boost) do
-            if _intersects(rec[FACETDB_ENC_KEYS[axis]], bvals) then score = score + BOOST_WEIGHT end
+            if _intersects(rec, slots[axis], bvals) then score = score + BOOST_WEIGHT end
         end
     end
     if def.anti then
         for axis, avals in pairs(def.anti) do
-            if _intersects(rec[FACETDB_ENC_KEYS[axis]], avals) then score = score + ANTI_WEIGHT end
+            if _intersects(rec, slots[axis], avals) then score = score + ANTI_WEIGHT end
         end
     end
     if queryTotal > 0 then score = score / queryTotal end
@@ -1732,9 +1744,10 @@ _resolveSmartsetItems = function(rules, opts)
     local def = _rulesToDef(rules, _tagIndexOf(vocab))
     if not (def.query or def.boost or def.anti) then return scored, stats end
 
+    local slots = _axisSlots()
     for itemID, rec in pairs(db) do
         if (not liveSet or liveSet[itemID]) and _hasAnyFacet(rec, vocab) then
-            local score, queryHits = _scoreItem(rec, def, vocab)
+            local score, queryHits = _scoreItem(rec, def, vocab, slots)
             local band = _bandFor(score, queryHits)
             scored[itemID] = {
                 score = score, band = band,
@@ -1759,10 +1772,10 @@ local function _addItems(set, items)
     return added
 end
 
-local function _unionSignatureItems(rules)
+local function _unionSignatureItems(rules, index)
     local set, count = {}, 0
     for raxis, tagRules in pairs(rules or {}) do
-        local axisIndex = _reverseIndex[raxis]
+        local axisIndex = index[raxis]
         for tag, sev in pairs(tagRules) do
             local items = sev == "signature" and axisIndex and axisIndex[tag]
             if items then count = count + _addItems(set, items) end
@@ -1771,24 +1784,21 @@ local function _unionSignatureItems(rules)
     return set, count
 end
 
-local function _computeTagAffinity(rules, axis)
-    local matchSet, matchCount = _unionSignatureItems(rules)
+local function _computeTagAffinity(rules, axis, index)
+    local matchSet, matchCount = _unionSignatureItems(rules, index)
     if matchCount < 5 then return nil end
     local freq = {}
     local db        = HDG.StaticData.Facets:GetAll()
     local axisVocab = HDG.StaticData.Facets:GetVocab()[axis] or _EMPTY
-    local encKey    = FACETDB_ENC_KEYS[axis]
+    local slot      = _axisSlots()[axis]
     for itemID in pairs(matchSet) do
         local rec = db[itemID]
-        local v = rec and rec[encKey]   -- exception(nullable): the reverse index only names FacetDB items, but a nil record is a legal miss
-        if type(v) == "table" then
-            for i = 1, #v do
-                local tag = axisVocab[v[i]]
+        if rec then   -- exception(nullable): the reverse index only names FacetDB items, but a nil record is a legal miss
+            local first, last = _span(rec, slot)
+            for p = first, last do
+                local tag = axisVocab[byte(rec, p)]
                 if tag then freq[tag] = (freq[tag] or 0) + 1 end
             end
-        elseif type(v) == "number" then
-            local tag = axisVocab[v]
-            if tag then freq[tag] = (freq[tag] or 0) + 1 end
         end
     end
     local pct = {}
@@ -1899,10 +1909,11 @@ Selectors:Register("styles.smartset.affinity", {
         "session.ui.styles.smartset.activeAxis",
         "session.styles.changeSeq",
     },
-    fn = function(state)
-        _ensureFacetIndexes()
+    calls = { "styles.smartset._facetIndex" },
+    fn = function(state, ctx)
+        local index = Selectors:Call("styles.smartset._facetIndex", state, ctx)
         local axis = state.session.ui.styles.smartset.activeAxis or "room"
-        return _computeTagAffinity(state.session.ui.styles.smartset.rules, axis) or _EMPTY
+        return _computeTagAffinity(state.session.ui.styles.smartset.rules, axis, index) or _EMPTY
     end,
 })
 

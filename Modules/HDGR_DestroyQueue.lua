@@ -100,7 +100,14 @@ end
 -- or DESTROY_RETRY_LIMIT tries in a row have landed nothing.
 function Q:_OnSilence()
     local run = self._run
+    -- A stopping run sends nothing more, so it can end now; its count may miss
+    -- confirmations still parked behind a sweep, which beats a run that waits on
+    -- a searcher that may never answer.
     if run.stopping then return self:_Finish(_stopReason(run)) end
+    -- Silence while the catalog holds entry events back for a sweep is HDG's, not
+    -- the server's: the confirmations land with the commit (DECOR_CATALOG_READY).
+    -- Written off now, the retry destroyed a copy more than asked for.
+    if HDG.HousingCatalogObserver:IsSweepPending() then return _armWatchdog(run) end
     local lost = _inFlight(run)
     run.dropped = run.dropped + lost
     run.retries = run.retries + 1
@@ -193,11 +200,19 @@ function Q:Stop()
 end
 
 -- The catalog observer patches rows, then signals COLLECTION_CATALOG_ROW_COUNTS_UPDATED
--- with the decorIDs that moved. Re-read a frame later: _OnCounts dispatches and
--- destroys, and neither may run nested inside another action's subscriber.
+-- with the decorIDs that moved. A sweep commit (DECOR_CATALOG_READY) moves counts
+-- too without that signal: confirmations parked behind the sweep fold into the
+-- snapshot, and their replay finds nothing left to move. Re-read a frame later:
+-- _OnCounts dispatches and destroys, and neither may run nested inside another
+-- action's subscriber.
 function Q:_OnAction(actionType, _, action)
-    if actionType == HDG.Constants.ACTIONS.COLLECTION_CATALOG_ROW_COUNTS_UPDATED and self._run then
+    if not self._run then return end
+    local A = HDG.Constants.ACTIONS
+    if actionType == A.COLLECTION_CATALOG_ROW_COUNTS_UPDATED then
         local ids = action.payload.decorIDs
+        C_Timer.After(0, function() Q:_OnCounts(ids) end)
+    elseif actionType == A.DECOR_CATALOG_READY then
+        local ids = { self._run.decorID }
         C_Timer.After(0, function() Q:_OnCounts(ids) end)
     end
 end

@@ -18,7 +18,7 @@ local LC = HDG.LayoutConfig
 -- Existing 7 columns stay fixed-anchored so they don't shift between widths.
 
 LC.window.views.mogul = {
-    explicit = true,
+    controllers = { "mogul" },
     width    = "auto",       -- 4 + 700 + 4 = 708 (default)
     height   = "auto",
     columns  = { 700 },

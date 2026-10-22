@@ -256,8 +256,8 @@ end
 -- Clicks live in cell initializers; active highlight flows via nav.tree's `active` flags.
 function NavController:Wire(rootFrame)
     local tree = HDG.UI.W(rootFrame, "navPanel.tree")
-    if not tree then return end   -- exception(nullable): satellite windows (shopping/zone/lumber) wire the same controllers onto a frame with no sidebar
-    -- Every rebuild discards the scroll offset, so every rebuild needs a reveal.
+    -- Every fill can move the active row (a rebuild discards the scroll offset; an
+    -- in-place update moves the highlight), so every fill needs a reveal.
     -- _afterSetItems is TreeList's post-population hook list (the same seam
     -- WireStoreSelectionSync uses).
     tree._afterSetItems = tree._afterSetItems or {}

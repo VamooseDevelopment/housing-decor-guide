@@ -12,7 +12,7 @@ local LC = HDG.LayoutConfig
 -- ===== View ==================================================================
 
 LC.window.views.debug = {
-    explicit = true,
+    controllers = { "debug" },
     width    = "auto",       -- 4 + 904 + 4 = 912
     height   = "auto",       -- chrome + status now come from the window's slots
     columns  = { 904 },

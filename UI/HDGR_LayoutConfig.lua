@@ -53,6 +53,9 @@ HDG.LayoutConfig = {
         views = {
             -- Per-tab views are declared in UI/LayoutConfig/ files.
             -- "houseTab" view lives in HDGR_LayoutConfig_HouseTab.lua.
+            -- Every view lists its `controllers`: the registered controllers that
+            -- wire its widgets. A frame wires the controllers of the views it hosts,
+            -- and only those (Controllers:WireAll); {} = the view is bindings only.
         },
         defaultView = "decor",
     },
@@ -203,6 +206,7 @@ HDG.LayoutConfig = {
 -- Chrome slot-views. per ADR-025. width is a placeholder; ComposeWindow spans
 -- it to window width for top/bottom slots. Only height matters.
 HDG.LayoutConfig.window.views.chrome = {
+    controllers = { "chrome" },
     standalone = true,
     width   = 420,                  -- placeholder; ComposeWindow spans to window width at runtime.
                                     -- Sized past the logo(246)+version+gap+close(22) fixed widths so
@@ -214,6 +218,7 @@ HDG.LayoutConfig.window.views.chrome = {
     cells   = { body = { col = 1, row = 1, colSpan = 1, rowSpan = 1 } },
 }
 HDG.LayoutConfig.window.views.status = {
+    controllers = {},
     standalone = true,
     width   = 100,                  -- placeholder; ComposeWindow spans to window width
     height  = STATUS_RAIL_HEIGHT,
@@ -221,87 +226,6 @@ HDG.LayoutConfig.window.views.status = {
     columns = { "fill" },
     rows    = { STATUS_RAIL_HEIGHT },
     cells   = { body = { col = 1, row = 1, colSpan = 1, rowSpan = 1 } },
-}
-
--- ============================================================================
--- Catalog initial-load overlay (HDGR_Layout "introOverlay" slot, main window)
--- ============================================================================
--- A window-wide overlay shown ONLY during the first catalog load this session.
--- It spans the content rect (not the nav) and its panel hides via
--- `visible = catalog.intro.isVisible`, so it sits invisible until the first load.
--- Centered headline + animated blip dots + a Refresh button (loading phase only).
-HDG.LayoutConfig.window.views.catalogIntro = {
-    standalone = true,
-    width   = 400, height = 400,   -- placeholders; the overlay spans to the content rect at runtime
-    padding = 0,
-    columns = { "fill" },
-    rows    = { "fill" },
-    cells   = { body = { col = 1, row = 1, colSpan = 1, rowSpan = 1 } },
-}
-HDG.LayoutConfig.panels.catalogIntroPanel = {
-    kind = "panel",
-    skin = "Frame",                       -- opaque stone surface: covers the tab content beneath
-    cell = { catalogIntro = "body" },
-    visibleInViews = { "catalogIntro" },
-    visible = "catalog.intro.isVisible",
-}
--- Vertical centering: fill spacers bracket the center group.
-HDG.LayoutConfig.sections["catalogIntro.body"] = {
-    ["in"] = "catalogIntroPanel", layout = "vertical", order = 10,
-}
-HDG.LayoutConfig.sections["catalogIntro.spacerTop"] = {
-    ["in"] = "catalogIntro.body", layout = "vertical", height = "fill", order = 10,
-}
-HDG.LayoutConfig.sections["catalogIntro.center"] = {
-    ["in"] = "catalogIntro.body", layout = "vertical", gap = "lg", order = 20,
-}
-HDG.LayoutConfig.sections["catalogIntro.dotsRow"] = {
-    ["in"] = "catalogIntro.center", layout = "horizontal", height = 16, gap = "sm", order = 20,
-}
-HDG.LayoutConfig.sections["catalogIntro.refreshRow"] = {
-    ["in"] = "catalogIntro.center", layout = "horizontal", height = 24, order = 30,
-    visible = "catalog.intro.isLoading",   -- hide during the success flash
-}
-HDG.LayoutConfig.sections["catalogIntro.spacerBottom"] = {
-    ["in"] = "catalogIntro.body", layout = "vertical", height = "fill", order = 30,
-}
--- Headline (large, centered both axes).
-HDG.LayoutConfig.widgets["catalogIntroPanel.headline"] = {
-    tooltip = false,
-    kind = "label", ["in"] = "catalogIntro.center",
-    font = "heading", justifyH = "CENTER",
-    width = "fill", height = 32, order = 10,
-    binding = "catalog.intro.headline",
-}
--- Animated blip dots (3), centered via fill spacers. Controller pulses their alpha.
-HDG.LayoutConfig.widgets["catalogIntroPanel.dotsLeftSpacer"] = {
-    tooltip = false, kind = "spacer", ["in"] = "catalogIntro.dotsRow", width = "fill", height = 14, order = 5,
-}
-HDG.LayoutConfig.widgets["catalogIntroPanel.dot1"] = {
-    tooltip = false, kind = "atlas", ["in"] = "catalogIntro.dotsRow",
-    atlas = HDG.Constants.BULLET_DOT_ATLAS, tone = "semantic.accent", width = 12, height = 12, order = 10,
-}
-HDG.LayoutConfig.widgets["catalogIntroPanel.dot2"] = {
-    tooltip = false, kind = "atlas", ["in"] = "catalogIntro.dotsRow",
-    atlas = HDG.Constants.BULLET_DOT_ATLAS, tone = "semantic.accent", width = 12, height = 12, order = 12,
-}
-HDG.LayoutConfig.widgets["catalogIntroPanel.dot3"] = {
-    tooltip = false, kind = "atlas", ["in"] = "catalogIntro.dotsRow",
-    atlas = HDG.Constants.BULLET_DOT_ATLAS, tone = "semantic.accent", width = 12, height = 12, order = 14,
-}
-HDG.LayoutConfig.widgets["catalogIntroPanel.dotsRightSpacer"] = {
-    tooltip = false, kind = "spacer", ["in"] = "catalogIntro.dotsRow", width = "fill", height = 14, order = 20,
-}
--- Refresh button (centered; loading phase only, row hides during success).
-HDG.LayoutConfig.widgets["catalogIntroPanel.refreshLeftSpacer"] = {
-    tooltip = false, kind = "spacer", ["in"] = "catalogIntro.refreshRow", width = "fill", height = 22, order = 5,
-}
-HDG.LayoutConfig.widgets["catalogIntroPanel.refresh"] = {
-    tooltip = false, kind = "button", ["in"] = "catalogIntro.refreshRow", font = "small",
-    text = "locale:CATALOG_INTRO_REFRESH", width = "auto", height = 22, order = 10, variant = "tertiary",
-}
-HDG.LayoutConfig.widgets["catalogIntroPanel.refreshRightSpacer"] = {
-    tooltip = false, kind = "spacer", ["in"] = "catalogIntro.refreshRow", width = "fill", height = 22, order = 20,
 }
 
 HDG.LayoutConfig.windows = {

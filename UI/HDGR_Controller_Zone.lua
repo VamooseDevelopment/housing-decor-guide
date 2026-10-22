@@ -224,10 +224,7 @@ function ZoneController:Wire(rootFrame)
         HDG.Store:Dispatch({ type = A.MAIN_WINDOW_TOGGLE })
     end)
 
-    -- Controllers:WireAll fires against every frame; bail early when
-    -- zonePanel widgets are absent (standalone lumber/shopping windows).
     local sb = HDG.UI.W(rootFrame, "zonePanel.searchBox")
-    if not sb then return end
     HDG.UI.WireTextChanged(sb, function(text)
         HDG.Store:Dispatch({ type = A.ZONE_SET_SEARCH, payload = { text = text } })
     end)
@@ -238,7 +235,7 @@ function ZoneController:Wire(rootFrame)
     end)
     -- Dynamic tooltip: reads showCollected at hover so the text never goes stale.
     local scBtn = HDG.UI.W(rootFrame, "zonePanel.showCollectedBtn")
-    if scBtn then HDG.TooltipEngine:Attach(scBtn, HDG.TooltipRecipes.ZoneShowCollected) end
+    HDG.TooltipEngine:Attach(scBtn, HDG.TooltipRecipes.ZoneShowCollected)
 
     -- Cart tick: whether the scanner matches the shopping list (list + alerts).
     HDG.UI.OnClick(rootFrame, "zonePanel.trackShoppingToggle", function()

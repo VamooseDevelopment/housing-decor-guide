@@ -35,6 +35,7 @@ HDG.BlizzardEvents = HDG.BlizzardEvents or {
     _debounceTimers = {},                 -- [event .. ":" .. moduleName] = timer
     _hookInstalled = {},                  -- [funcName] = true
     _registeredEvents = {},               -- [event] = true (events frame:RegisterEvent'd)
+    _fireCount = {},                      -- [event] = raw fires this session (see FireCount)
     _booted = false,
 }
 
@@ -248,6 +249,7 @@ end
 
 -- Internal fire: invoked by OnEvent or by tests via _simulate.
 function BE:_fire(event, ...)
+    self._fireCount[event] = self:FireCount(event) + 1
     -- Internal subs (CombatMiddleware etc.) fire first so combat state is updated before module dispatches.
     local internal = self._internalSubs and self._internalSubs[event]
     if internal then
@@ -271,6 +273,13 @@ function BE:_fire(event, ...)
             dispatchToSubscriber(sub, event, ...)
         end
     end
+end
+
+-- Raw fires of `event` this session, counted before any debounce. A debounced
+-- handler runs once per burst and can't tell whether more fired after the burst
+-- began; comparing this count with one taken earlier can.
+function BE:FireCount(event)
+    return self._fireCount[event] or 0  -- exception(nullable): an event that never fired
 end
 
 -- Test helper: drive the engine without a real frame event.
@@ -381,5 +390,6 @@ function BE:_Reset()
     self._debounceTimers = {}
     self._hookInstalled = {}
     self._registeredEvents = {}
+    self._fireCount = {}
     self._booted = false
 end

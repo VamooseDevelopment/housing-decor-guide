@@ -12,7 +12,7 @@ HDG = HDG or {}
 local LC = HDG.LayoutConfig
 
 LC.window.views.menagerie = {
-    explicit = true,
+    controllers = { "menagerie" },
     width    = "auto",
     height   = "auto",
     columns  = { 300, 540 },

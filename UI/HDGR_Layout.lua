@@ -175,10 +175,10 @@ function Layout:ResolveViewTracks(viewSpec, dimName)
     if dimName == "columns" then dynKey = viewSpec.dynamicColumns
     elseif dimName == "rows" then dynKey = viewSpec.dynamicRows end
     if not dynKey then return viewSpec[dimName] end
-    -- Strict reads -- selector errors propagate to the layout pipeline's
-    -- per-stage pcall (see MainFrame:runPipeline) where they get logged
-    -- loudly via HDG.Log:Warn. Earlier this site swallowed the error
-    -- silently and fell back to static spec, hiding selector bugs.
+    -- Strict reads -- a selector error propagates up through the pipeline
+    -- (MainFrame:runPipeline, strict per ADR-042) and aborts the pass loudly.
+    -- Earlier this site swallowed the error silently and fell back to static
+    -- spec, hiding selector bugs.
     local result = HDG.Selectors:Call(dynKey, HDG.Store:GetState())  -- exception(false-positive): layout engine pipeline, not a row factory
     if type(result) == "table" then return result end
     -- Selector returned non-table (nil or non-array) -- fall back to spec.
@@ -245,8 +245,9 @@ end
 
 -- Resolve which view a window's `fill` slot renders.
 --   "@view"          -> the active view (state.account.ui.view; defaultView
---                       fallback when unset or naming a retired view -- a real
---                       boundary, same resolution as MainFrame:PrepareContext)
+--                       fallback when unset, naming a retired view, or naming a
+--                       standalone one -- chrome or a satellite's content, which
+--                       the window does not build. A real boundary: saved state)
 --   any other string -> a fixed view name (a satellite's content)
 function Layout:ResolveFillView(config, windowName, state)
     config = config or HDG.LayoutConfig
@@ -262,8 +263,9 @@ function Layout:ResolveFillView(config, windowName, state)
         return fill
     end
     local v = state.account.ui.view   -- strict: caller passes a live state
-    if v and config.window.views[v] then return v end
-    return config.window.defaultView   -- exception(boundary): unset / retired view
+    local spec = v and config.window.views[v]
+    if spec and not spec.standalone then return v end
+    return config.window.defaultView   -- exception(boundary): unset / retired / standalone view
 end
 
 -- Resolve a window's slot map into view names. Edge slots (top/bottom/left/
@@ -286,12 +288,6 @@ local function resolveWindowSlots(config, windowName, state)
         right  = s.right,
         corner = s.corner,
         fill   = Layout:ResolveFillView(config, windowName, state),  -- reads win.slots.fill + state
-        -- Catalog initial-load overlay: PARKED. The overlay panel composes but does
-        -- not paint (render bug, to fix). Revive by restoring:
-        --   introOverlay = (windowName == "main") and "catalogIntro" or nil
-        -- (and un-park the phase machine in Modules/HDGR_CatalogIntro). The view /
-        -- panel / selectors / actions / controller stay in place, just uncalled.
-        introOverlay = nil,
     }
 end
 
@@ -314,6 +310,18 @@ function Layout:ComposeWindowDimensions(config, windowName, state)
     local _, th  = slotDims(config, slots.top)        -- height (2nd return)
     local _, bh  = slotDims(config, slots.bottom)
     return lw + fw + rw, th + fh + bh
+end
+
+-- The views a window composes right now: its slot views, the fill resolved
+-- against state. The main window's pipeline builds, paints and refreshes the
+-- controllers of these.
+function Layout:WindowViews(config, windowName, state)
+    local slots = resolveWindowSlots(config, windowName, state)
+    local views = {}
+    for _, slot in ipairs({ "top", "bottom", "left", "right", "corner", "fill" }) do
+        if slots[slot] then views[#views + 1] = slots[slot] end
+    end
+    return views
 end
 
 -- Compose a window into one merged placements table from its slot map. Each
@@ -353,12 +361,6 @@ function Layout:ComposeWindow(config, windowName, ctx)
     if slots.corner then
         local cw = (slotDims(config, slots.corner))
         add(slots.corner, W - cw, 0, nil, nil)  -- overlay, window top-right
-    end
-    if slots.introOverlay then
-        -- Content-region overlay (initial-load intro): spans the fill rect, drawn
-        -- last (on top). Excluded from ComposeWindowDimensions, so it never affects
-        -- window size -- the window stays sized to the player's actual tab.
-        add(slots.introOverlay, lw, bodyY, fw, fh)
     end
 
     local placements = {}
@@ -1218,21 +1220,39 @@ function Layout:Apply(rootFrame, placements)
     _applyToPlaced(rootFrame.panels,      placements)
     _applyToPlaced(rootFrame.sections,    placements)
     _applyToPlaced(rootFrame.slotChromes, placements, _applyPendingSkin)
-    return _applyToPlaced(rootFrame.widgets, placements, _pushStaleBinding)
+    HDG.BindingEngine:SetRevealing(true)
+    local moved = _applyToPlaced(rootFrame.widgets, placements, _pushStaleBinding)
+    HDG.BindingEngine:SetRevealing(false)
+    return moved
 end
 
 -- One window's layout pass: harvest intrinsics, compose, apply. When Apply's
 -- reveal pushes moved an auto-sized intrinsic, solve once more; the second
 -- Apply finds every placed widget current, so this never loops.
+-- With perf on, each step of each pass is a lap of its own (HDG.Perf, layout
+-- passes); off, every lap is a nil-check.
+local PASS_LAPS = {
+    { harvest = "pass 1 harvest", compose = "pass 1 compose", apply = "pass 1 apply" },
+    { harvest = "pass 2 harvest", compose = "pass 2 compose", apply = "pass 2 apply" },
+}
 function Layout:LayoutWindow(frame, config, windowName, state)
-    for _ = 1, 2 do
+    local perf = HDG.Perf
+    local laps = perf:OpenLayoutLaps(windowName)
+    for pass = 1, 2 do
+        local lap = PASS_LAPS[pass]
+        local intrinsics = self:HarvestIntrinsics(frame, config)
+        perf:LayoutLap(laps, lap.harvest)
         local placements = self:ComposeWindow(config, windowName, {
             state      = state,
-            intrinsics = self:HarvestIntrinsics(frame, config),
+            intrinsics = intrinsics,
         })
+        perf:LayoutLap(laps, lap.compose)
         frame.placements = placements
-        if not self:Apply(frame, placements) then return end
+        local moved = self:Apply(frame, placements)
+        perf:LayoutLap(laps, lap.apply)
+        if not moved then break end
     end
+    perf:CloseLayoutLaps(laps)
 end
 
 -- Build phase ----------------------------------------------------------------
@@ -1346,7 +1366,7 @@ end
 -- already resolves "locale:" on bindings, and resolving a path field would corrupt it.
 local LOCALE_TEXT_FIELDS = {
     "text", "label", "placeholder", "title", "value",
-    "leftText", "rightText", "shiftText", "dragText", "noteText", "selectionPrefix",
+    "leftText", "rightText", "shiftText", "ctrlText", "dragText", "noteText", "selectionPrefix",
 }
 
 -- Return a build-ready spec with any "locale:KEY" display fields resolved to text.
@@ -1463,7 +1483,7 @@ local function _buildOneSectionChrome(sectionId, sectionSpec, config, rootFrame,
     local hasChrome = chrome ~= nil and CHROME_TEMPLATES[chrome] ~= nil
     if not hasChrome then return end
     if rootFrame.sections[sectionId] then return end
-    local panelId = findEnclosingPanel(sectionId, config)
+    local panelId = _enclosingPanelOf(config)[sectionId]
     if not enclosingPanelOK(panelId) then return end
     local template     = CHROME_TEMPLATES[chrome]
     local inheritsFrom = (type(template) == "string") and template or nil
@@ -1536,10 +1556,16 @@ local function _resolveWidgetParent(widgetId, config, rootFrame, viewFilter, exc
     return rootFrame, not (viewFilter or excludeStandalone)
 end
 
--- Build leaf widgets. Skips if parent wasn't built in this rootFrame.
+-- Build leaf widgets. Skips if parent wasn't built in this rootFrame. A widget
+-- whose panel is unbuilt belongs to another pass (the main window builds tab by
+-- tab), so it is skipped before its in-chain walk: walked in every pass, the
+-- walks were 2 MB of the first open (2026-10-20).
 local function _buildWidgets(config, rootFrame, buildKind, viewFilter, excludeStandalone)
+    local panelOf = _enclosingPanelOf(config)
     for widgetId, widgetSpec in pairs(config.widgets or {}) do
-        if widgetSpec.defaultEnabled ~= false and not rootFrame.widgets[widgetId] then
+        local panelId = panelOf[widgetId]
+        if widgetSpec.defaultEnabled ~= false and not rootFrame.widgets[widgetId]
+           and not (panelId and not rootFrame.panels[panelId]) then
             local parent, ok = _resolveWidgetParent(widgetId, config, rootFrame, viewFilter, excludeStandalone)
             if ok then
                 local widget = buildKind(widgetSpec.kind, parent, widgetSpec)
@@ -1603,6 +1629,10 @@ local UNIVERSAL_WIDGET_FIELDS = {
     -- Catches "should-have-tooltip-but-doesn't" silently. See VDS migration
     -- (VamoosesDyeStudio/docs/VDS_TOOLTIP_MIGRATION.md) for the design rationale.
     tooltip = true,
+    -- ADR-043 per-row async resolver kick ({ idField, valueField, resolver }),
+    -- read by BindingEngine at bind time. Undeclared, the validator rejected any
+    -- spec that used it, so the middleware could never run (2026-10-18 audit).
+    resolveAsync = true,
 }
 local PANEL_SPEC_FIELDS = {
     kind = true, cell = true, slots = true, frameName = true,
@@ -1624,6 +1654,42 @@ Layout._UNIVERSAL_WIDGET_FIELDS = UNIVERSAL_WIDGET_FIELDS  -- exported for tests
 Layout._PANEL_SPEC_FIELDS       = PANEL_SPEC_FIELDS
 Layout._SECTION_SPEC_FIELDS     = SECTION_SPEC_FIELDS
 
+-- Every other level of the config is closed too, so a field this engine does
+-- not read fails Validate instead of sitting in the config doing nothing (25
+-- views carried an `explicit` flag nothing ever read). Top level: field ->
+-- the type it must have; the size constants are shared by the config files.
+local CONFIG_FIELDS = {
+    window = "table", windows = "table", panels = "table", sections = "table", widgets = "table",
+    CHROME_HEIGHT = "number", STATUS_RAIL_HEIGHT = "number", NAV_WIDTH = "number",
+    -- Acquisition's active-filter chips: Controller_Acquisition reads them here.
+    _activeFilterTags = "table",
+}
+local WINDOW_FIELDS = { defaultView = true, padding = true, gap = true, views = true }
+local VIEW_SPEC_FIELDS = {
+    width = true, height = true, columns = true, rows = true, cells = true,
+    dynamicColumns = true, dynamicRows = true, padding = true, standalone = true,
+    controllers = true,
+}
+local CELL_FIELDS = { col = true, row = true, colSpan = true, rowSpan = true }
+-- computeSlotRects gives a rect to these three only: a slot of any other name
+-- would place none of its children.
+local PANEL_SLOT_NAMES  = { header = true, body = true, footer = true }
+local PANEL_SLOT_FIELDS = { layout = true, chrome = true, padding = true, gap = true, height = true, align = true }
+-- A floating window (HDG.Window) and the slots its frame composes.
+local FLOAT_WINDOW_FIELDS = { slots = true, shown = true, position = true, lazy = true, parent = true }
+local FLOAT_POSITION_FIELDS = { default = true, movable = true, binding = true, setAction = true }
+local WINDOW_SLOT_NAMES = { top = true, bottom = true, left = true, right = true, corner = true, fill = true }
+local FLOAT_DEFAULT_FIELDS = { x = true, y = true }
+local FILTER_TAG_FIELDS = { axis = true, textSel = true, visibleSel = true }
+local TOOLTIP_FIELDS = { recipe = true }
+local PADDING_SIDES = { top = true, right = true, bottom = true, left = true }
+-- layoutStack stacks "vertical" / "horizontal" and stretches "fill"; it moves
+-- children right on "right" and leaves them left otherwise.
+local LAYOUTS = { vertical = true, horizontal = true, fill = true }
+local ALIGNS  = { left = true, right = true }
+-- getAlong's sizes besides a number; any other string fails the stack's sums.
+local SIZE_WORDS = { fill = true, auto = true, content = true }
+
 -- ===== Layout:Validate helpers ============================================
 -- Each `_validateX` takes `err` (the error-accumulator closure) so the
 -- orchestrator owns it; shared helpers (`_validateContainerPlacement`,
@@ -1639,37 +1705,141 @@ end
 -- (M1 derives the size from columns+rows+padding+gap via GetViewDimensions).
 local function _validDim(v) return type(v) == "number" or v == "auto" end
 
+-- Closed-schema field check. allowed[] is { fieldName -> true } from the
+-- per-level field constant (CONFIG_FIELDS, VIEW_SPEC_FIELDS, PANEL_SPEC_FIELDS,
+-- UNIVERSAL_WIDGET_FIELDS + kindDef.specFields for widgets, ...).
+local function _validateClosedSchema(entity, id, spec, allowed, label, err)
+    for fieldName in pairs(spec) do
+        if not allowed[fieldName] then
+            err(("%s %q: unknown field %q -- not in %s. Typo? Wrong sub-table?")
+                :format(entity, id, tostring(fieldName), label))
+        end
+    end
+end
+
+-- A frame wires the controllers its views list (Controllers:WireAll), so a view
+-- that omits the list would leave its widgets unwired. {} = bindings only. The
+-- names are checked against the controller registry by test_controller_views,
+-- where both are loaded; this engine does not read the registry.
+local function _validateViewControllers(viewName, viewSpec, err)
+    if type(viewSpec.controllers) ~= "table" then
+        err(("config.window.views.%s.controllers is required (the controllers that wire it; {} for none)")
+            :format(viewName))
+        return
+    end
+    for i, name in ipairs(viewSpec.controllers) do
+        if type(name) ~= "string" or name == "" then
+            err(("config.window.views.%s.controllers[%d] must be a controller name"):format(viewName, i))
+        end
+    end
+end
+
+-- A selector-name field: a registered selector, or unset where `required` is not.
+local function _checkSelectorName(where, name, err, required)
+    if name == nil then
+        if required then err(("%s is required (a selector name)"):format(where)) end
+    elseif not (type(name) == "string" and HDG.Selectors:Has(name)) then
+        err(("%s = %s is not a registered selector"):format(where, tostring(name)))
+    end
+end
+
+-- resolveSpacing errors on an unknown token, mid-build of the tab, and reads a
+-- value of any other type as 0.
+local function _checkSpacing(where, value, err)
+    if value == nil or type(value) == "number" then return end
+    if not (type(value) == "string" and HDG.Theme:GetMetric("spacing." .. value)) then
+        err(("%s = %s is not a number or a spacing token"):format(where, tostring(value)))
+    end
+end
+
+-- normalizePadding takes one spacing value for all four sides, or one per side.
+local function _checkPadding(where, value, err)
+    if type(value) ~= "table" then
+        _checkSpacing(where, value, err)
+        return
+    end
+    _validateClosedSchema("padding", where, value, PADDING_SIDES, "PADDING_SIDES", err)
+    for side in pairs(PADDING_SIDES) do _checkSpacing(where .. "." .. side, value[side], err) end
+end
+
+local function _checkSpacingFields(where, spec, err)
+    _checkPadding(where .. ".padding", spec.padding, err)
+    _checkSpacing(where .. ".gap", spec.gap, err)
+end
+
+local function _checkSize(entity, id, field, value, err)
+    if value ~= nil and type(value) ~= "number" and not SIZE_WORDS[value] then
+        err(("%s %q: %s %s is not a number, fill, auto or content"):format(entity, id, field, tostring(value)))
+    end
+end
+
+-- A track is a number or "fill"; the grid reads any other value as a 0-size
+-- track. An "auto" view size sums its tracks, which a "fill" track cannot join.
+local function _validateViewTracks(viewName, viewSpec, dimName, sizeField, err)
+    local tracks = viewSpec[dimName]
+    if type(tracks) ~= "table" then
+        err(("config.window.views.%s.%s is required (a list of tracks)"):format(viewName, dimName))
+        return
+    end
+    for i, t in ipairs(tracks) do
+        local where = ("config.window.views.%s.%s[%d]"):format(viewName, dimName, i)
+        if type(t) ~= "number" and t ~= "fill" then
+            err(("%s = %s is not a number or \"fill\""):format(where, tostring(t)))
+        elseif t == "fill" and viewSpec[sizeField] == "auto" then
+            err(("%s is \"fill\" but %s = \"auto\" sums the tracks"):format(where, sizeField))
+        end
+    end
+end
+
+-- A static grid's cells must lie inside its tracks: _sumSpannedTracks adds
+-- start..start+span-1 and a track past the end is nil. A dimension a selector
+-- supplies is sized at layout time and cannot be checked here.
+local function _validateCellBounds(viewName, cellName, cellSpec, viewSpec, err)
+    local colsOK = viewSpec.dynamicColumns ~= nil
+        or (cellSpec.col >= 1 and cellSpec.col + cellSpec.colSpan - 1 <= #viewSpec.columns)
+    local rowsOK = viewSpec.dynamicRows ~= nil
+        or (cellSpec.row >= 1 and cellSpec.row + cellSpec.rowSpan - 1 <= #viewSpec.rows)
+    if not (colsOK and rowsOK) then
+        err(("config.window.views.%s.cells.%s lies outside the view's %d columns x %d rows")
+            :format(viewName, tostring(cellName), #viewSpec.columns, #viewSpec.rows))
+    end
+end
+
+-- Cells must carry numeric col/row + colSpan/rowSpan -- _sumSpannedTracks and
+-- _computeLiveRowsCols do `start + span - 1` arithmetic, so a missing span is a
+-- latent runtime nil-crash. Catch it at startup.
+local function _validateViewCells(viewName, viewSpec, err)
+    for cellName, cellSpec in pairs(viewSpec.cells or {}) do
+        local where = ("config.window.views.%s.cells.%s"):format(viewName, tostring(cellName))
+        _validateClosedSchema("cell", where, cellSpec, CELL_FIELDS, "CELL_FIELDS", err)
+        if type(cellSpec.col) ~= "number" or type(cellSpec.row) ~= "number"
+           or type(cellSpec.colSpan) ~= "number" or type(cellSpec.rowSpan) ~= "number" then
+            err(("%s needs numeric col/row/colSpan/rowSpan"):format(where))
+        elseif type(viewSpec.columns) == "table" and type(viewSpec.rows) == "table" then
+            _validateCellBounds(viewName, cellName, cellSpec, viewSpec, err)
+        end
+    end
+end
+
 local function _validateWindowView(viewName, viewSpec, err)
+    _validateClosedSchema("view", viewName, viewSpec, VIEW_SPEC_FIELDS, "VIEW_SPEC_FIELDS", err)
+    if viewSpec.standalone ~= nil and type(viewSpec.standalone) ~= "boolean" then
+        err(("config.window.views.%s.standalone must be true or false"):format(viewName))
+    end
     if not _validDim(viewSpec.width) then
         err(("config.window.views.%s.width must be a number or \"auto\""):format(viewName))
     end
     if not _validDim(viewSpec.height) then
         err(("config.window.views.%s.height must be a number or \"auto\""):format(viewName))
     end
-    if not viewSpec.columns then
-        err(("config.window.views.%s.columns is required"):format(viewName))
-    end
-    if not viewSpec.rows then
-        err(("config.window.views.%s.rows is required"):format(viewName))
-    end
-    -- Optional dynamic-tracks selectors. Must be string keys (selector
-    -- names); actual selector resolution happens at runtime in ResolveViewTracks.
-    if viewSpec.dynamicColumns ~= nil and type(viewSpec.dynamicColumns) ~= "string" then
-        err(("config.window.views.%s.dynamicColumns must be a selector name string"):format(viewName))
-    end
-    if viewSpec.dynamicRows ~= nil and type(viewSpec.dynamicRows) ~= "string" then
-        err(("config.window.views.%s.dynamicRows must be a selector name string"):format(viewName))
-    end
-    -- Cells must carry numeric col/row + colSpan/rowSpan -- _sumSpannedTracks and
-    -- _computeLiveRowsCols do `start + span - 1` arithmetic, so a missing span is a
-    -- latent runtime nil-crash. Catch it at startup.
-    for cellName, cellSpec in pairs(viewSpec.cells or {}) do
-        if type(cellSpec.col) ~= "number" or type(cellSpec.row) ~= "number"
-           or type(cellSpec.colSpan) ~= "number" or type(cellSpec.rowSpan) ~= "number" then
-            err(("config.window.views.%s.cells.%s needs numeric col/row/colSpan/rowSpan")
-                :format(viewName, tostring(cellName)))
-        end
-    end
+    _validateViewTracks(viewName, viewSpec, "columns", "width", err)
+    _validateViewTracks(viewName, viewSpec, "rows", "height", err)
+    _checkPadding(("config.window.views.%s.padding"):format(viewName), viewSpec.padding, err)
+    -- Optional dynamic tracks: ResolveViewTracks calls the selector they name.
+    _checkSelectorName(("config.window.views.%s.dynamicColumns"):format(viewName), viewSpec.dynamicColumns, err)
+    _checkSelectorName(("config.window.views.%s.dynamicRows"):format(viewName), viewSpec.dynamicRows, err)
+    _validateViewCells(viewName, viewSpec, err)
+    _validateViewControllers(viewName, viewSpec, err)
 end
 
 -- Window shape: missing height/mode/mode.width would silently become 0
@@ -1680,6 +1850,8 @@ local function _validateWindow(windowCfg, err)
         err("config.window is missing")
         return
     end
+    _validateClosedSchema("window", "config.window", windowCfg, WINDOW_FIELDS, "WINDOW_FIELDS", err)
+    _checkSpacingFields("config.window", windowCfg, err)
     if not windowCfg.views or type(windowCfg.views) ~= "table" then
         err("config.window.views must be a table")
         return
@@ -1692,6 +1864,104 @@ local function _validateWindow(windowCfg, err)
     end
     for viewName, viewSpec in pairs(windowCfg.views) do
         _validateWindowView(viewName, viewSpec, err)
+    end
+end
+
+-- Top level: every key is one the engine or a config file reads, with its type.
+local function _validateConfigFields(config, err)
+    for key, value in pairs(config) do
+        local want = CONFIG_FIELDS[key]
+        if not want then
+            err(("config.%s: unknown top-level field -- not in CONFIG_FIELDS. Typo?"):format(tostring(key)))
+        elseif type(value) ~= want then
+            err(("config.%s must be a %s"):format(key, want))
+        end
+    end
+end
+
+-- HDG.Window reads the saved position through `binding` and dispatches
+-- `setAction` (an ACTIONS key) when a drag stops.
+local function _validateWindowPosition(where, position, err)
+    _validateClosedSchema("window position", where, position, FLOAT_POSITION_FIELDS, "FLOAT_POSITION_FIELDS", err)
+    _checkSelectorName(where .. ".binding", position.binding, err)
+    if position.setAction ~= nil and not HDG.Constants.ACTIONS[position.setAction] then
+        err(("%s.setAction = %s is not a key of Constants.ACTIONS"):format(where, tostring(position.setAction)))
+    end
+    if position.movable ~= nil and type(position.movable) ~= "boolean" then
+        err(("%s.movable must be true or false"):format(where))
+    end
+    local default = position.default
+    if default == nil then return end
+    _validateClosedSchema("window position", where .. ".default", default, FLOAT_DEFAULT_FIELDS,
+        "FLOAT_DEFAULT_FIELDS", err)
+    if type(default.x) ~= "number" or type(default.y) ~= "number" then
+        err(("%s.default needs numeric x and y"):format(where))
+    end
+end
+
+-- A window's slots name the views its frame composes. "@view" is the main
+-- window's open tab; any other view must be standalone, or the main window
+-- would build it as a tab too.
+local function _validateWindowSlots(where, slots, views, err)
+    for slot, view in pairs(slots) do
+        local at = ("%s.slots.%s"):format(where, tostring(slot))
+        if not WINDOW_SLOT_NAMES[slot] then
+            err(("%s: unknown slot -- not in WINDOW_SLOT_NAMES"):format(at))
+        elseif view ~= "@view" and not views[view] then
+            err(("%s = %s does not exist in window.views"):format(at, tostring(view)))
+        elseif view ~= "@view" and not views[view].standalone then
+            err(("%s = %q is not standalone: the main window would also build it as a tab"):format(at, view))
+        end
+    end
+end
+
+local function _validateFloatingWindow(name, win, views, err)
+    local where = ("config.windows.%s"):format(tostring(name))
+    _validateClosedSchema("window", where, win, FLOAT_WINDOW_FIELDS, "FLOAT_WINDOW_FIELDS", err)
+    _checkSelectorName(where .. ".shown", win.shown, err)
+    if win.lazy ~= nil and type(win.lazy) ~= "boolean" then err(("%s.lazy must be true or false"):format(where)) end
+    if win.parent ~= nil and type(win.parent) ~= "function" then
+        err(("%s.parent must be a function returning the parent frame"):format(where))
+    end
+    if win.position ~= nil then _validateWindowPosition(where .. ".position", win.position, err) end
+    if type(win.slots) ~= "table" or win.slots.fill == nil then
+        err(("%s.slots.fill is required (the view the window shows)"):format(where))
+        return
+    end
+    _validateWindowSlots(where, win.slots, views, err)
+end
+
+-- A standalone view builds only into a window that names it (chrome, status and
+-- nav into the main frame, the rest into their own), so one no window names
+-- renders nowhere.
+local function _validateStandaloneViewsShown(windows, views, err)
+    local shown = {}
+    for _, win in pairs(windows) do
+        for _, view in pairs(win.slots or {}) do shown[view] = true end
+    end
+    for viewName, viewSpec in pairs(views) do
+        if viewSpec.standalone and not shown[viewName] then
+            err(("config.window.views.%s is standalone but no config.windows entry shows it"):format(viewName))
+        end
+    end
+end
+
+local function _validateFloatingWindows(config, err)
+    local views = config.window and config.window.views
+    if type(views) ~= "table" then return end   -- reported by _validateWindow
+    for name, win in pairs(config.windows or {}) do
+        _validateFloatingWindow(name, win, views, err)
+    end
+    _validateStandaloneViewsShown(config.windows or {}, views, err)
+end
+
+-- Controller_Acquisition paints one chip per entry from these two selectors.
+local function _validateFilterTags(tags, err)
+    for i, tag in ipairs(tags) do
+        local where = ("config._activeFilterTags[%d]"):format(i)
+        _validateClosedSchema("filter tag", where, tag, FILTER_TAG_FIELDS, "FILTER_TAG_FIELDS", err)
+        _checkSelectorName(where .. ".textSel", tag.textSel, err, true)
+        _checkSelectorName(where .. ".visibleSel", tag.visibleSel, err, true)
     end
 end
 
@@ -1824,18 +2094,6 @@ local function _validateContainerPlacement(entity, id, spec, containerIds, panel
     end
 end
 
--- Closed-schema field check. allowed[] is { fieldName -> true } from the
--- per-entity spec-fields constant (PANEL_SPEC_FIELDS / SECTION_SPEC_FIELDS /
--- UNIVERSAL_WIDGET_FIELDS + kindDef.specFields for widgets).
-local function _validateClosedSchema(entity, id, spec, allowed, label, err)
-    for fieldName in pairs(spec) do
-        if not allowed[fieldName] then
-            err(("%s %q: unknown field %q -- not in %s. Typo? Wrong sub-table?")
-                :format(entity, id, fieldName, label))
-        end
-    end
-end
-
 -- Selector-reference fields: `binding` (widgets) and `visible` (widgets,
 -- panels, sections) may name a selector. A string that isn't a static:/locale:
 -- literal is a selector name and MUST resolve in HDG.Selectors -- otherwise
@@ -1871,12 +2129,101 @@ local function _validateSelectorRefs(entity, id, spec, err)
     end
 end
 
+-- "locale:KEY" resolves in the display fields (_resolveLocaleSpec) and in the
+-- binding (BindingEngine). A key enUS lacks shows as the raw key; a locale
+-- string in any other field reaches the build unresolved.
+local LOCALE_FIELD_SET = {}
+for _, f in ipairs(LOCALE_TEXT_FIELDS) do LOCALE_FIELD_SET[f] = true end
+
+local function _isLocaleRef(v) return type(v) == "string" and v:sub(1, 7) == "locale:" end
+
+local function _checkLocaleKey(entity, id, field, value, err)
+    if _isLocaleRef(value) and not HDG.Locale:Has(value:sub(8)) then
+        err(("%s %q: %s = %q is not a locale key"):format(entity, id, field, value))
+    end
+end
+
+local function _validateLocaleRefs(entity, id, spec, err)
+    for field, value in pairs(spec) do
+        if field == "binding" and type(value) == "table" then
+            for bf, bv in pairs(value) do _checkLocaleKey(entity, id, "binding." .. tostring(bf), bv, err) end
+        elseif LOCALE_FIELD_SET[field] or field == "binding" then
+            _checkLocaleKey(entity, id, field, value, err)
+        elseif _isLocaleRef(value) then
+            err(("%s %q: %s = %q reaches the build unresolved -- not in LOCALE_TEXT_FIELDS or a binding")
+                :format(entity, id, tostring(field), value))
+        end
+    end
+end
+
+-- A Theme role named by a spec (a skin, a label's role, a slot chrome): Theme:Register
+-- only warns on an unknown one and the frame never paints.
+local function _checkSkin(entity, id, field, role, err)
+    if role ~= nil and not HDG.Theme.Skinners[role] then
+        err(("%s %q: %s %q has no Theme Skinner -- it would not paint"):format(entity, id, field, tostring(role)))
+    end
+end
+
+-- layout / align values layoutStack acts on; any other value reads as the default.
+local function _checkLayoutValues(entity, id, spec, err)
+    if spec.layout ~= nil and not LAYOUTS[spec.layout] then
+        err(("%s %q: layout %q is not vertical, horizontal or fill"):format(entity, id, tostring(spec.layout)))
+    end
+    if spec.align ~= nil and not ALIGNS[spec.align] then
+        err(("%s %q: align %q is not left or right"):format(entity, id, tostring(spec.align)))
+    end
+end
+
+local function _validatePanelSlots(id, slots, err)
+    for slotName, slotSpec in pairs(slots) do
+        local where = ("%s.slots.%s"):format(id, tostring(slotName))
+        if not PANEL_SLOT_NAMES[slotName] then
+            err(("panel %q: slot %q gets no rect -- only header, body and footer are laid out")
+                :format(id, tostring(slotName)))
+        end
+        _validateClosedSchema("panel slot", where, slotSpec, PANEL_SLOT_FIELDS, "PANEL_SLOT_FIELDS", err)
+        _checkSkin("panel slot", where, "chrome", slotSpec.chrome, err)
+        _checkLayoutValues("panel slot", where, slotSpec, err)
+        _checkSpacingFields(where, slotSpec, err)
+        -- computeSlotRects subtracts the header and footer heights from the panel's.
+        if slotSpec.height ~= nil and type(slotSpec.height) ~= "number" then
+            err(("panel %q: slot %q height must be a number"):format(id, tostring(slotName)))
+        end
+    end
+end
+
+-- visibleInViews (panels, sections) names the views the entity renders in.
+local function _validateVisibleInViews(config, err)
+    local views = config.window and config.window.views or {}
+    for _, entity in ipairs({ "panels", "sections" }) do
+        for id, spec in pairs(config[entity] or {}) do
+            for _, view in ipairs(spec.visibleInViews or {}) do
+                if not views[view] then
+                    err(("%s %q: visibleInViews names %q, not in window.views"):format(entity, id, tostring(view)))
+                end
+            end
+        end
+    end
+end
+
 local function _validatePanel(id, spec, config, err)
     if spec.kind and not _hasKind(spec.kind) then
         err(("panel %q: kind %q is not a registered WidgetType"):format(id, spec.kind))
     end
     _validateClosedSchema("panel", id, spec, PANEL_SPEC_FIELDS, "PANEL_SPEC_FIELDS", err)
     _validateSelectorRefs("panel", id, spec, err)
+    _validateLocaleRefs("panel", id, spec, err)
+    _validatePanelSlots(id, spec.slots or {}, err)
+    _checkSkin("panel", id, "skin", spec.skin, err)
+    _checkSpacingFields(id, spec, err)
+    if spec.bodyLayout ~= nil and not LAYOUTS[spec.bodyLayout] then
+        err(("panel %q: bodyLayout %q is not vertical, horizontal or fill"):format(id, tostring(spec.bodyLayout)))
+    end
+    -- A panel renders only in the views its cell map names, and the main window
+    -- builds tab by tab: a panel naming none would render nowhere and build in no tab.
+    if next(spec.cell or {}) == nil then
+        err(("panel %q has no cell -- it renders in no view"):format(id))
+    end
     for view, cellName in pairs(spec.cell or {}) do
         local viewSpec = (config.window and config.window.views or {})[view]
         if not viewSpec then
@@ -1891,7 +2238,17 @@ end
 local function _validateSection(id, spec, containerIds, panelSlots, isStackedContainer, err)
     _validateClosedSchema("section", id, spec, SECTION_SPEC_FIELDS, "SECTION_SPEC_FIELDS", err)
     _validateSelectorRefs("section", id, spec, err)
+    _validateLocaleRefs("section", id, spec, err)
     _validateContainerPlacement("section", id, spec, containerIds, panelSlots, isStackedContainer, err)
+    _checkLayoutValues("section", id, spec, err)
+    _checkSpacingFields(id, spec, err)
+    _checkSize("section", id, "width", spec.width, err)
+    _checkSize("section", id, "height", spec.height, err)
+    -- An unknown chrome builds no chrome frame, and the section's widgets, which
+    -- parent to it, then build nowhere.
+    if spec.chrome ~= nil and CHROME_TEMPLATES[spec.chrome] == nil then
+        err(("section %q: chrome %q is not in Layout.CHROME_TEMPLATES"):format(id, tostring(spec.chrome)))
+    end
 end
 
 -- Kinds whose construction requires a `font` field on the spec.
@@ -1950,14 +2307,10 @@ local function _validateWidgetTooltip(id, spec, err)
             :format(id, tostring(spec.kind), type(tip)))
         return
     end
+    _validateClosedSchema("widget tooltip", id, tip, TOOLTIP_FIELDS, "TOOLTIP_FIELDS", err)
     if type(tip.recipe) ~= "string" then
         err(("widget %q (kind %q): tooltip table must be { recipe = \"Name\" } -- got recipe = %s")
             :format(id, tostring(spec.kind), type(tip.recipe)))
-        return
-    end
-    if HDG.TooltipRecipes == nil then
-        err(("widget %q: HDG.TooltipRecipes registry missing -- check "
-            .. "Core/HDGR_TooltipRecipes.lua load order in .toc"):format(id))
         return
     end
     if HDG.TooltipRecipes[tip.recipe] == nil then
@@ -1971,8 +2324,7 @@ end
 local function _validateWidgetScrollbox(id, spec, err)
     if spec.kind ~= "scrollbox" then return end
     if spec.rowKind then
-        local def = HDG.Rows.Get and HDG.Rows:Get(spec.rowKind) or nil
-        if not def then
+        if not HDG.Rows:Get(spec.rowKind) then
             err(("widget %q: scrollbox rowKind %q not registered in HDG.Rows")
                 :format(id, spec.rowKind))
         end
@@ -1980,6 +2332,60 @@ local function _validateWidgetScrollbox(id, spec, err)
     end
     if not spec.rowHeight then
         err(("widget %q: scrollbox without rowKind requires `rowHeight` field"):format(id))
+    end
+end
+
+-- Names a widget's build resolves. An unknown font role or cell kind errors only
+-- when the widget's tab is first built; an unknown role or skin only warns.
+local function _validateWidgetRefs(id, spec, err)
+    if spec.font ~= nil and HDG.Theme:GetFont(spec.font) == nil then
+        err(("widget %q: font role %q is not a Theme font"):format(id, tostring(spec.font)))
+    end
+    _checkSkin("widget", id, "role", spec.role, err)
+    _checkSkin("widget", id, "skin", spec.skin, err)
+    _checkSize("widget", id, "width", spec.width, err)
+    _checkSize("widget", id, "height", spec.height, err)
+    if not (spec.kind and _hasKind(spec.kind)) then return end
+    local kindDef = HDG.WidgetTypes:TryGet(spec.kind)
+    if spec.cellKind ~= nil and not (kindDef.resolveCellKind and kindDef.resolveCellKind(spec.cellKind)) then
+        err(("widget %q: cellKind %q is not a registered %s cell kind")
+            :format(id, tostring(spec.cellKind), spec.kind))
+    end
+    local problem = kindDef.checkSpec and kindDef.checkSpec(spec)
+    if problem then err(("widget %q (kind %q): %s"):format(id, spec.kind, problem)) end
+end
+
+-- resolveAsync: a list of entries BindingEngine asserts on at the first paint.
+local RESOLVE_ASYNC_FIELDS = { idField = true, valueField = true, resolver = true }
+local function _validateResolveAsync(id, spec, err)
+    if spec.resolveAsync == nil then return end
+    for i, entry in ipairs(spec.resolveAsync) do
+        local where = ("%s.resolveAsync[%d]"):format(id, i)
+        _validateClosedSchema("widget", where, entry, RESOLVE_ASYNC_FIELDS, "RESOLVE_ASYNC_FIELDS", err)
+        if type(entry.idField) ~= "string" or type(entry.valueField) ~= "string"
+           or type(entry.resolver) ~= "table" or type(entry.resolver.Request) ~= "function" then
+            err(("widget %q: resolveAsync[%d] needs idField, valueField and a resolver with Request"):format(id, i))
+        end
+    end
+end
+
+-- BindingEngine pushes the fields the kind's dispatch declares (a scalar binding
+-- fills the first). On a kind without them the bind errors; a field the kind
+-- does not declare is resolved on every push and never painted.
+local function _validateWidgetBinding(id, spec, err)
+    if spec.binding == nil or not (spec.kind and _hasKind(spec.kind)) then return end
+    local dispatch = HDG.WidgetTypes:TryGet(spec.kind).dispatch
+    if not (dispatch and dispatch.fields and dispatch.fields[1]) then
+        err(("widget %q: kind %q has no dispatch fields to bind"):format(id, spec.kind))
+        return
+    end
+    if type(spec.binding) ~= "table" then return end
+    local declared = {}
+    for _, field in ipairs(dispatch.fields) do declared[field] = true end
+    for field in pairs(spec.binding) do
+        if not declared[field] then
+            err(("widget %q: binding.%s is not a dispatch field of kind %q"):format(id, tostring(field), spec.kind))
+        end
     end
 end
 
@@ -1998,14 +2404,26 @@ local function _validateWidget(id, spec, containerIds, panelSlots, isStackedCont
     _validateWidgetTooltip(id, spec, err)
     _validateWidgetScrollbox(id, spec, err)
     _validateSelectorRefs("widget", id, spec, err)
+    _validateLocaleRefs("widget", id, spec, err)
+    _validateWidgetRefs(id, spec, err)
+    _validateWidgetBinding(id, spec, err)
+    _validateResolveAsync(id, spec, err)
 end
 
+-- Every level of the config is checked, and every level is closed: a field no
+-- check knows is an error, so the config cannot grow a part Validate skips.
+-- Run by tests/test_layout_validate.lua, which deploy and release require; the
+-- game does not run it (the spec is fixed at ship time).
 function Layout:Validate(config)
     config = config or HDG.LayoutConfig or {}
     local errors = {}
     local function err(msg) errors[#errors + 1] = msg end
 
+    _validateConfigFields(config, err)
     _validateWindow(config.window, err)
+    _validateFloatingWindows(config, err)
+    _validateFilterTags(config._activeFilterTags or {}, err)
+    _validateVisibleInViews(config, err)
     local containerIds, panelSlots = _buildContainerIndexes(config)
     local isStackedContainer = _makeIsStackedContainer(config)
     _validateMiskeying(config, err)

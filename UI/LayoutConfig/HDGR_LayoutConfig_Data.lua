@@ -15,7 +15,7 @@ local LC = HDG.LayoutConfig
 -- ===== View ==================================================================
 
 LC.window.views.data = {
-    explicit = true,
+    controllers = { "data" },
     width    = "auto",       -- 4 + 760 + 4 = 768
     height   = "auto",       -- chrome + status from window slots (ADR-025)
     columns  = { 760 },

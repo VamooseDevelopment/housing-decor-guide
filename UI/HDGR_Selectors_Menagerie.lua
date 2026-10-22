@@ -78,25 +78,47 @@ local function _matchesAxis(row, ui)
 end
 
 -- ===== the list =============================================================
--- Row envelopes carry name + kind ONLY (ruling 13: no size on rows; scale lives
--- in the scene). Everything the row factory paints is stamped HERE so it never
--- dives into state mid-paint (cookbook 03).
--- No `selected` on the row: the list's SelectionBehaviorMixin stamps that onto
--- the element itself and the controller re-syncs it from the Store after a
--- re-push. Baking it here made every click rebuild the whole list to flip one
--- boolean (1 MB a click, 2026-09-13 allocation audit).
-local function _menagerieRow(row, weight)
-    return {
-        kind      = "menagerieRow",
-        speciesID = row.speciesID,
-        name      = row.displayName,
-        kindLabel = row.kind or "?",   -- exception(nullable): post-build species -- "?" is the honest mark
-        -- Only the Room axis ranks, so only its rows say how well they fit. The
-        -- weight itself never reaches the row: the player is owed the judgement
-        -- ("belongs here"), not the number behind it.
-        weight    = weight,
-        fit       = weight and HDG.Locale:Get(M().ROOM_FIT[weight]) or nil,
-    }
+-- The row factory paints name + kind ONLY (ruling 13: no size on rows; scale
+-- lives in the scene), plus the fit under a ranking axis. Everything it paints is
+-- on the row, so it never dives into state mid-paint (cookbook 03).
+-- No `selected` stamped here: the list's Intrusive SelectionBehavior writes it
+-- onto the row and the controller re-syncs it from the Store after a re-push.
+-- Baking it made every click rebuild the whole list to flip one boolean (1 MB a
+-- click, 2026-09-13 allocation audit).
+--
+-- Rows are reused across rebuilds, one per species, the same way and for the
+-- same reason as decor.items: a fresh ~0.5 KB envelope per pet cost ~1 MB a
+-- build (first Menagerie visit, 2026-10-21), and every search keystroke and
+-- axis change builds again. A row holds only what is its own and reads the
+-- pet's fields (speciesID, displayName, ...) through to its index entry, so the
+-- list's writes land on the row, never on the entry. Safe for the reason
+-- decor.items gives: nothing keeps an older result, and the list refills from
+-- the new array each compute. Weak values: the rows go when the list lets go.
+local _rowsBySpecies = setmetatable({}, { __mode = "v" })
+local ROW_META = { __index = function(row, key) return row._pet[key] end }
+
+-- Nil is written only over a field the row HAS: WoW's Lua 5.1 inserts the key of
+-- `row.k = nil` when the row lacks it, and a full two-field row doubles to make
+-- room. Writing weight/fit/selected unconditionally cost ~300 KB a build
+-- (measured 731 KB against ~490 predicted, 2026-10-21).
+local function _menagerieRow(pet, weight)
+    local kindLabel = pet.kind or "?"   -- exception(nullable): post-build species -- "?" is the honest mark
+    local row = _rowsBySpecies[pet.speciesID]
+    if row then
+        row._pet, row.kindLabel = pet, kindLabel
+        if rawget(row, "selected") ~= nil then row.selected = nil end
+    else
+        row = setmetatable({ _pet = pet, kindLabel = kindLabel }, ROW_META)
+        _rowsBySpecies[pet.speciesID] = row
+    end
+    -- Only a ranking axis (a room or a mood) ranks, so only its rows say how
+    -- well they fit. The weight itself never reaches the paint: the player is
+    -- owed the judgement ("belongs here"), not the number behind it.
+    if weight ~= nil or rawget(row, "weight") ~= nil then
+        row.weight = weight
+        row.fit    = weight and HDG.Locale:Get(M().ROOM_FIT[weight]) or nil
+    end
+    return row
 end
 
 Selectors:Register("menagerie.items", {
@@ -137,7 +159,7 @@ Selectors:Register("menagerie.items", {
             -- of equal weight swap places between repaints.
             table.sort(out, function(x, y)
                 if x.weight ~= y.weight then return x.weight > y.weight end
-                return x.name < y.name
+                return x.displayName < y.displayName
             end)
         end
         return out
@@ -427,7 +449,8 @@ Selectors:Register(NS .. ".flow", {
 -- ===== the scene ============================================================
 Selectors:Register(NS .. ".scene", {
     calls = { SELECTED },
-    reads = { "session.ui.menagerie.scene", "session.resolvers.staticData.tick" },
+    reads = { "session.ui.menagerie.scene", "session.resolvers.staticData.tick",
+              "session.resolvers.pets.tick" },
     fn = function(state, ctx)
         local p = Selectors:Call(SELECTED, state, ctx)
         if not p then return nil end   -- exception(nullable): empty stage pre-selection
@@ -443,7 +466,7 @@ Selectors:Register(NS .. ".scene", {
         end
         return {
             speciesID    = p.speciesID,
-            petDisplayID = p.displayID,   -- exception(nullable): a species with no display renders 2D fallback
+            petDisplayID = HDG.PetObserver:DisplayID(p.speciesID),   -- exception(nullable): a species with no display renders 2D fallback
             petHeight    = p.height,
             petScale     = HDG.StaticData.PetFacts:SceneScale(p.speciesID),
             petLift      = HDG.StaticData.PetFacts:SceneLift(p.speciesID),

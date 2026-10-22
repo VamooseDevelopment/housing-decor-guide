@@ -17,7 +17,7 @@ local LC = HDG.LayoutConfig
 -- ===== View ==================================================================
 
 LC.window.views.config = {
-    explicit = true,
+    controllers = { "config" },
     width    = "auto",       -- 4 + 600 + 4 + 320 + 4 = 932
     height   = "auto",
     columns  = { 600, 320 },  -- settings (left) + single-column Theme Preview (right)

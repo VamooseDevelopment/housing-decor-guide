@@ -91,9 +91,9 @@ HDG.Rows:Register("petRow", {
 })
 
 -- ===== Controller ============================================================
--- The contract is Wire AND Refresh: Controllers:RefreshAll calls Refresh on every
--- registered controller with no guard (HDGR_Controllers.lua:58), so a controller
--- missing either one takes down the whole refresh pass.
+-- The contract is Wire AND Refresh: Controllers:RefreshViews calls Refresh on
+-- every controller a shown view lists with no guard, so a controller missing
+-- either one takes down the whole refresh pass.
 --
 -- The search box writes the SAME transient the decor search does, so flipping to
 -- Pets mid-search keeps what you typed -- which is what you want, because the

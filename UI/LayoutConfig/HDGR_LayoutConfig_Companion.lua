@@ -36,7 +36,7 @@ local LC = HDG.LayoutConfig
 -- ===== View ==================================================================
 
 LC.window.views.companion = {
-    explicit   = true,
+    controllers = { "companion" },
     standalone = true,            -- HDG.Window floating frame; not a main-window tab
     width      = "auto",          -- 5 decor cards wide (HDG-like vertical layout; was 8)
     height     = "auto",          -- grid ~2 card-rows taller; recent strip is its own panel below

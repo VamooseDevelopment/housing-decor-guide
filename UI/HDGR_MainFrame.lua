@@ -1,11 +1,13 @@
 -- HDG MainFrame
 --
 -- Shell. Owns the outer frame and orchestrates the layout pipeline:
---   1. Layout:BuildAll          -- spec-driven widget construction
+--   1. Layout:BuildAll          -- spec-driven widget construction: chrome,
+--                                  status, nav and the open tab; every other
+--                                  tab on its first visit (BuildView stage)
 --   2. Controllers:WireAll      -- attach event handlers to spec'd widgets
 --   3. EventBus                 -- HDGR_STATE_CHANGED triggers Refresh
 --   4. Refresh                  -- Layout:Compute -> Layout:Apply ->
---                                  Controllers:RefreshAll
+--                                  Controllers:RefreshViews
 
 HDG = HDG or {}
 
@@ -35,6 +37,21 @@ local function _buildAfterCombat(self)
     end
     self._mainWindowBuildDeferred = true
     HDG.Store:Subscribe(onAction)
+end
+
+-- ESC closes the window; every other key passes through to the game.
+-- SetPropagateKeyboardInput is protected in combat (see the build gate below),
+-- and the window can stay open into a fight when Hide in combat is off. In
+-- combat, skip it: ESC still toggles, other keys follow the propagate state the
+-- window opened with (true, set on show) until combat ends.
+function HDG.OnMainWindowKeyDown(frame, key)
+    local canSet = not InCombatLockdown()  -- exception(boundary): protected call in combat
+    if key == "ESCAPE" then
+        if canSet then frame:SetPropagateKeyboardInput(false) end
+        HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.MAIN_WINDOW_TOGGLE })
+    elseif canSet then
+        frame:SetPropagateKeyboardInput(true)
+    end
 end
 
 function HDG:CreateMainWindow()
@@ -86,11 +103,12 @@ function HDG:CreateMainWindow()
     -- focused EditBox consumes Escape itself, clearing focus before this fires).
     frame:EnableKeyboard(true)
     frame:SetPropagateKeyboardInput(true)
-    frame:SetScript("OnKeyDown", function(self, key)
-        if key == "ESCAPE" then
-            self:SetPropagateKeyboardInput(false)
-            HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.MAIN_WINDOW_TOGGLE })
-        else
+    frame:SetScript("OnKeyDown", HDG.OnMainWindowKeyDown)
+    -- ESC leaves propagate false on the way out. Reopened by mouse, the window kept
+    -- it, and a fight that began before the first key press swallowed every key.
+    -- The window only shows out of combat (the pipeline defers in combat).
+    frame:HookScript("OnShow", function(self)
+        if not InCombatLockdown() then   -- exception(boundary): protected call in combat
             self:SetPropagateKeyboardInput(true)
         end
     end)
@@ -172,52 +190,208 @@ function HDG:ToggleMainWindow()
     return frame
 end
 
+-- ===== Build profiling ======================================================
+-- Splits the first-open build into its steps, so /hdgr perf can say where its
+-- allocation goes. The 2026-10-20 first-open profile showed a 15.4 MB
+-- MAIN_WINDOW_TOGGLE flush with only ~3.4 MB in pipeline stages, and nothing
+-- to say how the rest divides between the frame tree, the wiring and the
+-- first paint. One op row for the build, one quiet row per
+-- step; the steps partition it, and "~unlapped" is what they did not cover.
+-- Live only during a timed build: every lap is one nil-check with perf off.
+local BUILD_STEPS = { "views", "chrome+status+nav", "wire", "bind", "firstRefresh" }
+-- { ms = {step=ms}, kb = {step=KB}, tabs = { {tab, ms, kb} }, t0, k0, t, k, tt, tk } during a timed build
+local _buildProf = nil
+
+local function _openBuildProfile()
+    local perf = HDG.Perf
+    if not (perf and perf:Enabled()) then return end
+    local t0, k0 = perf:Open()
+    _buildProf = { ms = {}, kb = {}, tabs = {}, t0 = t0, k0 = k0, t = t0, k = k0, tt = t0, tk = k0 }
+end
+
+-- One lap = the clock and the heap. The heap delta is true allocation: the
+-- build's own sample holds the collector until it closes (HDG.Perf, Sampling).
+local function _buildLap(step)
+    if not _buildProf then return end
+    local now, know = _G.debugprofilestop(), collectgarbage("count")
+    _buildProf.ms[step] = now - _buildProf.t
+    _buildProf.kb[step] = know - _buildProf.k
+    _buildProf.t, _buildProf.k = now, know
+    _buildProf.tt, _buildProf.tk = now, know
+end
+
+-- One row per tab inside the views step, from the same clock and heap: which tabs
+-- carry the frame tree is what says whether building a tab on its first visit pays.
+local function _tabLap(tab)
+    if not _buildProf then return end
+    local now, know = _G.debugprofilestop(), collectgarbage("count")
+    local tabs = _buildProf.tabs
+    tabs[#tabs + 1] = { tab = tab, ms = now - _buildProf.tt, kb = know - _buildProf.tk }
+    _buildProf.tt, _buildProf.tk = now, know
+end
+
+-- The first refresh paints only when the window was already toggled open (the
+-- subscriber build in Init); built ahead of the toggle (slash), it stays hidden
+-- and the paint lands in the toggle's flush. The row says which, so a near-zero
+-- firstRefresh is not read as a cheap paint.
+local function _closeBuildProfile(shown)
+    if not _buildProf then return end
+    local perf = HDG.Perf
+    local totalMs, totalKB = perf:RecordOp("mainWindow.build", _buildProf.t0, _buildProf.k0)
+    local lappedMs, lappedKB = 0, 0
+    for _, step in ipairs(BUILD_STEPS) do
+        local label = step
+        if step == "firstRefresh" then
+            label = shown and "firstRefresh (window shown: painted)"
+                           or "firstRefresh (window hidden: paints in the toggle flush)"
+        end
+        perf:RecordOpQuiet("mainWindow.build." .. label, _buildProf.ms[step], _buildProf.kb[step])
+        lappedMs = lappedMs + _buildProf.ms[step]
+        lappedKB = lappedKB + _buildProf.kb[step]
+    end
+    perf:RecordOpQuiet("mainWindow.build.~unlapped", totalMs - lappedMs, totalKB - lappedKB)
+    for _, row in ipairs(_buildProf.tabs) do
+        perf:RecordOpQuiet(("mainWindow.build.views.%s (inside views)"):format(row.tab), row.ms, row.kb)
+    end
+    _buildProf = nil
+end
+
+-- The main window's tabs, in a fixed order: LayoutConfig's views less the
+-- standalone ones (chrome, status and nav build into the window apart; the
+-- floating windows build into their own frames).
+local function _mainWindowTabs(config)
+    local tabs = {}
+    for name, spec in pairs(config.window.views) do
+        if not spec.standalone then tabs[#tabs + 1] = name end
+    end
+    table.sort(tabs)
+    return tabs
+end
+
+-- ===== Build each tab on its first visit ====================================
+-- Building every tab at the first open was 10.3 MB of the window's 15 MB build
+-- (profile 2026-10-20); a player opens a few of the 21. A tab builds when the
+-- pass that shows it first runs, with the tabs it shares a controller with: a
+-- controller wires onto every widget its tabs hold (UI.W is strict), so the four
+-- Projects tabs, which share one, build together. No panel is in two tabs
+-- (test_main_window_tabs_build), so a controller is the only link.
+
+-- The tabs that list each controller.
+local function _tabsByController(config, tabs)
+    local byController = {}
+    for _, tab in ipairs(tabs) do
+        for _, name in ipairs(config.window.views[tab].controllers) do
+            byController[name] = byController[name] or {}
+            table.insert(byController[name], tab)
+        end
+    end
+    return byController
+end
+
+-- The tab group of `start`: every tab reached through shared controllers.
+-- Each member maps to the same sorted list in `groups`.
+local function _collectGroup(config, start, byController, groups)
+    local group, seen, i = { start }, { [start] = true }, 1
+    while group[i] do
+        for _, name in ipairs(config.window.views[group[i]].controllers) do
+            for _, other in ipairs(byController[name]) do
+                if not seen[other] then
+                    seen[other] = true
+                    group[#group + 1] = other
+                end
+            end
+        end
+        i = i + 1
+    end
+    table.sort(group)
+    for _, tab in ipairs(group) do groups[tab] = group end
+end
+
+-- tab -> its build group, per config. A standalone view has none: it is
+-- chrome, or a floating window's content.
+local _tabGroups = setmetatable({}, { __mode = "k" })
+local function _groupsOf(config)
+    local groups = _tabGroups[config]
+    if groups then return groups end
+    groups = {}
+    local tabs = _mainWindowTabs(config)
+    local byController = _tabsByController(config, tabs)
+    for _, tab in ipairs(tabs) do
+        if not groups[tab] then _collectGroup(config, tab, byController, groups) end
+    end
+    _tabGroups[config] = groups
+    return groups
+end
+
+-- Build a group's tabs into the main window, one BuildAll pass each. Pass env
+-- so Theme:Register can extract env.scheme (per spec 9.2); seam for sub-tree
+-- previews without touching Theme.currentScheme.
+local function _buildGroup(frame, group)
+    local env = HDG.Environment._current
+    for _, tab in ipairs(group) do
+        HDG.Layout:BuildAll(frame, HDG.LayoutConfig, env, { viewFilter = tab })
+        frame._hdgrBuiltViews[tab] = true
+        _tabLap(tab)
+    end
+end
+
+-- The pass about to show `view` builds its group if no visit has yet, then wires
+-- and binds what the group brought (both skip what earlier visits did). Reached
+-- only from the pipeline (BuildView stage): a combat pass is held whole, so a
+-- tab never builds in combat, and the flush has finished dispatching.
+function HDG:EnsureMainWindowView(frame, view)
+    if frame._hdgrBuiltViews[view] then return end
+    local group = _groupsOf(HDG.LayoutConfig)[view]
+    local perf = HDG.Perf
+    local timed = perf:Enabled()
+    local t0, k0
+    if timed then t0, k0 = perf:Open() end
+    _buildGroup(frame, group)
+    HDG.Controllers:WireAll(frame)
+    HDG.BindingEngine:Build(frame, HDG.LayoutConfig)
+    if timed then perf:RecordOp("mainWindow.buildView " .. table.concat(group, "+"), t0, k0) end
+end
+
 function HDG:BuildMainWindow(parent)
     if not parent then return end
+    _openBuildProfile()
 
-    -- 0. Validate the spec; loud failures are better than silent typos.
-    local errors = HDG.Layout:Validate(HDG.LayoutConfig)
-    if errors and #errors > 0 then
-        HDG.Log:Notify("error", "LayoutConfig validation errors:")
-        for _, msg in ipairs(errors) do HDG.Log:Notify("error", "  - " .. tostring(msg)) end
-    end
+    -- The spec is checked at ship time, not here: tests/test_layout_validate.lua
+    -- runs Layout:Validate, and deploy and release refuse to go past it. Run at
+    -- every first open it re-checked a fixed spec for 1.36 MB (/hdgmem build).
 
-    -- 1. Build the entire frame tree from LayoutConfig. Pass env so
-    -- Theme:Register can extract env.scheme (per spec 9.2); seam for
-    -- sub-tree previews without touching Theme.currentScheme.
-    local env = HDG.Environment._current or nil
-    -- excludeStandalone: skip panels whose cell map exclusively targets
-    -- standalone views (e.g. lumberWindow). Those panels are built by
-    -- HDG.Window into their own floating frame instead -- if we built
-    -- them here too they'd render twice + steal click focus from the
+    -- 1. Build the open tab's group, one tab at a time; the rest build on their
+    -- first visit (HDG:EnsureMainWindowView). Standalone-only panels (e.g.
+    -- lumberWindow) are in no tab: HDG.Window builds them into their own floating
+    -- frame, and built here too they'd render twice + steal click focus from the
     -- standalone window.
-    HDG.Layout:BuildAll(parent, HDG.LayoutConfig, env, { excludeStandalone = true })
+    parent._hdgrBuiltViews = {}
+    local open = HDG.Layout:ResolveFillView(HDG.LayoutConfig, "main", HDG.Store:GetState())
+    _buildGroup(parent, _groupsOf(HDG.LayoutConfig)[open])
+    _buildLap("views")
 
-    -- 1a. Chrome/status slot-views: standalone so the main BuildAll skipped them.
+    -- 1a. Chrome/status slot-views: standalone so no tab pass built them.
     -- Build into the SAME frame; ComposeWindow positions via top/bottom slots.
+    local env = HDG.Environment._current
     HDG.Layout:BuildAll(parent, HDG.LayoutConfig, env, { viewFilter = "chrome" })
     HDG.Layout:BuildAll(parent, HDG.LayoutConfig, env, { viewFilter = "status" })
 
-    -- 1b. Sidebar nav: standalone treeList, skipped by main BuildAll.
+    -- 1b. Sidebar nav: standalone treeList, no tab pass built it.
     -- Build into the main frame; ComposeWindow places via slots.left = "nav".
     HDG.Layout:BuildAll(parent, HDG.LayoutConfig, env, { viewFilter = "nav" })
+    _buildLap("chrome+status+nav")
 
-    -- 2. Wire the close button. Dispatches MAIN_WINDOW_TOGGLE (SSoT = mainWindowShown);
-    --    a direct Hide() would desync and FrameVisibility would re-show the window.
-    local closeButton = parent.widgets and parent.widgets["streamPanel.closeButton"]
-    if closeButton and closeButton.SetScript then
-        closeButton:SetScript("OnClick", function()
-            HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.MAIN_WINDOW_TOGGLE })
-        end)
-    end
-
-    -- 3. Controllers wire behaviour to spec'd widgets.
+    -- 2. Controllers wire behaviour to spec'd widgets (the close button: Chrome).
     HDG.Controllers:WireAll(parent)
+    _buildLap("wire")
 
-    -- 4. Tag bound widgets so the binding engine can push values during Refresh.
+    -- 3. Tag bound widgets so the binding engine can push values during Refresh.
     HDG.BindingEngine:Build(parent, HDG.LayoutConfig)
+    _buildLap("bind")
 
     self:RefreshMainWindow()
+    _buildLap("firstRefresh")
+    _closeBuildProfile(parent:IsShown())
 end
 
 -- ===== Pipeline stages per UI_WIDGET_TAXONOMY.md section 6 ================
@@ -279,8 +453,9 @@ PIPELINE_STAGES[#PIPELINE_STAGES + 1] = {
             -- Open transition: THIS pass does the full catch-up repaint. Escalate the
             -- narrow MAIN_WINDOW_TOGGLE invalidation ({mainWindowShown}) to "*" so Bind
             -- paints everything now. MAIN_WINDOW_OPENING below is then purely a module-wake
-            -- signal -- its own pipeline pass is skipped by _paintsMainWindow, so opening
-            -- costs ONE full pass instead of two.
+            -- signal -- its own pipeline pass is skipped by _paintsMainWindow. So an open
+            -- costs two full passes, this one and the coalesced reflow requested above,
+            -- not three.
             ctx.invalidation = "*"
             -- Gated modules (CollectionReconciler, BagObserver, etc.) slept while the
             -- addon was closed. Dispatch a single MAIN_WINDOW_OPENING so they catch up
@@ -288,8 +463,17 @@ PIPELINE_STAGES[#PIPELINE_STAGES + 1] = {
             HDG.Store:Dispatch({
                 type = HDG.Constants.ACTIONS.MAIN_WINDOW_OPENING,
             })
+            -- Open: the lists hold the rows the memos built, so aging one out would
+            -- free nothing and cost a rebuild on the next switch. Aging waits for the close.
+            HDG.Selectors:HoldAging(true)
         elseif not desired and isShown then
             frame:Hide()
+            -- Closed: lists hand back their data and the memos go with them; the
+            -- open transition above repaints everything with "*". Memos rebuilt
+            -- while closed (tooltips, bag badges) age out again.
+            HDG.BindingEngine:Release(frame)
+            HDG.Selectors:InvalidateMemos("*")
+            HDG.Selectors:HoldAging(false)
         end
         -- Publish post-reconcile visibility so Bind/Layout can skip when the
         -- window is hidden (frame-level extension of Engine:Apply's per-widget
@@ -310,18 +494,15 @@ PIPELINE_STAGES[#PIPELINE_STAGES + 1] = {
         local config = HDG.LayoutConfig
         local state  = HDG.Store:GetState()
 
-        local activeView = state.account.ui.view
-        if not (activeView and config.window.views[activeView]) then
-            activeView = config.window.defaultView
-        end
-        -- Shopping and Zone are now independent HDG.Window floating frames.
-        -- No view-override needed here; the main window always shows the
-        -- user's saved tab (activeView). Both standalone views are flagged
-        -- standalone=true so BuildAll(excludeStandalone=true) skips them.
+        -- The user's saved tab (Layout:ResolveFillView: defaultView when unset,
+        -- retired, or a standalone view -- Shopping and Zone are their own
+        -- HDG.Window floating frames).
+        local activeView = HDG.Layout:ResolveFillView(config, "main", state)
 
         ctx.config     = config
         ctx.state      = state
         ctx.view       = activeView
+        ctx.views      = HDG.Layout:WindowViews(config, "main", state)   -- chrome, status, nav + the tab
         ctx.viewSpec   = config.window.views[activeView]
         -- Window size = the active view's natural dimensions. Window
         -- composition (HDG-ADR-025): the `main` window hugs its `fill` view,
@@ -330,6 +511,17 @@ PIPELINE_STAGES[#PIPELINE_STAGES + 1] = {
         -- so "auto" width/height are handled uniformly.
         ctx.targetWidth, ctx.targetHeight =
             HDG.Layout:ComposeWindowDimensions(config, "main", state)
+    end,
+}
+
+-- Stage 1b: BuildView -- build the tab on its first visit (HDG:EnsureMainWindowView),
+-- before Bind/ControllerRefresh/Layout, so the pass that switches to it paints it:
+-- its widgets are born hidden and stale, and Layout pushes each one it reveals.
+PIPELINE_STAGES[#PIPELINE_STAGES + 1] = {
+    name = "BuildView",
+    predicate = _paintsMainWindow,
+    run  = function(ctx)
+        HDG:EnsureMainWindowView(ctx.frame, ctx.view)
     end,
 }
 
@@ -383,17 +575,17 @@ PIPELINE_STAGES[#PIPELINE_STAGES + 1] = {
 -- BEFORE Layout per spec section 6: visibility is now declarative (the
 -- `visible` field on widget specs, resolved by Layout:Compute), so
 -- controllers no longer need to win Show/Hide races against Layout.
+-- Only the controllers the shown views list refresh (chrome, status, nav + the tab).
 PIPELINE_STAGES[#PIPELINE_STAGES + 1] = {
     name = "ControllerRefresh",
     -- Skip for LOG_PUSH: a log append repaints the status rail via Bind, but
     -- triggers no imperative controller side effects + moves nothing (perf).
     predicate = function(ctx)
         return _paintsMainWindow(ctx)
-           and HDG.Controllers.RefreshAll
            and ctx.actionType ~= HDG.Constants.ACTIONS.LOG_PUSH
     end,
     run = function(ctx)
-        HDG.Controllers:RefreshAll(ctx.frame, ctx)
+        HDG.Controllers:RefreshViews(ctx.frame, ctx, ctx.views)
     end,
 }
 
@@ -471,9 +663,9 @@ PIPELINE_STAGES[#PIPELINE_STAGES + 1] = {
     run = function(_ctx) end,
 }
 
--- Pipeline runner. Iterates stages in spec section 6 order. Each stage is
--- pcall-wrapped per spec audit finding C2 so a crash in (e.g.) Bind doesn't
--- silently skip Layout / ControllerRefresh and leave the UI half-refreshed.
+-- Pipeline runner. Iterates stages in spec section 6 order. Each stage is a
+-- strict call (ADR-042): a throw aborts the whole pass loudly rather than run
+-- later stages on a half-bound frame.
 --
 -- `invalidation` is threaded into ctx so the Bind stage can
 -- forward it to BindingEngine:Apply for selective widget refresh.

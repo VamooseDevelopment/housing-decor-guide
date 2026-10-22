@@ -223,6 +223,17 @@ function W:CreateAll()
     end
 end
 
+-- Scheme / font-face change: re-measure and repaint every satellite whatever its
+-- interest set (a nil invalidation bypasses the gate) -- none of them reads the
+-- theme settings, so the reconcile subscriber skips them. Theme calls this after
+-- rebuilding its fonts, so the repaint sees the new face and paint generation.
+function W:RepaintAll()
+    for name, frame in pairs(self._frames) do
+        HDG.UI.RefreshIntrinsicWidths(frame)
+        self:_ReconcileOne(name, nil)
+    end
+end
+
 -- ===== Lazy creation (HouseEditorCompanion) =================================
 -- Idempotent: returns the existing frame on second call.
 -- CreateAll subscription reconciles the new frame on subsequent dispatches;

@@ -658,7 +658,9 @@ function RecipesController:Wire(rootFrame)
     if breadcrumbFs and scrollBox and scrollBox.RegisterCallback and scrollBox.FindElementData then
         local lastGroup
         local function setBreadcrumb(beginIndex)
-            local ed    = beginIndex and scrollBox:FindElementData(beginIndex)
+            -- exception(nullable): closing the window releases the list's data and the
+            -- ScrollBox still reports the range change -- a list with no data has no group.
+            local ed    = beginIndex and scrollBox:HasDataProvider() and scrollBox:FindElementData(beginIndex)
             local group = ed and ed.groupLabel
             if group == lastGroup then return end   -- skip redundant SetText churn
             lastGroup = group

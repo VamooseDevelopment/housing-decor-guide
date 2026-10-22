@@ -12,7 +12,7 @@ local LC = HDG.LayoutConfig
 -- ===== View ==================================================================
 
 LC.window.views.trainers = {
-    explicit = true,
+    controllers = { "trainers" },
     width    = "auto",       -- 4 + 760 + 4 = 768
     height   = "auto",       -- chrome + status now come from the window's slots
     columns  = { 760 },

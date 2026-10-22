@@ -11,64 +11,27 @@ local Selectors = HDG.Selectors
 -- ============================================================================
 -- decor.allItems -> unfiltered sorted list from HousingCatalogObserver
 -- decor.filterQuery -> current search query
--- decor.items -> post-filter list (scrollbox binds here)
+-- decor.matchingRows -> post-filter rows, catalog order
+-- decor.items -> the list (scrollbox binds here): matchingRows, Stored-sorted in Stored mode
 -- decor.headerLabel -> "OWNED/TOTAL (PCT%)" + optional "* N shown" tail
 --
--- iconTexture is the catalog's rendered preview icon (NOT GetItemIconByID).
+-- The catalog's own rows, sorted by name. Not copies: the observer patches a row's
+-- counts in place when the game moves them, so a count change rebuilds this array
+-- of references and nothing else (a copy of every row was ~1.7 MB in WoW on every
+-- count change with Decor open, memory plan 2026-10-19 sec 6). Rows are the
+-- facade's tables: readers never write to them.
 Selectors:Register("decor.allItems", {
     reads    = {"account.collection.ownedDecorIDs", "session.resolvers.catalog.tick"},
     memoized = true,
     fn = function(state, ctx)
         if not HDG.HousingCatalogObserver:IsReady() then return {} end
         local items = {}
-        HDG.HousingCatalogObserver:IterateRows(function(itemID, row)
-            local iconTex, iconAtl = HDG.Format.CoerceIconPair(
-                row.iconTexture, row.iconAtlas)
-            -- Each item is its own metatable (__index = itself): the rows
-            -- decor.items derives from it are small tables of per-view fields
-            -- that inherit these, instead of a full copy per row (and per dyed
-            -- variant) -- 6 MB per rebuild of the Decor list before (2026-09-13).
-            local item = {
-                itemID                = itemID,
-                decorID               = row.decorID,
-                name                  = row.name,
-                -- exp uses baked row.expansion; "?" sentinel preserved for label selectors.
-                exp                   = row.expansion or "?",
-                canCustomize          = row.canCustomize,
-                -- Baked per-owned-dyed-variant list; decor.items expands into variant rows.
-                dyedVariants          = row.dyedVariants,
-                isOwned               = row.isOwned,
-                numStored             = row.quantity,
-                numPlaced             = row.numPlaced,
-                placementCost         = row.placementCost,
-                isAllowedIndoors      = row.isAllowedIndoors,
-                isAllowedOutdoors     = row.isAllowedOutdoors,
-                iconTexture           = iconTex,
-                iconAtlas             = iconAtl,
-                firstAcquisitionBonus = row.firstAcquisitionBonus,
-            }
-            item.__index = item
-            items[#items + 1] = item
-        end)
+        HDG.HousingCatalogObserver:IterateRows(function(_, row) items[#items + 1] = row end)
         table.sort(items, function(a, b)
             if a.name == b.name then return (a.itemID or 0) < (b.itemID or 0) end
             return (a.name or "") < (b.name or "")
         end)
         return items
-    end,
-})
-
--- O(1) lookup index over decor.allItems. Memoized; invalidates with decor.allItems.
-Selectors:Register("decor.allItemsByID", {
-    memoized = true,
-    calls    = {"decor.allItems"},
-    fn = function(state, ctx)
-        local list = Selectors:Call("decor.allItems", state, ctx)
-        local out = {}
-        for _, row in ipairs(list) do
-            if row.itemID then out[row.itemID] = row end
-        end
-        return out
     end,
 })
 
@@ -104,7 +67,7 @@ Selectors:Register("decor.isBlank", {
     end,
 })
 
--- ===== decor.items row helpers ==============================================
+-- ===== decor.matchingRows row helpers =======================================
 -- Per-item work split into three pure helpers; `f` bundles resolved predicates
 -- + filter scalars so each helper takes one context arg.
 
@@ -118,18 +81,42 @@ local function _decorRowPasses(item, f)
     return true
 end
 
--- A list row: the per-view fields, inheriting everything else from the
--- decor.allItems item (its own metatable). A row factory's writes (selection
--- stamps) land on the row, never on the shared item.
+-- List rows are reused across rebuilds, one table per variantKey: a search keystroke,
+-- a favourite or a count change stamped a fresh table for every row that passed
+-- (memory plan 2026-10-19 sec 6). A deliberate exception to selector purity: a
+-- rebuild overwrites the rows the previous result holds. That is safe because
+-- nothing keeps an older result -- the list refills from the new array, which is
+-- new on every compute, so `_sameItems` still sees the change. Weak values: the rows
+-- go when the window closes (ReleaseListData drops the list's copy, the memo goes
+-- with the next invalidation).
+local _rowsByKey = setmetatable({}, { __mode = "v" })
+
+-- A list row: the per-view fields, inheriting everything else from its catalog row
+-- (`_item`). A row factory's writes land on the list row, never on the catalog row.
+local ROW_META = { __index = function(row, key) return row._item[key] end }
+
+-- The row for variantKey, pointed at `item`, holding no flag a fresh row wouldn't:
+-- the Intrusive SelectionBehavior writes `selected` onto rows, and the selection
+-- sync sets it again after the refill.
+local function _reuseRow(variantKey, item)
+    local row = _rowsByKey[variantKey]
+    if not row then
+        row = setmetatable({}, ROW_META)
+        _rowsByKey[variantKey] = row
+    end
+    row._item, row.variantKey, row.selected = item, variantKey, nil
+    return row
+end
+
 local function _stampDecorRow(item, f)
     local id = item.itemID
-    return setmetatable({
-        isFavorite       = f.isFavorite(id),
-        craftableState   = f.craftableState(id),
-        isCollected      = f.isCollected(id),
-        inStoredMode     = f.onlyStored == true,
-        destroyableCount = f.destroyableCount(id),
-    }, item)
+    local row = _reuseRow(tostring(id) .. ":base", item)
+    row.isFavorite       = f.isFavorite(id)
+    row.craftableState   = f.craftableState(id)
+    row.isCollected      = f.isCollected(id)
+    row.inStoredMode     = f.onlyStored == true
+    row.destroyableCount = f.destroyableCount(id)
+    return row
 end
 
 -- A stored-mode row's sort count: the pinned one, else its live count (nothing
@@ -140,14 +127,30 @@ local function _sortCount(row, pinned)
     return c
 end
 
+-- One owned dyed stack's row: the base row's per-view stamps, the stack's own
+-- identity and count. Inherits from the catalog row, never from the base list row:
+-- the list's Intrusive SelectionBehavior writes `selected` onto the base row, and
+-- every variant would read it through.
+local function _stampVariantRow(stamped, item, dv)
+    local row = _reuseRow(tostring(stamped.itemID) .. ":" .. tostring(dv.variantIdentifier), item)
+    row.isFavorite         = stamped.isFavorite
+    row.craftableState     = stamped.craftableState
+    row.isCollected        = stamped.isCollected
+    row.inStoredMode       = stamped.inStoredMode
+    row.isVariantRow       = true
+    row.variantIdentifier  = dv.variantIdentifier
+    row.dyeColorIDs        = dv.dyeColorIDs
+    row.dyeColorsByChannel = dv.dyeColorsByChannel
+    row.numStored          = dv.numStored
+    row.destroyableCount   = dv.numStored
+    row.entryID            = dv.entryID   -- per-variant destroy identity (else destroy hits the base stack)
+    return row
+end
+
 -- Append base row then one row per owned dyed variant. Under "Dyed" tag the
 -- undyed base is suppressed. variantKey (itemID:variant) is pool + selection
 -- identity. Each variant carries its own dv.numStored (not the aggregate base count).
--- Variant rows inherit from the shared ITEM and copy the base row's per-view
--- stamps. Never from the base ROW: the list's Intrusive SelectionBehavior writes
--- `selected` onto the base row, and every variant would read it through.
 local function _emitDecorRows(out, item, stamped, activeTag)
-    local id = stamped.itemID
     local dyedVariants = stamped.dyedVariants
     local hasDyed = dyedVariants and #dyedVariants > 0
     -- Base row = the undyed (vid=0) variant. In Stored view, suppress it when the item
@@ -155,31 +158,22 @@ local function _emitDecorRows(out, item, stamped, activeTag)
     -- undyed slot renders a phantom count that can't be destroyed.
     local hideEmptyUndyed = hasDyed and stamped.inStoredMode and (stamped.destroyableCount or 0) <= 0
     if not (activeTag == "Dyed" and hasDyed) and not hideEmptyUndyed then
-        stamped.variantKey = tostring(id) .. ":base"
         out[#out + 1] = stamped
     end
     if not hasDyed then return end
     for _, dv in ipairs(dyedVariants) do
-        out[#out + 1] = setmetatable({
-            isFavorite         = stamped.isFavorite,
-            craftableState     = stamped.craftableState,
-            isCollected        = stamped.isCollected,
-            inStoredMode       = stamped.inStoredMode,
-            isVariantRow       = true,
-            variantIdentifier  = dv.variantIdentifier,
-            variantKey         = tostring(id) .. ":" .. tostring(dv.variantIdentifier),
-            dyeColorIDs        = dv.dyeColorIDs,
-            dyeColorsByChannel = dv.dyeColorsByChannel,
-            numStored          = dv.numStored,
-            destroyableCount   = dv.numStored,
-            entryID            = dv.entryID,   -- per-variant destroy identity (else destroy hits the base stack)
-        }, item)
+        out[#out + 1] = _stampVariantRow(stamped, item, dv)
     end
 end
 
-Selectors:Register("decor.items", {
-    -- Memoized: decor.headerLabel calls into us for "shown N", which would
-    -- double-walk ~2000 items per dispatch without caching.
+-- The Decor list's rows in catalog order, before the Stored sort. Apart from
+-- decor.items so the Destroy list's sort pin, which every tab switch clears,
+-- never reaches the rows: outside Stored mode decor.items hands the list this
+-- same table back and the list skips its refill (2,000 rows restamped and
+-- refilled on every switch in and out of Decor, memory plan 2026-10-19 sec 6).
+Selectors:Register("decor.matchingRows", {
+    -- Memoized: decor.headerLabel calls through decor.items for "shown N", which
+    -- would double-walk ~2000 items per dispatch without caching.
     memoized = true,
     calls = {
         "decor.allItems",
@@ -191,7 +185,6 @@ Selectors:Register("decor.items", {
         "decor.isStored",
         "decor.activeTag",
         "decor.destroyableCount",
-        "decor.pinnedSortCounts",
         -- isFavorite + craftableState called directly in fn -> declared here per
         -- accurate-calls invariant. Their paths also reach via matchesTag, but
         -- direct calls must still be declared.
@@ -223,17 +216,27 @@ Selectors:Register("decor.items", {
                 _emitDecorRows(out, item, _stampDecorRow(item, f), f.activeTag)
             end
         end
+        return out
+    end,
+})
 
-        -- Stored mode: most-cluttering first (destroyable count desc, name asc),
-        -- by the pinned counts once the player has destroyed from the list.
-        if f.onlyStored then
-            local pinned = Selectors:Call("decor.pinnedSortCounts", state, ctx)
-            table.sort(out, function(a, b)
-                local da, db = _sortCount(a, pinned), _sortCount(b, pinned)
-                if da ~= db then return da > db end
-                return (a.name or "") < (b.name or "")
-            end)
-        end
+-- The Decor list. Stored mode (the Destroy list) sorts most-cluttering first
+-- (destroyable count desc, name asc), by the pinned counts once the player has
+-- destroyed from it -- into a copy, because decor.matchingRows' table is memoized.
+Selectors:Register("decor.items", {
+    memoized = true,
+    calls = { "decor.matchingRows", "decor.onlyStored", "decor.pinnedSortCounts" },
+    fn = function(state, ctx)
+        local rows = Selectors:Call("decor.matchingRows", state, ctx)
+        if not Selectors:Call("decor.onlyStored", state, ctx) then return rows end
+        local pinned = Selectors:Call("decor.pinnedSortCounts", state, ctx)
+        local out = {}
+        for i, row in ipairs(rows) do out[i] = row end
+        table.sort(out, function(a, b)
+            local da, db = _sortCount(a, pinned), _sortCount(b, pinned)
+            if da ~= db then return da > db end
+            return (a.name or "") < (b.name or "")
+        end)
         return out
     end,
 })
@@ -817,7 +820,7 @@ Selectors:Register("decor.craftableState", {
 })
 
 -- ===== Filter state surface ===================================================
--- Used by chip `active` bindings and by decor.items as composed filter inputs.
+-- Used by chip `active` bindings and by decor.matchingRows as composed filter inputs.
 
 Selectors:Register("decor.topFilter", {
     reads = {"session.ui.decor.filters.topFilter"},
@@ -839,11 +842,10 @@ for _, entry in ipairs(HDG.Constants.TOP_FILTERS or {}) do
 end
 
 -- ===== Tags-row dynamic slot selectors =======================================
--- 20 pre-allocated slots per top filter (TAG_SLOT_COUNT = 20). Each slot:
+-- One set per tags-row chip (Constants.TAG_SLOT_COUNT). Each slot:
 --   decor.tagSlot.text_N    -- tag label or "" when slot empty
 --   decor.tagSlot.active_N  -- true when this slot's tag is active
 --   decor.tagSlot.visible_N -- true when slot has content
-HDG.Constants.TAG_SLOT_COUNT = 20
 for slot = 1, HDG.Constants.TAG_SLOT_COUNT do
     local n = slot
     Selectors:Register("decor.tagSlot.text_" .. n, {
@@ -997,7 +999,7 @@ Selectors:Register("decor.isDyed", {
             local row = byItemID[itemID]
             -- row.dyedVariants is baked by the observer (_bakeVariantDyes) =
             -- owned variants (numStored>0) with an applied dye. Single source of
-            -- truth, shared with the decor.items per-variant expansion.
+            -- truth, shared with the decor.matchingRows per-variant expansion.
             return (row and row.dyedVariants and #row.dyedVariants > 0) or false
         end
     end,
@@ -1037,7 +1039,7 @@ Selectors:Register("decor.filterActive", {
 
 -- ===== Tags row content + bucket/tag matching =================================
 -- decor.tagsForFilter -> ordered chip list for the current topFilter.
--- decor.matchesTag -> curried predicate composed into decor.items.
+-- decor.matchesTag -> curried predicate composed into decor.matchingRows.
 
 -- Placement-cost chips under the Size top filter. The budget atlas IS the
 -- label ("cost" reads as gold; "weight" is room terminology) -- the same
@@ -1167,7 +1169,7 @@ Selectors:Register("decor.tagsForFilter", {
 })
 
 -- Pass-through placeholder for future bucket-level filters. No reads/calls
--- since the function is constant. Re-add to decor.items.calls if a bucket needs it.
+-- since the function is constant. Re-add to decor.matchingRows.calls if a bucket needs it.
 Selectors:Register("decor.matchesTopFilter", {
     fn = function(state, ctx)
         return function() return true end

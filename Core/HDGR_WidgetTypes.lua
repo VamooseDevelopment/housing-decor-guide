@@ -73,6 +73,10 @@ local KNOWN_FIELDS = {
     pool    = true,
     destroy = true,
 
+    -- release(widget): drop the data the widget holds while its window is closed;
+    -- the next push refills it. BindingEngine:Release calls it on window hide.
+    release = true,
+
     -- initialState(spec) -> table: optional initial Theme.Skinners state.
     -- Called by Layout's buildKind after build; result is passed through
     -- HDG.Theme:Register(widget, kindDef.skin, state). State-bearing kinds
@@ -86,6 +90,17 @@ local KNOWN_FIELDS = {
     -- Layout's validator consults this predicate instead of inspecting spec
     -- internals directly (spec section 5 -- engines query the registry).
     requiresFont = true,
+
+    -- resolveCellKind(name) -> def|nil: for a kind whose specs name a cell kind
+    -- (`cellKind`), the lookup its build uses. Layout's validator calls it, so a
+    -- cell-kind typo fails the test gate instead of the tab's first build.
+    resolveCellKind = true,
+
+    -- checkSpec(spec) -> message|nil: for a kind whose build checks fields that
+    -- name something outside the config (an action, a config key), that check.
+    -- The build errors on its message; Layout's validator reports it, so the
+    -- test gate sees it before the tab is ever opened.
+    checkSpec = true,
 
     -- specFields = { "fieldName", ... }: closed-schema field allow-list for
     -- THIS kind's widget specs. Validator combines specFields with the
@@ -179,6 +194,12 @@ local function _validateLifecycle(def, err)
     end
 end
 
+local function _validateRelease(def, err)
+    if def.release ~= nil and type(def.release) ~= "function" then
+        err("`release` must be a function (widget)")
+    end
+end
+
 local function _validateInputSecure(def, err)
     if not (def.input and def.input.secure) then return end
     local sec = def.input.secure
@@ -223,9 +244,16 @@ local function _validateInitialState(def, err)
     end
 end
 
-local function _validateRequiresFont(def, err)
+-- The hooks Layout's validator calls.
+local function _validateValidatorHooks(def, err)
     if def.requiresFont ~= nil and type(def.requiresFont) ~= "function" then
         err("`requiresFont` must be a function(spec) -> bool")
+    end
+    if def.resolveCellKind ~= nil and type(def.resolveCellKind) ~= "function" then
+        err("`resolveCellKind` must be a function(name) -> cell kind def or nil")
+    end
+    if def.checkSpec ~= nil and type(def.checkSpec) ~= "function" then
+        err("`checkSpec` must be a function(spec) -> error message or nil")
     end
 end
 
@@ -439,10 +467,11 @@ local function validateOne(kind, def, registry, errors)
     _validateKey(def, err)
     _validateDispatch(def, err)
     _validateLifecycle(def, err)
+    _validateRelease(def, err)
     _validateInputSecure(def, err)
     _validateSkin(def, err)
     _validateInitialState(def, err)
-    _validateRequiresFont(def, err)
+    _validateValidatorHooks(def, err)
     _validateExtends(def, registry, err)
     _validateValidity(def, err)
     _validateDestroyRequired(def, err)

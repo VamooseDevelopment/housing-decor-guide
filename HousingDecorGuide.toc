@@ -2,7 +2,7 @@
 ## Title: Vamoose's Housing Decor Guide
 ## Notes: Track, craft, preview, and acquire housing decorations across all professions
 ## Author: Vamoose
-## Version: 3.38.0
+## Version: 3.39.0
 ## SavedVariables: HDG_DB
 ## SavedVariablesPerCharacter: HDG_DB_CURRENT_PROFILE
 ## IconTexture: Interface\AddOns\HousingDecorGuide\textures\Vamoose_HDG_400_trans
@@ -74,9 +74,6 @@ Core\HDGR_TooltipEngine.lua
 Core\HDGR_TooltipRecipes.lua
 Core\HDGR_Modules.lua
 Core\HDGR_Middleware.lua
-# Migration module: in-place HDG_DB -> HDG account.* transform.
-# Loads before Store so HDG.Migration:Run is available at LoadFromSavedVariables time.
-Core\HDGR_Migration.lua
 Core\HDGR_StoreFurnishings.lua
 Core\HDGR_Store.lua
 # Loads after Store so Config:Initialize can call Store:GetState; the
@@ -174,6 +171,7 @@ data\HDGR_PetTaxonomyDB.lua
 data\HDGR_PetVoiceDB.lua
 data\HDGR_PetAnimDB.lua
 data\HDGR_PetSceneDecorDB.lua
+data\HDGR_PetCantAttachDB.lua
 data\HDGR_PetSceneScaleDB.lua
 
 # ===== Modules (logic ports / resolvers) =====
@@ -233,7 +231,6 @@ Modules\HDGR_MerchantObserver.lua
 Modules\HDGR_BuyQueue.lua
 Modules\HDGR_DestroyQueue.lua
 Modules\HDGR_CatalogOverlay.lua
-Modules\HDGR_CatalogIntro.lua
 Modules\HDGR_MinimapButton.lua
 Modules\HDGR_ProfessionButtons.lua
 Modules\HDGR_ProfessionScanner.lua
@@ -252,7 +249,6 @@ UI\HDGR_SettingsPanel.lua
 UI\HDGR_SettingsPanel.xml
 UI\HDGR_Controller_Chrome.lua
 UI\HDGR_Controller_Nav.lua
-UI\HDGR_Controller_CatalogIntro.lua
 UI\HDGR_Controller_Decor.lua
 UI\HDGR_Controller_Pets.lua
 UI\HDGR_Controller_Menagerie.lua

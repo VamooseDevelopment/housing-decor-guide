@@ -13,7 +13,7 @@ local LC = HDG.LayoutConfig
 -- Re-ordering columns = swap the cells map only.
 
 LC.window.views.recipes = {
-    explicit = true,
+    controllers = { "recipes" },
     width    = "auto",       -- 854
     height   = "auto",       -- chrome + status now come from the window's slots
     columns  = { 320, 300, 320 },   -- list / queue / materials (profs moved to the strip)

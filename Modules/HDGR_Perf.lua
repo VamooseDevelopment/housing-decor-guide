@@ -20,10 +20,19 @@ local P = HDG.Perf
 --   _sel[name]        = { count, total, max, kb, maxKB }
 --   _op[name]         = { count, total, max, kb, maxKB }  -- module ops outside the dispatch path
 --   _stage[name]      = { count, total, max, kb, maxKB }  -- per-pipeline-stage cost (runPipeline)
-P._flush = P._flush or {}
-P._sel   = P._sel   or {}
-P._op    = P._op    or {}
-P._stage = P._stage or {}
+--   _push[key]        = { count, total, max, kb, maxKB }  -- one bound widget's push, "<kind> <id>  data|paint"
+--   _layout[key]      = { count, total, max, kb, maxKB }  -- Layout:LayoutWindow laps, "<window>  pass N <step>"
+P._flush  = P._flush  or {}
+P._sel    = P._sel    or {}
+P._op     = P._op     or {}
+P._stage  = P._stage  or {}
+P._push   = P._push   or {}
+P._layout = P._layout or {}
+-- What every push cost, outermost pushes only: a layout lap takes what this
+-- grew by inside its apply to split the apply into the widgets it revealed,
+-- pushed, and the placement itself (the Layout stage carried 8.5 MB with
+-- nothing to say how it divides, 2026-10-22 profile).
+P._pushTotal = P._pushTotal or { ms = 0, kb = 0 }
 -- Allocation since the last Reset, counted once: only OUTERMOST samples add to
 -- it (a selector sampled inside a flush is already inside the flush's KB).
 -- This is the one number to drive down when the target is the memory PEAK --
@@ -92,6 +101,9 @@ end
 -- not one (Aegis lost a measurement to this, 2026-08-08). Read ONE tool at a
 -- time: Vitals for the net rate a player pays, this report for attribution.
 local _depth = 0
+-- Pushes nest when a dispatcher shows a bound child: the child's OnShow hook
+-- pushes it from inside the parent's paint. Only the outermost adds to _pushTotal.
+local _pushDepth = 0
 
 -- Every probe site takes its opening readings through here rather than inline,
 -- so a site cannot take one reading and forget the other -- and so the hold
@@ -121,6 +133,7 @@ end
 -- error that escaped a probed call (see THE TRADE above).
 function P:_Release()
     _depth = 0
+    _pushDepth = 0
     collectgarbage("restart")
 end
 
@@ -178,6 +191,63 @@ function P:RecordStage(name, t0, k0)
     _close(self, self._stage, name, t0, k0)
 end
 
+-- One bound widget's push (BindingEngine pushOne), sampled as two rows: data is
+-- its selectors and resolver kicks, paint its dispatcher. A push nested in
+-- another's paint is inside the outer paint row as well; the total counts it once.
+-- The keys are built before either sample opens, so neither row carries them.
+function P:SamplePush(widget, resolveAll, paint, state, ctx)
+    local key = widget._hdgrKind .. " " .. widget._hdgrId
+    local dataKey, paintKey = key .. "  data", key .. "  paint"
+    _pushDepth = _pushDepth + 1
+    local t0, k0 = self:Open()
+    local resolved = resolveAll(widget, state, ctx)
+    local dataMs, dataKB = _close(self, self._push, dataKey, t0, k0)
+    t0, k0 = self:Open()
+    paint(widget, resolved, ctx)
+    local paintMs, paintKB = _close(self, self._push, paintKey, t0, k0)
+    _pushDepth = _pushDepth - 1
+    if _pushDepth == 0 then
+        local pt = self._pushTotal
+        pt.ms = pt.ms + dataMs + paintMs
+        pt.kb = pt.kb + dataKB + paintKB
+    end
+end
+
+-- One window's layout passes (Layout:LayoutWindow): a row for the whole and a
+-- row per lap, all under one held collector. nil when perf is off; every lap
+-- and the close are then a nil-check.
+function P:OpenLayoutLaps(windowName)
+    if not self:Enabled() then return nil end
+    local t0, k0 = self:Open()
+    local pt = self._pushTotal
+    return { window = windowName, t0 = t0, k0 = k0, t = t0, k = k0, pushMs = pt.ms, pushKB = pt.kb }
+end
+
+-- A lap that pushed bound widgets is split into those pushes and the rest. The
+-- next lap starts from fresh readings, so the bookkeeping here is in no lap
+-- (only in the whole-window row).
+function P:LayoutLap(laps, label)
+    if not laps then return end
+    local ms = _G.debugprofilestop() - laps.t
+    local kb = collectgarbage("count") - laps.k
+    local pt = self._pushTotal
+    local pushMs, pushKB = pt.ms - laps.pushMs, pt.kb - laps.pushKB
+    local key = laps.window .. "  " .. label
+    if pushMs ~= 0 or pushKB ~= 0 then
+        _bump(self._layout, key .. ": reveal pushes", pushMs, pushKB)
+        _bump(self._layout, key .. ": placement", ms - pushMs, kb - pushKB)
+    else
+        _bump(self._layout, key, ms, kb)
+    end
+    laps.pushMs, laps.pushKB = pt.ms, pt.kb
+    laps.t, laps.k = _G.debugprofilestop(), collectgarbage("count")
+end
+
+function P:CloseLayoutLaps(laps)
+    if not laps then return end
+    _close(self, self._layout, laps.window .. "  whole layout", laps.t0, laps.k0)
+end
+
 -- SetEpoch: t-zero for the boot timeline. Called once from Init:OnInitialize. Idempotent.
 function P:SetEpoch()
     if self._epoch then return end
@@ -203,6 +273,9 @@ function P:Reset()
     self._sel      = {}
     self._op       = {}
     self._stage    = {}
+    self._push     = {}
+    self._layout   = {}
+    self._pushTotal = { ms = 0, kb = 0 }
     self._timeline = {}
     self._alloc    = { kb = 0, samples = 0 }
     self:_Release()
@@ -241,11 +314,12 @@ local function _appendSection(lines, title, bucket, showSubs, floor)
     -- Header. Columns: total KB, total ms, count, KB per call, max KB, ms per call, [subs], key.
     lines[#lines + 1] = showSubs
         and string.format("  %9s %9s %6s %8s %8s %8s %5s  %s", "KB", "ms", "n", "KB/call", "maxKB", "ms/call", "subs", "action")
-        or  string.format("  %9s %9s %6s %8s %8s %8s  %s", "KB", "ms", "n", "KB/call", "maxKB", "ms/call", "selector")
-    local hidden = 0
+        or  string.format("  %9s %9s %6s %8s %8s %8s  %s", "KB", "ms", "n", "KB/call", "maxKB", "ms/call", "name")
+    local hidden, hiddenKB, hiddenMs = 0, 0, 0
     for _, e in ipairs(entries) do
         if floor and e.total < floor.ms and e.kb < floor.kb then
             hidden = hidden + 1
+            hiddenKB, hiddenMs = hiddenKB + e.kb, hiddenMs + e.total
         else
             local avgMs, avgKB = e.total / e.count, e.kb / e.count
             if showSubs then
@@ -258,7 +332,10 @@ local function _appendSection(lines, title, bucket, showSubs, floor)
         end
     end
     if hidden > 0 then
-        lines[#lines + 1] = string.format("  (+%d more under %.2fms AND %.1fKB total -- hidden)", hidden, floor.ms, floor.kb)
+        -- Their sum, because many small rows can add up to one big one (the
+        -- per-widget push rows: a hundred labels under the floor each).
+        lines[#lines + 1] = string.format("  (+%d more under %.2fms AND %.1fKB total -- hidden; %.1f KB, %.1fms together)",
+            hidden, floor.ms, floor.kb, hiddenKB, hiddenMs)
     end
 end
 
@@ -342,6 +419,13 @@ function P:Report()
     lines[#lines + 1] = ""
     _appendSection(lines, "Refresh pipeline stages (per-stage cost inside runPipeline):",
                    self._stage, false)
+    lines[#lines + 1] = ""
+    -- Placement includes what a size change sets off: a scroll list re-lays its rows on resize.
+    _appendSection(lines, "Layout passes (Layout:LayoutWindow per window; apply = placement + the widgets it revealed, pushed):",
+                   self._layout, false)
+    lines[#lines + 1] = ""
+    _appendSection(lines, "Widget pushes (<kind> <id>: data = its selectors, paint = its dispatcher; a push inside another's paint is in both):",
+                   self._push, false, { ms = 0.05, kb = 0.5 })
     return table.concat(lines, "\n")
 end
 

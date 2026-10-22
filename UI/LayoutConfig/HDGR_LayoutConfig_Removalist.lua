@@ -14,7 +14,7 @@ local LC = HDG.LayoutConfig
 -- ===== View =================================================================
 
 LC.window.views.removalist = {
-    explicit = true,
+    controllers = { "removalist" },
     width    = "auto",
     height   = "auto",
     columns  = { 140, 280, 280, 240 },   -- list trimmed ("Plot N" is short); maps wide; info column holds the key text

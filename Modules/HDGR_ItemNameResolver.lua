@@ -66,8 +66,8 @@ function R:ResolveName(itemID)
     end
     -- 4. Cold cache: kick async load; baked English DB name is the placeholder until step 2 fills in.
     self:_Request(itemID)
-    local rdb = HDG.StaticData.Reagents:GetAll()
-    if rdb and rdb[itemID] and rdb[itemID].name then return rdb[itemID].name, false end
+    local _, baked = HDG.StaticData.Reagents:Get(itemID)  -- exception(nullable): not every item is a reagent
+    if baked then return baked, false end
     return "item " .. tostring(itemID), false
 end
 

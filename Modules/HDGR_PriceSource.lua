@@ -24,23 +24,17 @@ HDG.PriceSource = HDG.PriceSource or {}
 local P = HDG.PriceSource
 
 -- Lazy-built vendor price cache from HDGR_ReagentsDB.
--- Entry[1] is the source string; "Vendor:1500" yields a vendor copper price.
+-- A reagent source of "Vendor:1500" yields a vendor copper price.
 local _vendorPriceCache
 
 local function buildVendorPriceCache()
     if _vendorPriceCache then return _vendorPriceCache end
     _vendorPriceCache = {}
-    local rdb = HDG.StaticData.Reagents:GetAll()
-    if type(rdb) ~= "table" then return _vendorPriceCache end
-    for itemID, entry in pairs(rdb) do
-        local srcStr
-        if type(entry) == "table" then srcStr = entry[1]
-        elseif type(entry) == "string" then srcStr = entry end
-        if type(srcStr) == "string" then
-            local copper = srcStr:match("^Vendor:(%d+)$")
-            if copper then
-                _vendorPriceCache[itemID] = tonumber(copper)
-            end
+    local Reagents = HDG.StaticData.Reagents
+    for itemID in pairs(Reagents:GetAll()) do
+        local copper = Reagents:Get(itemID):match("^Vendor:(%d+)$")
+        if copper then
+            _vendorPriceCache[itemID] = tonumber(copper)
         end
     end
     return _vendorPriceCache

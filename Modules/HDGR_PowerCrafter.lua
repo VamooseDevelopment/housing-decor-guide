@@ -127,8 +127,8 @@ local function _intermediateRecipe(graph, itemID)
     local sub = graph[itemID]  -- exception(nullable): gathered/vendor reagents have no producer
     if not sub then return nil end
     if RNG_BULK_CATEGORY[sub.categoryName] then return nil end
-    local reagent = HDG.StaticData.Reagents:Get(itemID)  -- exception(nullable): reagent outside ReagentsDB
-    if reagent and not reagent[1]:match("^Crafted") then return nil end
+    local source = HDG.StaticData.Reagents:Get(itemID)  -- exception(nullable): reagent outside ReagentsDB
+    if source and not source:match("^Crafted") then return nil end
     return sub
 end
 

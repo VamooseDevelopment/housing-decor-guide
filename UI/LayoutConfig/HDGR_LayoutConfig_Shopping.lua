@@ -22,7 +22,7 @@ local LC = HDG.LayoutConfig
 -- ===== View ==================================================================
 
 LC.window.views.shoppingList = {
-    explicit    = true,
+    controllers = { "shopping" },
     standalone  = true,        -- HDG.Window floating frame; not in main window
     width       = "auto",      -- 4 + 480 + 4 = 488
     height      = "auto",      -- 4 + 28 + 4 + 650 + 4 = 690

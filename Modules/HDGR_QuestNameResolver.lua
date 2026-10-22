@@ -75,8 +75,11 @@ HDG.Modules:Declare({
     dependencies = {},
     ownsBlizzardNamespaces = { "C_QuestLog" },   -- ADR-011: sole owner
     blizzardEvents = {
-        QUEST_TURNED_IN        = { handler = "OnQuestTurnedIn",
-                                   requiresMainWindow = true },
+        -- Not window-gated: a turn-in with HDG closed was dropped, so its decor
+        -- quest waited for the next catalog load to be recorded, and satellites
+        -- showing [QUST] chips stayed stale. Recording walks the loaded catalog
+        -- once per turn-in (cheap; nothing to walk before the first load).
+        QUEST_TURNED_IN        = { handler = "OnQuestTurnedIn" },
     },
     OnQuestTurnedIn = function(self, questID)
         R:OnQuestTurnedIn(questID)

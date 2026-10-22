@@ -136,55 +136,62 @@ local function _paintDroplets(row, ed)
     row._nameFs:SetPoint("RIGHT", row, "RIGHT", n > 0 and (-44 - n * 9 - 2) or -44, 0)
 end
 
--- Left = select, right = favorite toggle. Toast reads state BEFORE dispatch (sync Store; order matters).
-local function _wireDecorClicks(row, ed)
+-- Left = select, right = favorite toggle. The handlers are file-level and read the
+-- row's current data off the frame (row._ed): rows are rewired on every paint, and
+-- two closures per paint were garbage on every scroll and refill (memory plan
+-- 2026-10-19 sec 6).
+local function _onDecorLeftClick(row)
+    local ed = row._ed
     local itemID = ed.itemID
-    if not itemID then
+    -- Ctrl-click queues the item's recipe (decor rows carry no recipeID,
+    -- so resolve it via the Professions reverse index); non-craftable
+    -- decor toasts a "no recipe" note instead. Shift-click links the item
+    -- in chat (active editbox, or opens chat). A plain click selects.
+    -- Ctrl-Shift-click destroys one stored copy of THIS row's variant with
+    -- no dialog (Soul, Discord 2026-09-19: "hover, hold ctrl+shift and
+    -- brrrr"). Checked first: it is also a Ctrl-click.
+    if IsControlKeyDown() and IsShiftKeyDown() then
+        DecorController:_DestroyOneFromRow(itemID, ed.variantKey, ed.name)
+        return
+    end
+    if IsControlKeyDown() then
+        local rid = HDG.StaticData.Recipes:Get(itemID) and itemID
+        if rid then
+            HDG.UI.QueueRecipe(rid, itemID, ed.name)
+        else
+            HDG.Log:Info("queue", ed.name .. " has no recipe")
+        end
+        return
+    end
+    if IsShiftKeyDown() then
+        HDG.UI.LinkItem(itemID)
+        return
+    end
+    -- selectedItemID drives the detail pane (base item data); the
+    -- separate selectedVariantKey drives the list highlight + the dyed
+    -- model preview (which specific owned variant was clicked).
+    CH.Mechanics.SetUITransientView("decor", "selectedItemID", itemID)
+    CH.Mechanics.SetUITransientView("decor", "selectedVariantKey", ed.variantKey)
+end
+
+-- Toast reads state BEFORE dispatch (sync Store; order matters).
+local function _onDecorRightClick(row)
+    local ed = row._ed
+    local wasFav = HDG.Store:GetState().account.favorites[ed.itemID]  -- exception(false-positive): top-level controller read
+    HDG.Store:Dispatch({
+        type    = HDG.Constants.ACTIONS.FAVORITE_TOGGLE,
+        payload = { itemID = ed.itemID },
+    })
+    HDG.Log:Info("decor_action", (wasFav and "Unfavorited: " or "Favorited: ") .. ed.name)
+end
+
+local function _wireDecorClicks(row, ed)
+    row._ed = ed
+    if not ed.itemID then
         HDG.UI.WireLeftRightClick(row, nil, nil)
         return
     end
-    local variantKey = ed.variantKey
-    HDG.UI.WireLeftRightClick(row,
-        function()
-            -- Ctrl-click queues the item's recipe (decor rows carry no recipeID,
-            -- so resolve it via the Professions reverse index); non-craftable
-            -- decor toasts a "no recipe" note instead. Shift-click links the item
-            -- in chat (active editbox, or opens chat). A plain click selects.
-            -- Ctrl-Shift-click destroys one stored copy of THIS row's variant with
-            -- no dialog (Soul, Discord 2026-09-19: "hover, hold ctrl+shift and
-            -- brrrr"). Checked first: it is also a Ctrl-click.
-            if IsControlKeyDown() and IsShiftKeyDown() then
-                DecorController:_DestroyOneFromRow(itemID, variantKey, ed.name)
-                return
-            end
-            if IsControlKeyDown() then
-                local rid = HDG.StaticData.Recipes:Get(itemID) and itemID
-                if rid then
-                    HDG.UI.QueueRecipe(rid, itemID, ed.name)
-                else
-                    HDG.Log:Info("queue", ed.name .. " has no recipe")
-                end
-                return
-            end
-            if IsShiftKeyDown() then
-                HDG.UI.LinkItem(itemID)
-                return
-            end
-            -- selectedItemID drives the detail pane (base item data); the
-            -- separate selectedVariantKey drives the list highlight + the dyed
-            -- model preview (which specific owned variant was clicked).
-            CH.Mechanics.SetUITransientView("decor", "selectedItemID", itemID)
-            CH.Mechanics.SetUITransientView("decor", "selectedVariantKey", variantKey)
-        end,
-        function()
-            local wasFav = HDG.Store:GetState().account.favorites[itemID]  -- exception(false-positive): top-level controller read
-            HDG.Store:Dispatch({
-                type    = HDG.Constants.ACTIONS.FAVORITE_TOGGLE,
-                payload = { itemID = itemID },
-            })
-            HDG.Log:Info("decor_action",
-                (wasFav and "Unfavorited: " or "Favorited: ") .. ((ed and ed.name) or "item"))
-        end)
+    HDG.UI.WireLeftRightClick(row, _onDecorLeftClick, _onDecorRightClick)
 end
 
 local function _paintDecorRow(row, ed)
@@ -211,6 +218,7 @@ HDG.Rows:Register("decorRow", {
         resetText  = { "_nameFs" },
         reset      = function(row)
             row._itemID, row._name = nil, nil  -- clear R2 tooltip stamps
+            row._ed = nil                      -- the click handlers' row data
             if row._favStar   then row._favStar:Hide()   end
             if row._checkIcon then row._checkIcon:Hide() end
             if row._craftStar then row._craftStar:Hide() end
@@ -730,7 +738,7 @@ local function _makeTagTooltipDef(slot)
 end
 
 function DecorController:_wireTagSlots(rootFrame)
-    for slot = 1, (HDG.Constants.TAG_SLOT_COUNT or 12) do
+    for slot = 1, HDG.Constants.TAG_SLOT_COUNT do
         local captured = slot
         -- Dynamic tooltip: shows the Redeemable explainer when this slot holds it.
         HDG.TooltipEngine:Attach(

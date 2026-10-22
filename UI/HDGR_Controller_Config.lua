@@ -17,7 +17,6 @@ local dispatch = HDG.ControllerHelpers.Mechanics.DispatchNamed  -- hygiene A13
 -- 0.5s OnUpdate auto-reverts on lapse.
 local function _wireHardReset(rootFrame)
     local resetBtn = HDG.UI.W(rootFrame, "configPanel.hardReset")
-    if not resetBtn then return end
     local armedAt
 
     local function setLabel(text, colorToken)
@@ -34,8 +33,7 @@ local function _wireHardReset(rootFrame)
         local now = GetTime()
         if armedAt and (now - armedAt) < HARD_RESET_CONFIRM_WINDOW then
             revert()
-            HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.HARD_RESET })
-            HDG.Log:Success("migration", "HDG has been hard-reset")
+            HDG:HardReset()
         else
             armedAt = now
             setLabel("Click again to confirm", "semantic.error_deep")
@@ -191,10 +189,9 @@ local INSPECTOR_UI_TOKENS = {
     { token = "float.border",         kind = "fg" },
 }
 
--- Paint one text sample. Missing sample = list/LC drift; missing color = token absent in scheme.
+-- Paint one text sample. A missing sample is list/LC drift (UI.W errors); missing color = token absent in scheme.
 local function _paintTextToken(rootFrame, key)
     local sample = HDG.UI.W(rootFrame, "themeInspectorPanel.sample_" .. key)
-    if not sample then return end
     local c = HDG.Theme:GetColor("text." .. key)
     if c then sample:SetTextColor(c.r, c.g, c.b, c.a) end  -- inspector: previews the token on a sample
 end
@@ -215,7 +212,6 @@ end
 -- Paint one UI sample. fg = recolor label; bg = fill swatch. Missing color = leave blank.
 local function _paintUIToken(rootFrame, row)
     local sample = HDG.UI.W(rootFrame, "themeInspectorPanel.uisample_" .. row.token:gsub("%.", "_"))
-    if not sample then return end
     local c = HDG.Theme:GetColor(row.token)
     if not c then return end
     if row.kind == "fg" then

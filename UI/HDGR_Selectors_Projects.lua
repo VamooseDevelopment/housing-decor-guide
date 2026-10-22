@@ -1783,6 +1783,10 @@ Selectors:Register("projects.layoutGroups", {
 -- version.numFloors, capped at 3. The controller rotates each floor to fit its slot.
 Selectors:Register("projects.layoutPreviewModel", {
     reads = { "account.projects.layouts", "account.rooms", "session.ui.projects.layoutSelectedVersionID" },
+    -- Read by the preview and by layoutDetail, which six controller sites and two
+    -- labels call: each one rebuilt every room's mask (8 x 109 KB on one Layouts
+    -- visit, 2026-10-22 profile). Every reader only reads it.
+    memoized = true,
     fn = function(state)
         local A   = HDG.Projects.ShapeAtlas
         local sel = state.session.ui.projects.layoutSelectedVersionID
@@ -1827,6 +1831,7 @@ Selectors:Register("projects.layoutDetail", {
     reads = { "account.projects.houses", "account.projects.layouts", "account.rooms",
               "session.ui.projects.layoutSelectedVersionID", "session.house.ownedHouses" },
     calls = { "projects.placementCaps", "projects.layoutPreviewModel" },
+    memoized = true,   -- two labels and six controller sites read it in one refresh (6 x 131 KB, 2026-10-22)
     fn = function(state, ctx)
         local A   = HDG.Projects.ShapeAtlas
         local sel = state.session.ui.projects.layoutSelectedVersionID

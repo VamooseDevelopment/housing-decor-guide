@@ -311,60 +311,6 @@ Selectors:Register("acq.detailExpansion", {
     end,
 })
 
--- Master item list (Find by Item view). All catalog rows are released items
--- so no liveDecorIDs gate is needed.
-Selectors:Register("acq.allItems", {
-    reads    = {"session.resolvers.staticData.tick", "session.resolvers.catalog.tick"},
-    memoized = true,
-    fn = function()
-        if not HDG.HousingCatalogObserver:IsReady() then return {} end
-        local recipes = HDG.StaticData.Recipes:GetAll() or {}
-
-        local items = {}
-        HDG.HousingCatalogObserver:IterateRows(function(itemID, row)
-            local aug     = HDG.StaticData.ItemAugment:Get(itemID)
-            local recipe  = recipes[itemID]
-            -- requiresRep: ItemAugment factionID > 0, or catalog factionGate present.
-            local requiresRep = (aug and aug.factionID and aug.factionID > 0) == true
-                             or row.factionGate ~= nil
-            -- sourceType / altSourceType: first 2 entries from aug.sources[].
-            -- Sources beyond [2] ignored at this surface.
-            local srcType, altSrcType = 0, 0
-            if aug and aug.sources then
-                srcType    = (aug.sources[1] and aug.sources[1].type) or 0
-                altSrcType = (aug.sources[2] and aug.sources[2].type) or 0
-            end
-            -- expName from catalog expansion tag.
-            local exp = HDG.HousingCatalogObserver:GetExpansionForItem(itemID) or "?"
-            -- First vendor entry for display (sourceName/sourceDetail in row list).
-            local fv = row.vendors and row.vendors[1]
-            -- Its own metatable: acq.items rows inherit these fields instead of
-            -- copying them (4.8 MB per rebuild before, 2026-09-13).
-            local item = {
-                itemID        = itemID,
-                decorID       = row.decorID,
-                name          = row.name or "Unknown",
-                expansion     = exp,
-                sourceType    = srcType,
-                altSourceType = altSrcType,
-                sourceName    = (fv and fv.name) or "",
-                sourceDetail  = (fv and fv.zone) or "",
-                profession    = recipe and recipe.profession or nil,
-                requiresRep   = requiresRep,
-                -- Quest/achievement gate ids carried for the row-list chip-dim
-                -- (acq.items stamps questDone/achEarned; GateChips fades the
-                -- [QUST]/[ACH] chip until the gate is met).
-                questID       = row.questID,
-                achievementID = row.achievementID,
-            }
-            item.__index = item
-            items[#items + 1] = item
-        end)
-        table.sort(items, HDG.TableUtils.ByNameThenItemID)
-        return items
-    end,
-})
-
 -- Current preset string ("missing" / "achievement" / "reputation" /
 -- "crafted" / "quest") or nil.
 Selectors:Register("acq.preset", {
@@ -410,15 +356,16 @@ local function _itemCostFlags(itemID)
     return endeavor, allGold
 end
 
--- Curried filter: returns a function (envRow) -> bool. Caller composes
--- into acq.items. Source-type presets walk row.sourceTags membership via
+-- Curried filter: returns a function (itemID) -> bool. Caller composes
+-- into acq.matchesItemFilters, which hands every matcher an itemID: a probe
+-- row wrapping it was a table per item per keystroke (~140 KB a build,
+-- 2026-10-22). Source-type presets walk row.sourceTags membership via
 -- the catalog row (canonical signal -- covers catalog + ItemAugment + recipe-
 -- derived). missing/endeavor resolve cost flags by itemID (so both modes share
 -- them) -- they're not source kinds.
 local function _matchesFlag(flag)
-    return function(envRow)
-        if not envRow.itemID then return false end
-        local catRow = HDG.HousingCatalogObserver:GetRow(envRow.itemID)
+    return function(itemID)
+        local catRow = HDG.HousingCatalogObserver:GetRow(itemID)
         if not catRow or not catRow.sourceTags then return false end
         for _, t in ipairs(catRow.sourceTags) do
             if t.kind == flag then return true end
@@ -434,10 +381,9 @@ local _PRESET_TO_FLAG = {
 }
 -- SOLD IN A HOUSING NEIGHBORHOOD. The predicate lives on the catalog observer
 -- (IsSoldInNeighborhood) because the companion's "Neighborhood Decor" collection
--- asks the same question; this adapts it to an envelope row.
-local function _matchesNeighborhood(envRow)
-    if not envRow.itemID then return false end
-    local catRow = HDG.HousingCatalogObserver:GetRow(envRow.itemID)
+-- asks the same question; this adapts it to an itemID.
+local function _matchesNeighborhood(itemID)
+    local catRow = HDG.HousingCatalogObserver:GetRow(itemID)
     if not catRow then return false end  -- exception(nullable): itemID outside the catalog
     return HDG.HousingCatalogObserver:IsSoldInNeighborhood(catRow)
 end
@@ -462,9 +408,8 @@ end
 local UNGATED_BLOCKERS = { REP = true, QUEST = true, ACH = true,
                            PROMO = true, SHOP = true }
 
-local function _matchesUngated(envRow)
-    if not envRow.itemID then return false end
-    local catRow = HDG.HousingCatalogObserver:GetRow(envRow.itemID)
+local function _matchesUngated(itemID)
+    local catRow = HDG.HousingCatalogObserver:GetRow(itemID)
     if not catRow then return false end  -- exception(nullable): itemID outside the catalog
     -- The vendor's OWN standing requirement, which is not an item source tag:
     -- an item with no source gate can still sit behind a revered-only merchant.
@@ -472,7 +417,7 @@ local function _matchesUngated(envRow)
     -- No source signal at all is not "ungated" -- it is "unknown", and the
     -- UNKN kind exists precisely so those surface rather than defaulting.
     if not catRow.sourceTags then return false end
-    local _, gold = _itemCostFlags(envRow.itemID)
+    local _, gold = _itemCostFlags(itemID)
     if not gold then return false end
     local vendor = false
     for _, t in ipairs(catRow.sourceTags) do
@@ -494,7 +439,7 @@ Selectors:Register("acq.matchesPreset", {
         if preset == "endeavor" then
             -- Endeavor = items costing Community Coupons (3363), read from the
             -- catalog row's baked costEntries by itemID (works in both modes).
-            return function(row) return (_itemCostFlags(row.itemID)) == true end
+            return function(itemID) return (_itemCostFlags(itemID)) == true end
         end
         -- SHARED with the source dropdown, not reimplemented. Both axes ask the
         -- same question of a row; two copies is how the chip and the dropdown
@@ -527,8 +472,8 @@ Selectors:Register("acq.matchesMissing", {
             return function() return true end
         end
         local isColl = Selectors:Call("decor.isCollected", state, ctx)
-        return function(row)
-            return not (isColl and isColl(row.itemID))
+        return function(itemID)
+            return not (isColl and isColl(itemID))
         end
     end,
 })
@@ -579,7 +524,7 @@ Selectors:Register("acq.matchesSource", {
             if kind then
                 matchers[#matchers + 1] = _matchesFlag(kind.key)
             elseif v == "endeavor" then
-                matchers[#matchers + 1] = function(row) return (_itemCostFlags(row.itemID)) == true end
+                matchers[#matchers + 1] = function(itemID) return (_itemCostFlags(itemID)) == true end
             elseif v == "neighborhood" then
                 matchers[#matchers + 1] = _matchesNeighborhood
             elseif v == "ungated" then
@@ -587,8 +532,8 @@ Selectors:Register("acq.matchesSource", {
             end
         end
         if #matchers == 0 then return function() return false end end
-        return function(row)
-            for _, m in ipairs(matchers) do if m(row) then return true end end
+        return function(itemID)
+            for _, m in ipairs(matchers) do if m(itemID) then return true end end
             return false
         end
     end,
@@ -598,7 +543,7 @@ Selectors:Register("acq.matchesSource", {
 -- reused by BOTH view modes: item mode tests it per item.itemID; vendor mode
 -- tests "sells >=1 item passing it" (see _vendorSellsMatchingItem). Returns
 -- fn(itemID) -> bool, composing the existing matchesSource + matchesPreset
--- closures (which read the catalog row by .itemID) plus an expansion check via
+-- closures (which read the catalog row by itemID) plus an expansion check via
 -- the catalog's GetExpansionForItem. sweepGeneration read covers the GetRow /
 -- GetExpansionForItem observer-cache lookups; matchesPreset transitively
 -- carries decor.isCollected (the "missing" signal).
@@ -616,21 +561,24 @@ Selectors:Register("acq.matchesItemFilters", {
             if hasExp and not expSet[HDG.HousingCatalogObserver:GetExpansionForItem(itemID)] then
                 return false
             end
-            local probe = { itemID = itemID }
-            if matchSource  and not matchSource(probe)  then return false end
-            if matchPreset  and not matchPreset(probe)  then return false end
-            if matchMissing and not matchMissing(probe) then return false end
+            if matchSource  and not matchSource(itemID)  then return false end
+            if matchPreset  and not matchPreset(itemID)  then return false end
+            if matchMissing and not matchMissing(itemID) then return false end
             return true
         end
     end,
 })
 
--- Needle match across the four searchable item fields.
-local function _matchesNeedle(item, needle)
-    return (item.name and item.name:lower():find(needle, 1, true))
-        or (item.profession and item.profession:lower():find(needle, 1, true))
-        or (item.expansion  and item.expansion:lower():find(needle, 1, true))
-        or (item.sourceName and item.sourceName:lower():find(needle, 1, true))
+-- Needle match across the four searchable fields of a catalog row: name,
+-- profession, expansion, first vendor. The vendor is read off row.vendors, not
+-- row.sourceName -- that is display text, built for the row on first read.
+local function _matchesNeedle(row, needle)
+    local recipe, fv = row.recipe, row.vendors[1]
+    local exp = HDG.HousingCatalogObserver:GetExpansionForItem(row.itemID)
+    return row.name:lower():find(needle, 1, true)
+        or (recipe and recipe.profession:lower():find(needle, 1, true))
+        or (exp and exp:lower():find(needle, 1, true))   -- exception(nullable): a row with no expansion tag
+        or (fv and fv.name:lower():find(needle, 1, true))
 end
 
 -- Vendor-axis filters (rep / zone / faction) in ITEM mode, by walking the
@@ -677,23 +625,71 @@ local function _repMetForRow(row)
     return (prog and prog.met) == true
 end
 
--- Chip-dim stamps (questDone / achEarned / repMet) on a shallow-copied row.
+-- Find Decor list rows are reused across rebuilds, one table per itemID, for the
+-- reason decor.items gives: a search keystroke stamped a fresh row for every item
+-- that passed, over a 13-field copy of each catalog row (~2.3 MB a first visit,
+-- 2026-10-22). Safe for the same reason: nothing keeps an older result, and the
+-- list refills from the new array each compute. Weak values: the rows go when
+-- the list lets go. A row holds its own stamps and reads the rest through to its
+-- catalog row (`_item`), so the list's writes land on the row, never on the
+-- catalog row.
+local _rowsByItemID = setmetatable({}, { __mode = "v" })
+-- expansion and profession are read on demand: only the visible rows paint them.
+-- The expansion is GetExpansionForItem's, the one the Expansion filter tests, not
+-- the row's stored tag -- an item with two Expansion tags reads differently in the two.
+local ROW_META = { __index = function(row, key)
+    local item = row._item
+    if key == "expansion" then
+        return HDG.HousingCatalogObserver:GetExpansionForItem(item.itemID) or "?"   -- exception(nullable): a row with no expansion tag; "?" paints blank
+    end
+    if key == "profession" then
+        local recipe = item.recipe
+        return recipe and recipe.profession   -- exception(nullable): most decor is not crafted
+    end
+    return item[key]
+end }
+
+-- Nil is written only over a field the row HAS: WoW's Lua 5.1 inserts the key of
+-- `row.k = nil` when the row lacks it (memory plan 2026-10-21).
+local function _setOwn(row, key, value)
+    if value ~= nil or rawget(row, key) ~= nil then row[key] = value end
+end
+
+-- Chip-dim stamps (questDone / achEarned / repMet).
 -- questDone is account-wide (any alt's recorded completion) OR the current
 -- char's live flag (via _questCompletion -- shared with the detail source
 -- line); achEarned is account-wide. GateChips fades the matching chip when
 -- false. The impure IsComplete/IsEarned/GetProgress calls are gated by the
 -- questStatus/achievementStatus/rep ticks in the calling selector's reads.
-local function _stampChipDim(stamped, item, state)
+local function _stampChipDim(listRow, item, state)
+    local questDone, achEarned
     if item.questID then
         local rec, live = _questCompletion(state, item.questID)
-        stamped.questDone = rec ~= nil or live
+        questDone = rec ~= nil or live
     end
     if item.achievementID then
-        stamped.achEarned = HDG.AchievementObserver:IsEarned(item.achievementID) == true
+        achEarned = HDG.AchievementObserver:IsEarned(item.achievementID) == true
     end
-    if item.requiresRep then
-        stamped.repMet = _repMetForRow(HDG.HousingCatalogObserver:GetRow(item.itemID))
+    _setOwn(listRow, "questDone", questDone)
+    _setOwn(listRow, "achEarned", achEarned)
+    _setOwn(listRow, "repMet", _repMetForRow(item))
+end
+
+-- The list row for a catalog row, holding no flag a fresh row wouldn't: the
+-- Intrusive SelectionBehavior writes `selected` onto rows, and the selection
+-- sync sets it again after the refill.
+local function _acqItemRow(item, isCollected, state)
+    local row = _rowsByItemID[item.itemID]
+    if row then
+        row._item = item
+        if rawget(row, "selected") ~= nil then row.selected = nil end
+    else
+        row = setmetatable({ _item = item }, ROW_META)
+        _rowsByItemID[item.itemID] = row
     end
+    row.isCollected = isCollected
+    _stampChipDim(row, item, state)
+    return row
 end
 
 -- Filtered items: search applies to name + profession + expansion + sourceName;
@@ -702,16 +698,17 @@ Selectors:Register("acq.items", {
     memoized = true,  -- perf: filtered+built item list (~3.8ms walk); shared per flush by the list binding + blankItem + hasResults
     -- acq.selectedItemID retired -- selection owned by SelectionBehaviorMixin
     -- on acquisitionListPanel.itemList. Row factory reads ed.selected.
-    calls = {"acq.allItems", "acq.filterQuery", "acq.matchesItemFilters", "acq.matchesCurrency",
+    calls = {"decor.allItems", "acq.filterQuery", "acq.matchesItemFilters", "acq.matchesCurrency",
              "acq.repFilter", "acq.zoneFilter", "acq.factionFilter", "decor.isCollected"},
     -- Status ticks + account.questCompletions + rep tick: re-stamp questDone/achEarned/
     -- repMet (the row-list chip-dim signals) when completion or rep changes. Gate the
     -- impure IsComplete/IsEarned/GetProgress calls below -- same boundary as the detail line.
     -- sweepGeneration: the rep-axis GetRow(itemID).factionGate lookup below reads the bake.
+    -- staticData: the zone/faction axes read VendorAugment.
     reads = {"session.resolvers.questStatus.tick", "session.resolvers.achievementStatus.tick", "account.questCompletions",
-             "session.resolvers.rep.tick", "session.resolvers.catalog.tick"},
+             "session.resolvers.rep.tick", "session.resolvers.catalog.tick", "session.resolvers.staticData.tick"},
     fn = function(state, ctx)
-        local all       = Selectors:Call("acq.allItems",           state, ctx)
+        local all       = Selectors:Call("decor.allItems",         state, ctx)
         local q         = Selectors:Call("acq.filterQuery",        state, ctx)
         local matchItem = Selectors:Call("acq.matchesItemFilters", state, ctx)
         local matchCurrency = Selectors:Call("acq.matchesCurrency", state, ctx)
@@ -737,15 +734,9 @@ Selectors:Register("acq.items", {
                                          repSet, zoneSet, factionSet, Aug)
             end
             if pass then
-                -- Inherit + stamp: acq.allItems is memoized, so the stamps land on
-                -- a row of their own that reads the item's fields through its
-                -- metatable. Source chips: row factories call
-                -- UI.GateChips(ed.itemID, questDone, achEarned), which reads
-                -- row.sourceTags baked at BuildRow.
-                local stamped = setmetatable({}, item)
-                stamped.isCollected = isColl and isColl(item.itemID) or false
-                _stampChipDim(stamped, item, state)
-                out[#out + 1] = stamped
+                -- Source chips: row factories call UI.GateChips(ed.itemID,
+                -- questDone, achEarned), which reads row.sourceTags baked at BuildRow.
+                out[#out + 1] = _acqItemRow(item, isColl and isColl(item.itemID) or false, state)
             end
         end
         return out
@@ -1527,13 +1518,13 @@ Selectors:Register("acq.mapAllLabel", {
 })
 
 Selectors:Register("acq.countLabel", {
-    calls = {"acq.viewMode", "acq.allItems", "acq.items", "acq.allVendors", "acq.vendors"},
+    calls = {"acq.viewMode", "decor.allItems", "acq.items", "acq.allVendors", "acq.vendors"},
     fn = function(state, ctx)
         local mode = Selectors:Call("acq.viewMode", state, ctx)
         local unit, total, visible
         if mode == "item" then
             unit    = "item"
-            total   = #(Selectors:Call("acq.allItems", state, ctx))
+            total   = #(Selectors:Call("decor.allItems", state, ctx))
             visible = #(Selectors:Call("acq.items",    state, ctx))
         else
             unit    = "vendor"

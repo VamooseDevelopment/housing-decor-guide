@@ -13,26 +13,39 @@ local UI = HDG.UI
 
 -- ===== Widget access =====================================================
 
+-- Strict: a controller is wired only onto frames that host its views
+-- (Controllers:WireAll), so a missing widget is a typo or a wrong `controllers`
+-- list, and it errors instead of leaving a button unwired.
 function UI.W(rootFrame, id)
-    return rootFrame.widgets[id]
+    local w = rootFrame.widgets[id]
+    if w == nil then
+        error(("widget %q is not on this frame (a typo, or a view's `controllers` list is wrong)")
+            :format(tostring(id)), 2)
+    end
+    return w
 end
 
 -- Wire LMB+RMB on a row Button. Either handler may be nil.
 -- Both handlers receive the row Button as `self`.
+-- One shared OnClick for every wired row, reading the handlers off the frame: rows
+-- are rewired on every paint (refills, scrolling), and a closure per paint was
+-- garbage each time (memory plan 2026-10-19 sec 6).
+local function _onLeftRightClick(self, button)
+    if button == "RightButton" then
+        if self._rmbHandler then self._rmbHandler(self) end
+    elseif self._lmbHandler then
+        self._lmbHandler(self)
+    end
+end
+
 function UI.WireLeftRightClick(row, lmbHandler, rmbHandler)
     row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-    row:SetScript("OnClick", function(self, button)
-        if button == "RightButton" then
-            if rmbHandler then rmbHandler(self) end
-        elseif lmbHandler then
-            lmbHandler(self)
-        end
-    end)
+    row._lmbHandler, row._rmbHandler = lmbHandler, rmbHandler
+    row:SetScript("OnClick", _onLeftRightClick)
 end
 
 function UI.OnClick(rootFrame, widgetId, fn)
-    local w = UI.W(rootFrame, widgetId)
-    if w and w.SetScript then w:SetScript("OnClick", fn) end
+    UI.W(rootFrame, widgetId):SetScript("OnClick", fn)
 end
 
 -- Add a recipe to the craft queue + toast the amount added on the status rail.
@@ -357,8 +370,8 @@ local function _reagentSearchName(itemID)
         name = (C_Item.GetItemInfo(itemID))
     end
     if not name or name == "" then
-        local row = HDG.StaticData.Reagents:Get(itemID)   -- exception(nullable): not every item is a known reagent
-        name = row and row[2]
+        local _, reagentName = HDG.StaticData.Reagents:Get(itemID)   -- exception(nullable): not every item is a known reagent
+        name = reagentName
     end
     if not name or name == "" then name = "item:" .. tostring(itemID) end
     return name

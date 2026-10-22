@@ -21,7 +21,7 @@
 -- Adding a recipe:
 --   1. Add the entry below (alphabetical within its section)
 --   2. Reference it via { recipe = "YourRecipeName" } in LayoutConfig spec
---   3. The Layout:Validate boot check catches name typos
+--   3. Layout:Validate (tests/test_layout_validate.lua, run by deploy) catches name typos
 --
 -- TODO sections are placeholders; replace stubs as each call site migrates to recipe form.
 

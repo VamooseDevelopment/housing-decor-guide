@@ -18,8 +18,11 @@
 
 HDG = HDG or {}
 HDG.Theme = {
-    registry    = setmetatable({}, { __mode = "k" }),  -- weak-keyed; GC releases entries
-    states      = setmetatable({}, { __mode = "k" }),  -- per-widget state (selected/active/etc)
+    registry    = setmetatable({}, { __mode = "k" }),  -- weak-keyed; GC releases entries. widget -> LAST role (SetState / Apply target)
+    states      = setmetatable({}, { __mode = "k" }),  -- per-widget state (selected/active/etc) -- the last state passed
+    roles       = setmetatable({}, { __mode = "k" }),  -- widget -> every role, in order -- only for widgets with two or more
+    roleStates  = setmetatable({}, { __mode = "k" }),  -- widget -> { [role] = the state that role was registered with }
+    paintGeneration = 0,   -- bumped on every scheme / font-face change; rows painted under an older one re-Configure
     fontObjects = {},  -- role name -> FontObject (created at Initialize)
 }
 
@@ -138,37 +141,53 @@ function HDG.Theme:_InstallSchemeSubscriber()
         -- (debug toggle, price preferences, etc). Both scheme and font-face changes
         -- need the same rebuild-fonts + ApplyAll + full re-render.
         if not HDG.Paths.MatchesAny({ "account.config.scheme", "account.config.fontFamily" }, invalidation) then return end
-        local newScheme = HDG.Store:GetState().account.config.scheme
-        if type(newScheme) ~= "string" or newScheme == "" then return end
-        local scheme = HDGR_SchemeConstants[newScheme]
-        if not scheme then
-            HDG.Log:Warn("theme", "scheme " .. newScheme .. " not found in HDGR_SchemeConstants")
-            return
-        end
-        -- Native-button schemes (Panseit's Blizzard UI) build a different button
-        -- WIDGET (UIPanelButtonTemplate vs HDG's atlas), which a repaint can't swap.
-        -- When that flips, the buttons need a /reload to rebuild -> prompt the user.
-        local nativeChanged = (self.currentScheme.nativeButtons or false) ~= (scheme.nativeButtons or false)
-        self.currentScheme = scheme
-        self:BuildFontObjects()   -- resolves the (possibly newly-overridden) font face
-        self:ApplyAll()
-        -- ApplyAll only repaints Theme:Register'd widgets. Pooled data rows read
-        -- Theme:GetColor at Configure-time and would keep the old scheme until
-        -- the next data refresh. Force a full re-render.
-        if HDG.RefreshMainWindow then HDG:RefreshMainWindow("*") end  -- exception(boundary): RefreshMainWindow nil in tests / partial load-order
-        if nativeChanged and _G.StaticPopup_Show then   -- exception(boundary): StaticPopup_Show nil in tests
-            if not _G.StaticPopupDialogs["HDGR_THEME_RELOAD"] then
-                _G.StaticPopupDialogs["HDGR_THEME_RELOAD"] = {
-                    text = "Panseit's Blizzard UI uses native Blizzard buttons. Switching to or from it needs a UI reload to rebuild them. Reload now?",
-                    button1 = "Reload Now",
-                    button2 = "Later",
-                    OnAccept = function() _G.ReloadUI() end,
-                    timeout = 0, whileDead = true, hideOnEscape = true,
-                }
-            end
-            _G.StaticPopup_Show("HDGR_THEME_RELOAD")
-        end
+        self:ApplyConfiguredTheme()
     end)
+end
+
+-- Rebuild the fonts and repaint every surface for the scheme and font face in
+-- config. Runs after a CONFIG_SET that moved either (the subscriber above).
+function HDG.Theme:ApplyConfiguredTheme()
+    local newScheme = HDG.Store:GetState().account.config.scheme
+    if type(newScheme) ~= "string" or newScheme == "" then return end
+    local scheme = HDGR_SchemeConstants[newScheme]
+    if not scheme then
+        HDG.Log:Warn("theme", "scheme " .. newScheme .. " not found in HDGR_SchemeConstants")
+        return
+    end
+    -- Native-button schemes (Panseit's Blizzard UI) build a different button
+    -- WIDGET (UIPanelButtonTemplate vs HDG's atlas), which a repaint can't swap.
+    -- When that flips, the buttons need a /reload to rebuild -> prompt the user.
+    local nativeChanged = (self.currentScheme.nativeButtons or false) ~= (scheme.nativeButtons or false)
+    self.currentScheme = scheme
+    self:BuildFontObjects()   -- resolves the (possibly newly-overridden) font face
+    self:ApplyAll()
+    -- ApplyAll only repaints Theme:Register'd widgets. Pooled data rows read
+    -- Theme:GetColor at Configure-time and would keep the old scheme until
+    -- the next data refresh. Force a full re-render -- and bump the paint
+    -- generation first, or a scrollbox handed the same memoized items table
+    -- skips SetItems and never re-runs Configure (Components _sameItems).
+    -- Auto-sized widgets measured their text in the old face: re-measure.
+    -- Satellites too: their interest sets don't read these settings, and
+    -- doing it here (not in a Window subscriber) keeps it after this rebuild.
+    self.paintGeneration = self.paintGeneration + 1
+    if HDG.RefreshMainWindow then  -- exception(boundary): RefreshMainWindow nil in tests / partial load-order
+        HDG.UI.RefreshIntrinsicWidths(HDG.mainFrame)
+        HDG:RefreshMainWindow("*")
+    end
+    if HDG.Window then HDG.Window:RepaintAll() end  -- exception(boundary): Window nil in tests / partial load-order
+    if nativeChanged and _G.StaticPopup_Show then   -- exception(boundary): StaticPopup_Show nil in tests
+        if not _G.StaticPopupDialogs["HDGR_THEME_RELOAD"] then
+            _G.StaticPopupDialogs["HDGR_THEME_RELOAD"] = {
+                text = "Panseit's Blizzard UI uses native Blizzard buttons. Switching to or from it needs a UI reload to rebuild them. Reload now?",
+                button1 = "Reload Now",
+                button2 = "Later",
+                OnAccept = function() _G.ReloadUI() end,
+                timeout = 0, whileDead = true, hideOnEscape = true,
+            }
+        end
+        _G.StaticPopup_Show("HDGR_THEME_RELOAD")
+    end
 end
 
 function HDG.Theme:GetScheme()
@@ -1236,11 +1255,28 @@ function HDG.Theme:Register(widget, widgetType, state, env)
             :format(not widget and "widget" or "role"))
         return false
     end
+    local prev = self.registry[widget]
     self.registry[widget] = widgetType
-    if state ~= nil then
-        -- states is initialised at Theme construction; left no-op here for safety.
-        self.states[widget] = state
+    -- A widget can carry several roles (RowWoodBeam then RowChrome on a styles
+    -- row). The registry keeps only the last, so ApplyAll once re-ran only that
+    -- one and every earlier role froze at the old scheme. ApplyAll replays them
+    -- all, in order, each with the state it came with. Most widgets carry one
+    -- role, which the registry already holds, so the list starts only when a
+    -- second role arrives: a list for every widget was ~5,800 tables in a
+    -- browsed window (memory census 2026-10-19).
+    local roles = self.roles[widget]
+    if not roles and prev and prev ~= widgetType then
+        roles = { prev }
+        self.roles[widget] = roles
+        self.roleStates[widget] = { [prev] = self.states[widget] }
     end
+    if roles then
+        local known = false
+        for _, r in ipairs(roles) do if r == widgetType then known = true end end
+        if not known then roles[#roles + 1] = widgetType end
+        if state ~= nil then self.roleStates[widget][widgetType] = state end
+    end
+    if state ~= nil then self.states[widget] = state end
     local skin = self.Skinners and self.Skinners[widgetType]
     if skin then
         skin(widget, resolveScheme(self, env), self.states and self.states[widget])
@@ -1256,14 +1292,40 @@ function HDG.Theme:Apply(widget, widgetType, env)
     if not widget then return false end
     local resolvedType = widgetType or self.registry[widget]
     local skin = self.Skinners and self.Skinners[resolvedType]
-    if not skin then return false end
+    if not skin then
+        -- ADR-015, same as Register: a role with no Skinner fails loud, not silent.
+        HDG.Log:Warn("theme", "Apply: no Skinner for role '" .. tostring(resolvedType) .. "' -- widget will not paint")
+        return false
+    end
     skin(widget, resolveScheme(self, env), self.states and self.states[widget])
     return true
 end
 
+-- Every role of every widget, in registration order -- the order the build
+-- painted them. The last role takes the widget's live state (SetState writes
+-- it); an earlier one takes the state it was registered with, so RowWoodBeam
+-- keeps the alpha it reads strictly.
+local function applyRole(self, widget, role, scheme, state)
+    local skin = self.Skinners[role]
+    if not skin then
+        HDG.Log:Warn("theme", "ApplyAll: no Skinner for role '" .. tostring(role) .. "' -- widget will not paint")
+        return
+    end
+    skin(widget, scheme, state)
+end
+
 function HDG.Theme:ApplyAll(env)
-    for widget, widgetType in pairs(self.registry) do
-        self:Apply(widget, widgetType, env)
+    local scheme = resolveScheme(self, env)
+    for widget, last in pairs(self.registry) do
+        local roles = self.roles[widget]
+        if roles then
+            local byRole = self.roleStates[widget]
+            for _, role in ipairs(roles) do
+                applyRole(self, widget, role, scheme, (role ~= last and byRole[role]) or self.states[widget])
+            end
+        else
+            applyRole(self, widget, last, scheme, self.states[widget])
+        end
     end
 end
 

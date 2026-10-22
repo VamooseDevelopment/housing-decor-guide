@@ -617,10 +617,6 @@ end
 -- ===== Controller contract ===================================================
 
 function C:Wire(root)
-    -- WireAll runs once per WINDOW (main + lumber tracker + ...); only the
-    -- window hosting the Blueprints view has our widgets.
-    local pasteProbe = HDG.UI.W(root, "blueprintsListPanel.pasteBox")
-    if not pasteProbe then return end  -- exception(nullable): this window doesn't host the Blueprints view
     self.root = root
 
     -- One collection request per session, not per re-mount.
@@ -935,9 +931,7 @@ local METER_BAR_IDS = {
 }
 
 function C:Refresh(rootFrame, _ctx)
-    -- RefreshAll runs once per WINDOW; skip windows that don't host the view.
     local codeBox = HDG.UI.W(rootFrame, "blueprintsDetailPanel.codeBox")
-    if not codeBox then return end  -- exception(nullable): this window doesn't host the Blueprints view
 
     -- Bindings render everything textual; the two imperative reconciles are the
     -- meter fill colors (state-driven skinner re-registration) and the
@@ -950,9 +944,7 @@ function C:Refresh(rootFrame, _ctx)
     -- Verdict badge text: green when it fits, red when blocked (the band's
     -- card chrome stays accent; only the text role tones -- UX review #14).
     local verdictFs = HDG.UI.W(rootFrame, "blueprintsDetailPanel.verdict")
-    if verdictFs then  -- exception(nullable): windows without the Blueprints view
-        HDG.Theme:Register(verdictFs, b.fits and "TextSuccess" or "TextError")
-    end
+    HDG.Theme:Register(verdictFs, b.fits and "TextSuccess" or "TextError")
     if not codeBox:HasFocus() then
         codeBox:SetText(_selectedCode() or "")
     end

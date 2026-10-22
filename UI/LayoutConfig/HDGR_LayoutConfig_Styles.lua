@@ -17,7 +17,7 @@ local LC = HDG.LayoutConfig
 -- ===== View ==================================================================
 
 LC.window.views.styles = {
-    explicit = true,
+    controllers = { "styles" },
     width    = "auto",       -- 4 + 1014 + 4 = 1022
     height   = "auto",       -- chrome + status now come from the window's slots
     columns  = { 1014 },     -- 998 + 16 margins so 7 cards hold (see header math)

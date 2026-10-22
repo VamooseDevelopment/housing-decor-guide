@@ -1,3 +1,61 @@
+## [3.39.0] - 2026-10-22 (October 2026)
+
+### Fixed
+- **Logging in to a zone with decor you haven't collected brings up the zone alert.** The alert and
+  the Zone Scanner's list now appear about 30 seconds after you log in, with HDG's window closed.
+  Before, they waited until you first opened HDG.
+- **Find Decor shows each crafted decor's profession,** and searching for a profession, such as
+  Tailoring, finds the decor it makes. Before, crafted decor showed no profession there and a
+  profession search found nothing.
+- **Decor you've just collected shows as collected.** Now and then the game reports a new piece
+  before its own count catches up, and HDG kept showing it as Not Collected until you reloaded. HDG
+  now checks each new piece a moment after it arrives and looks again if it still reads uncollected,
+  with the window open or closed, so the collected marks at a vendor are right too.
+- **Reopening the window shows decor collected while it was closed,** without switching tabs first.
+- **A collect could be undone a moment later.** When two catalog scans overlapped, a piece collected
+  between them could flip back to Not Collected until the next scan.
+- **Destroying copies never destroys more than you asked for.** If the catalog refreshed in the
+  middle of a run, HDG could miss copies that had already gone and send one destroy too many. It now
+  waits for the refresh instead.
+- **Switching colour scheme recolours everything at once.** Recipe headers, recipe and vendor names,
+  the Alts grid headers and the floating windows kept the old scheme's colours until their contents
+  changed.
+- **Changing the font resizes labels and buttons at once,** instead of leaving text overflowing its
+  buttons until you reloaded.
+- **Keys still reach the game in combat** with Hide in combat turned off. HDG's window could swallow
+  every key you pressed in a fight.
+- **Deleting your last shopping list gives you a fresh one,** so Add to Cart works straight away
+  instead of saying there's no active list.
+- **Hard reset reloads your UI,** as its button says.
+- **Reagents the game hasn't loaded yet show their name** instead of "item" and a number while
+  the real name loads.
+- **Opening Import or Export from Tools** lets the Destroy decor list re-sort when you come back,
+  as leaving the Decor tab any other way does.
+- **Quests you turn in with HDG closed** count for "completed by" without waiting for you to open a
+  catalog tab first.
+- **Your saved data is safer.** If HDG ever fails to load your saved data, it no longer saves an empty
+  profile over it when you log out, and a future update can no longer bring back shopping lists or
+  characters you deleted.
+
+### Changed
+- **Updating straight from HDG 2.x (before 3.0, June 2026) now starts you fresh.** Your
+  favorites, notes and lists from 2.x no longer carry over. Anyone who has run 3.0 or later keeps
+  everything.
+- **Leftover data from HDG 2.x is cleared out of your saved data.** The 3.0 update copied what it
+  kept when you upgraded, so nothing you use changes. If you came from 2.x, HDG uses several MB less
+  memory and its save file is much smaller.
+- **HDG uses less memory from the moment you log in.** It builds your pet list the first time you
+  open Pets or the Menagerie instead of at login, prepares only the colour scheme you use, and keeps
+  the style tags behind Smart Sets, the Menagerie's pet details, recipes and reagents in a far more
+  compact form. Once the catalog loads, each decor keeps only what HDG needs to sort and filter it,
+  each vendor's details are stored once instead of on every item it sells, and items sold at the same
+  price share one copy of it. Everything looks and works the same.
+- **Closing HDG's window gives its memory back.** Lists and dropdown menus let go of what they were
+  showing when you close the window, and fill again when you open it, scrolled to where you left
+  them. Smart Sets let go of their tag counts too.
+- **Find Decor uses less memory,** both the first time you open it and each time you type in its
+  search box.
+
 ## [3.38.0] - 2026-10-18 (October 2026)
 
 ### Added

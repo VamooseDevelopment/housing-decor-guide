@@ -175,57 +175,86 @@ function M:Create(parent, cfg)
     return host, scrollBar
 end
 
--- Apply collapse-only mutations in-place. Returns true on clean apply, false
--- when root count diverged (caller falls back to full rebuild). Designed for
--- collapse-toggle dispatches where only per-node isCollapsed changes (orig. the retired ACQ_TOGGLE_VENDOR_EXPANSION action).
-local function _applyCollapseOnly(widget, newRoots)
-    local provider = widget._scrollBox:GetDataProvider()
-    if not provider or not provider.GetChildrenNodes then return false end
-    local existing = provider:GetChildrenNodes()
-    if #existing ~= #(newRoots or {}) then return false end
-    for i, newRoot in ipairs(newRoots) do
-        local node = existing[i]
-        if not node or not node.SetCollapsed then return false end
-        if (newRoot.isCollapsed and true or false) ~= (node:IsCollapsed() and true or false) then
-            node:SetCollapsed(newRoot.isCollapsed and true or false)
-        end
+-- In-place update when the new tree has the live tree's shape: the same node
+-- keys and kinds, with the same children, at every depth. The nav rebuilds its
+-- nodes on every view switch only to move the highlight; replacing each node's
+-- data and repainting the visible rows keeps the TreeNodes and their frames
+-- (memory plan 2026-10-19 sec 6). A fold changes the shape -- a collapsed group
+-- carries no children -- so it rebuilds, which also gives an expanded group its
+-- children when the tree was built with it folded.
+local NO_CHILDREN = {}
+
+local function _sameShape(nodes, datas)
+    if #nodes ~= #datas then return false end
+    for i, node in ipairs(nodes) do
+        local was, data = node:GetData(), datas[i]
+        -- A node without a key can't be matched to its old self.
+        if data.key == nil or was.key ~= data.key or was.kind ~= data.kind then return false end
+        -- exception(optional): leaf nodes carry no children (module header).
+        if not _sameShape(node:GetNodes(), data.children or NO_CHILDREN) then return false end
     end
     return true
 end
 
--- SetItems: flatten rootNodes into a TreeDataProvider; apply isCollapsed at
--- insert time. Design target is 2-level trees.
--- opts (or boolean retainScroll for legacy callers):
---   retainScroll = bool  -- RetainScrollPosition (default Discard)
---   collapseOnly = bool  -- try in-place collapse mutation first; rebuild on mismatch
-function M:SetItems(widget, rootNodes, opts)
-    -- Legacy: bool 3rd arg = retainScroll only.
-    if type(opts) ~= "table" then opts = { retainScroll = opts == true } end
-
-    if opts.collapseOnly and _applyCollapseOnly(widget, rootNodes) then
-        return
+local function _replaceData(nodes, datas)
+    for i, node in ipairs(nodes) do
+        local data = datas[i]
+        node.data = data
+        if (data.isCollapsed == true) ~= (node:IsCollapsed() == true) then
+            node:SetCollapsed(data.isCollapsed == true)
+        end
+        _replaceData(node:GetNodes(), data.children or NO_CHILDREN)   -- exception(optional): leaf nodes carry no children
     end
+end
 
-    local provider = CreateTreeDataProvider()
-    local function insertChildren(parentNode, children)
-        if not children then return end
-        for _, childData in ipairs(children) do
-            local childNode = parentNode:Insert(childData)
-            if childData.children and #childData.children > 0 then
-                insertChildren(childNode, childData.children)
-            end
+local function _repaintFrame(frame, node)
+    M:GetCellKind(node:GetData().kind).initializer(frame, node)
+end
+
+local function _applyInPlace(widget, newRoots)
+    local provider = widget._scrollBox:GetDataProvider()
+    -- exception(nullable): the first fill (or one after the window released its data) has no provider.
+    if not provider or not _sameShape(provider:GetChildrenNodes(), newRoots) then return false end
+    _replaceData(provider:GetChildrenNodes(), newRoots)
+    widget._scrollBox:ForEachFrame(_repaintFrame)
+    return true
+end
+
+local function _insertChildren(parentNode, children)
+    if not children then return end
+    for _, childData in ipairs(children) do
+        local childNode = parentNode:Insert(childData)
+        if childData.children and #childData.children > 0 then
+            _insertChildren(childNode, childData.children)
         end
     end
+end
+
+-- Flatten rootNodes into a new TreeDataProvider; apply isCollapsed at insert time.
+local function _rebuild(widget, rootNodes, opts)
+    local provider = CreateTreeDataProvider()
     for _, rootData in ipairs(rootNodes or {}) do
         local node = provider:Insert(rootData)
         if rootData.isCollapsed then node:SetCollapsed(true) end
-        insertChildren(node, rootData.children)
+        _insertChildren(node, rootData.children)
     end
     local flag = opts.retainScroll
         and ScrollBoxConstants.RetainScrollPosition
         or  ScrollBoxConstants.DiscardScrollPosition
     widget._scrollBox:SetDataProvider(provider, flag)
-    -- Post-population hooks (e.g. WireStoreSelectionSync after a rebuild).
+    HDG.UI.RestoreListScroll(widget, widget._scrollBox)   -- refilled after the window closed
+end
+
+-- SetItems: update the live tree in place when the new one has its shape
+-- (_applyInPlace), else rebuild. Design target is 2-level trees.
+-- opts (or boolean retainScroll for legacy callers):
+--   retainScroll = bool  -- RetainScrollPosition on a rebuild (default Discard)
+function M:SetItems(widget, rootNodes, opts)
+    -- Legacy: bool 3rd arg = retainScroll only.
+    if type(opts) ~= "table" then opts = { retainScroll = opts == true } end
+    if not _applyInPlace(widget, rootNodes) then _rebuild(widget, rootNodes, opts) end
+    -- Post-population hooks, after either path (WireStoreSelectionSync; the nav's
+    -- reveal of its active row, which moves on an in-place update too).
     -- per ADR-042: strict call, no pcall -- a failing hook is a real bug.
     if widget._afterSetItems then
         for _, fn in ipairs(widget._afterSetItems) do fn(widget) end

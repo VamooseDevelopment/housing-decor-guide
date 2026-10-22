@@ -13,7 +13,7 @@
 --   RosePineMain     - Rose Pine main (the dark default)
 --   GruvboxDarkHard  - Gruvbox dark + hard contrast
 --
--- Add a theme: provide a palette table + BuildScheme(palette).
+-- Add a theme: a palette builder in Palettes + its name in HDGR_SchemeMeta.order.
 -- Switch at runtime: HDG.Theme:LoadScheme("Mocha").
 --
 -- Access via Theme APIs:
@@ -306,7 +306,7 @@ end
 local Palettes = {}
 
 -- ----- ColorblindSafe (original HDG palette) -------------------------------
-Palettes.ColorblindSafe = {
+Palettes.ColorblindSafe = function() return {
     sunken          = hex("#0C1116"),
     bg              = hex("#101418", 0.95),
     panel_soft      = hex("#151D27"),
@@ -353,11 +353,11 @@ Palettes.ColorblindSafe = {
     diag_warn           = hex("#F2C94C"),  -- warning (amber)
     diag_info           = hex("#4EA3F1"),  -- accent (blue)
     diag_hint           = hex("#00A896"),  -- success (teal)
-}
+} end
 
 -- ----- Catppuccin Mocha -----------------------------------------------------
 -- Source: https://github.com/catppuccin/catppuccin#-palette
-Palettes.Mocha = {
+Palettes.Mocha = function() return {
     sunken          = hex("#11111b"),                   -- crust
     bg              = hex("#1e1e2e", 0.95),             -- base
     panel_soft      = hex("#181825"),                   -- mantle
@@ -396,11 +396,11 @@ Palettes.Mocha = {
     diag_warn           = hex("#f9e2af"),  -- yellow
     diag_info           = hex("#89b4fa"),  -- blue
     diag_hint           = hex("#94e2d5"),  -- teal
-}
+} end
 
 -- ----- Tokyonight Night ----------------------------------------------------
 -- Source: https://github.com/folke/tokyonight.nvim (extras/lua/tokyonight_night.lua)
-Palettes.TokyonightNight = {
+Palettes.TokyonightNight = function() return {
     sunken          = hex("#16161e"),                   -- bg_dark
     bg              = hex("#1a1b26", 0.95),             -- bg
     panel_soft      = hex("#1f2335"),                   -- bg + slight lift
@@ -439,11 +439,11 @@ Palettes.TokyonightNight = {
     diag_warn           = hex("#e0af68"),  -- yellow
     diag_info           = hex("#0db9d7"),  -- blue2
     diag_hint           = hex("#1abc9c"),  -- teal
-}
+} end
 
 -- ----- Rose Pine Main -------------------------------------------------------
 -- Source: https://github.com/rose-pine/rose-pine-theme (palette/main.md)
-Palettes.RosePineMain = {
+Palettes.RosePineMain = function() return {
     sunken          = hex("#191724"),                   -- base (darkest)
     bg              = hex("#1f1d2e", 0.95),             -- surface
     panel_soft      = hex("#21202e"),                   -- highlightLow
@@ -482,11 +482,11 @@ Palettes.RosePineMain = {
     diag_warn           = hex("#f6c177"),  -- gold
     diag_info           = hex("#9ccfd8"),  -- foam
     diag_hint           = hex("#c4a7e7"),  -- iris
-}
+} end
 
 -- ----- Gruvbox Dark Hard ----------------------------------------------------
 -- Source: https://github.com/morhetz/gruvbox (gruvbox-palettes.png)
-Palettes.GruvboxDarkHard = {
+Palettes.GruvboxDarkHard = function() return {
     sunken          = hex("#1d2021"),                   -- bg0_h (hard contrast)
     bg              = hex("#282828", 0.95),             -- bg0
     panel_soft      = hex("#32302f"),                   -- bg0_s
@@ -525,11 +525,11 @@ Palettes.GruvboxDarkHard = {
     diag_warn           = hex("#fabd2f"),  -- yellow
     diag_info           = hex("#83a598"),  -- blue
     diag_hint           = hex("#8ec07c"),  -- aqua
-}
+} end
 
 -- ----- Solarized Dark -------------------------------------------------------
 -- Source: https://ethanschoonover.com/solarized/ (base03..base3 + accents)
-Palettes.SolarizedDark = {
+Palettes.SolarizedDark = function() return {
     sunken          = hex("#002b36"),                   -- base03
     bg              = hex("#002b36", 0.95),             -- base03
     panel_soft      = hex("#03303a"),                   -- between base03/base02
@@ -568,11 +568,11 @@ Palettes.SolarizedDark = {
     diag_warn           = hex("#b58900"),  -- yellow
     diag_info           = hex("#2aa198"),  -- cyan
     diag_hint           = hex("#859900"),  -- green
-}
+} end
 
 -- ----- Solarized Light ------------------------------------------------------
 -- Source: https://ethanschoonover.com/solarized/ (light variant)
-Palettes.SolarizedLight = {
+Palettes.SolarizedLight = function() return {
     isLight         = true,                             -- light-canvas theme
     -- Surface ramp: monotonic by lightness (sunken darkest
     -- -> raised lightest/base3) so the depth ramp holds on light schemes too.
@@ -614,11 +614,11 @@ Palettes.SolarizedLight = {
     diag_warn           = hex("#b58900"),  -- yellow
     diag_info           = hex("#2aa198"),  -- cyan
     diag_hint           = hex("#859900"),  -- green
-}
+} end
 
 -- ----- Gruvbox Light Hard ---------------------------------------------------
 -- Source: https://github.com/morhetz/gruvbox (gruvbox-palettes.png light side)
-Palettes.GruvboxLightHard = {
+Palettes.GruvboxLightHard = function() return {
     isLight         = true,                             -- light-canvas theme
     -- Surface ramp: monotonic by lightness (sunken darkest
     -- -> raised lightest) -- Gruvbox bg ramp reordered + interpolated.
@@ -660,11 +660,11 @@ Palettes.GruvboxLightHard = {
     diag_warn           = hex("#b57614"),  -- yellow
     diag_info           = hex("#076678"),  -- blue
     diag_hint           = hex("#427b58"),  -- aqua
-}
+} end
 
 -- ----- Everforest Dark (Medium contrast) ------------------------------------
 -- Source: https://github.com/sainnhe/everforest (palette/dark medium)
-Palettes.EverforestDark = {
+Palettes.EverforestDark = function() return {
     sunken          = hex("#272e33"),                   -- bg_dim
     bg              = hex("#2d353b", 0.95),             -- bg0
     panel_soft      = hex("#343f44"),                   -- bg1
@@ -703,11 +703,11 @@ Palettes.EverforestDark = {
     diag_warn           = hex("#dbbc7f"),  -- yellow
     diag_info           = hex("#7fbbb3"),  -- blue
     diag_hint           = hex("#d699b6"),  -- purple
-}
+} end
 
 -- ----- Everforest Light (Medium contrast) -----------------------------------
 -- Source: https://github.com/sainnhe/everforest (palette/light medium)
-Palettes.EverforestLight = {
+Palettes.EverforestLight = function() return {
     isLight         = true,                             -- light-canvas theme
     -- Surface ramp: monotonic by lightness (sunken darkest
     -- -> raised lightest/bg0) -- Everforest bg ramp reordered + interpolated.
@@ -749,11 +749,11 @@ Palettes.EverforestLight = {
     diag_warn           = hex("#dfa000"),
     diag_info           = hex("#3a94c5"),
     diag_hint           = hex("#df69ba"),  -- purple light
-}
+} end
 
 -- ----- Kanagawa Wave (dark default) -----------------------------------------
 -- Source: https://github.com/rebelot/kanagawa.nvim (lua/kanagawa/colors.lua)
-Palettes.KanagawaWave = {
+Palettes.KanagawaWave = function() return {
     sunken          = hex("#16161D"),                   -- sumiInk0
     bg              = hex("#1F1F28", 0.95),             -- sumiInk3 (default bg)
     panel_soft      = hex("#181820"),                   -- sumiInk1
@@ -792,11 +792,11 @@ Palettes.KanagawaWave = {
     diag_warn           = hex("#FF9E3B"),  -- roninYellow
     diag_info           = hex("#658594"),  -- dragonBlue
     diag_hint           = hex("#6A9589"),  -- waveAqua1
-}
+} end
 
 -- ----- Kanagawa Lotus (light variant) ---------------------------------------
 -- Source: https://github.com/rebelot/kanagawa.nvim (lotus palette)
-Palettes.KanagawaLotus = {
+Palettes.KanagawaLotus = function() return {
     isLight         = true,                             -- light-canvas theme
     -- Surface ramp: monotonic by lightness (sunken darkest -> raised lightest/lotusWhite3);
     -- footer/header dropped the lotusViolet band to maintain monotonicity.
@@ -838,11 +838,11 @@ Palettes.KanagawaLotus = {
     diag_warn           = hex("#cc6d00"),
     diag_info           = hex("#4d699b"),
     diag_hint           = hex("#6f894e"),
-}
+} end
 
 -- ----- Nord -----------------------------------------------------------------
 -- Source: https://www.nordtheme.com/docs/colors-and-palettes
-Palettes.Nord = {
+Palettes.Nord = function() return {
     sunken          = hex("#2e3440"),                   -- nord0 (Polar Night)
     bg              = hex("#2e3440", 0.95),             -- nord0
     panel_soft      = hex("#3b4252"),                   -- nord1
@@ -881,11 +881,11 @@ Palettes.Nord = {
     diag_warn           = hex("#B48EAD"),  -- nord15 (PURPLE per Nord spec, NOT yellow)
     diag_info           = hex("#5E81AC"),  -- nord10
     diag_hint           = hex("#81A1C1"),  -- nord9
-}
+} end
 
 -- ----- Dracula --------------------------------------------------------------
 -- Source: https://draculatheme.com/contribute (official palette)
-Palettes.Dracula = {
+Palettes.Dracula = function() return {
     sunken          = hex("#1e1f29"),                   -- darker bg
     bg              = hex("#282a36", 0.95),             -- background
     panel_soft      = hex("#21222c"),
@@ -924,11 +924,11 @@ Palettes.Dracula = {
     diag_warn           = hex("#F1FA8C"),  -- yellow
     diag_info           = hex("#8BE9FD"),  -- cyan
     diag_hint           = hex("#8BE9FD"),  -- cyan (same as info per Mofiqul)
-}
+} end
 
 -- ----- Nightfly -------------------------------------------------------------
 -- Source: https://github.com/bluz71/vim-nightfly-colors (palette in plugin)
-Palettes.Nightfly = {
+Palettes.Nightfly = function() return {
     sunken          = hex("#00111b"),                   -- shade (deeper)
     bg              = hex("#011627", 0.95),             -- main bg
     panel_soft      = hex("#01121f"),
@@ -967,11 +967,11 @@ Palettes.Nightfly = {
     diag_warn           = hex("#e3d18a"),  -- yellow
     diag_info           = hex("#87bcff"),  -- malibu
     diag_hint           = hex("#7fdbca"),  -- turquoise
-}
+} end
 
 -- ----- OneNord --------------------------------------------------------------
 -- Source: https://github.com/rmehri01/onenord.nvim (Nord + One Dark blend)
-Palettes.OneNord = {
+Palettes.OneNord = function() return {
     sunken          = hex("#2a2e3a"),                   -- bg_dark
     bg              = hex("#2e3440", 0.95),             -- bg
     panel_soft      = hex("#2a2e3a"),
@@ -1010,12 +1010,12 @@ Palettes.OneNord = {
     diag_warn           = hex("#D08F70"),  -- orange
     diag_info           = hex("#A3BE8C"),  -- green
     diag_hint           = hex("#B48EAD"),  -- light_purple
-}
+} end
 
 -- ----- Badwolf (Steve Losh) -------------------------------------------------
 -- Source: https://github.com/sjl/badwolf (colors/badwolf.vim s:bwc dict / HTML
 -- palette preview). Gravel ramp = grayscale surfaces; tardis/lime/taffy accents.
-Palettes.Badwolf = {
+Palettes.Badwolf = function() return {
     sunken          = hex("#141413"),                   -- blackestgravel
     bg              = hex("#1c1b1a", 0.95),             -- blackgravel (Normal bg)
     panel_soft      = hex("#242321"),                   -- darkgravel
@@ -1054,7 +1054,7 @@ Palettes.Badwolf = {
     diag_warn           = hex("#ffa724"),  -- orange
     diag_info           = hex("#0a9dff"),  -- tardis (blue)
     diag_hint           = hex("#8cffba"),  -- saltwatertaffy (green)
-}
+} end
 
 -- ----- Housing (the addon's signature theme) --------------------------------
 -- A clone of Badwolf -- near-black charcoal + white text, the closest existing
@@ -1067,35 +1067,38 @@ Palettes.Badwolf = {
 -- every other scheme leaves chrome=nil and paints solid/watercolor (step 2).
 -- Derives from Badwolf by shallow copy so it tracks any Badwolf tweak; do NOT
 -- mutate Badwolf (it stays its own selectable theme).
-Palettes.Housing = {}
-for k, v in pairs(Palettes.Badwolf) do Palettes.Housing[k] = v end
--- Donor-signature overrides (the tokens the atlas does not cover):
-Palettes.Housing.accent          = hex("#ffd100")   -- Blizzard Gold (donor accent; Badwolf's was tardis blue)
-Palettes.Housing.accent_brighter = hex("#ffe45c")   -- lightened gold
-Palettes.Housing.accent_darker   = hex("#c99700")   -- darkened gold
-Palettes.Housing.border          = hex("#705c42")   -- bronze-wood (donor border; Badwolf's was warm grey)
-Palettes.Housing.panel_header    = hex("#452e1c")   -- dark wood (donor header_bar)
-Palettes.Housing.statusline_bg   = hex("#452e1c")   -- dark wood, matching the header band
--- Chrome atlas table -- the contract the atlas-aware Skinners read (step 2).
--- All Blizzard atlas strings, confirmed present on 12.0.7. Absent on every
--- other scheme, so those Skinners fall back to the solid/watercolor path.
-Palettes.Housing.chrome = {
-    windowBg     = "housing-dashboard-bg-activity",         -- main window background
-    windowBorder = "housing-simple-wood-frame",             -- full-window carved-wood frame overlay
-    titleBand    = "catalog-nav-bg-primary",                -- title strip (Skinner rotates 90deg)
-    headerSign   = "housing-woodsign",                      -- panel-header wood sign
-    navPanel     = "housing-basic-panel--stone-background", -- sidebar stone column
-    panelBg      = "housing-basic-panel--stone-background", -- content panel stone (cover-cropped)
-    rowBeam      = "housing-woodsign",                      -- RowWoodBeam reads this (was hardcoded)
-    scrollThumb  = "decor-abilitybar-divider",              -- scrollbar thumb
-    foliageLeft  = "housing-decorative-foliage-left",       -- per-view header bookend (left end)
-    foliageRight = "housing-decorative-foliage-right",      -- per-view header bookend (right end)
-}
+Palettes.Housing = function()
+    local p = {}
+    for k, v in pairs(Palettes.Badwolf()) do p[k] = v end
+    -- Donor-signature overrides (the tokens the atlas does not cover):
+    p.accent          = hex("#ffd100")   -- Blizzard Gold (donor accent; Badwolf's was tardis blue)
+    p.accent_brighter = hex("#ffe45c")   -- lightened gold
+    p.accent_darker   = hex("#c99700")   -- darkened gold
+    p.border          = hex("#705c42")   -- bronze-wood (donor border; Badwolf's was warm grey)
+    p.panel_header    = hex("#452e1c")   -- dark wood (donor header_bar)
+    p.statusline_bg   = hex("#452e1c")   -- dark wood, matching the header band
+    -- Chrome atlas table -- the contract the atlas-aware Skinners read (step 2).
+    -- All Blizzard atlas strings, confirmed present on 12.0.7. Absent on every
+    -- other scheme, so those Skinners fall back to the solid/watercolor path.
+    p.chrome = {
+        windowBg     = "housing-dashboard-bg-activity",         -- main window background
+        windowBorder = "housing-simple-wood-frame",             -- full-window carved-wood frame overlay
+        titleBand    = "catalog-nav-bg-primary",                -- title strip (Skinner rotates 90deg)
+        headerSign   = "housing-woodsign",                      -- panel-header wood sign
+        navPanel     = "housing-basic-panel--stone-background", -- sidebar stone column
+        panelBg      = "housing-basic-panel--stone-background", -- content panel stone (cover-cropped)
+        rowBeam      = "housing-woodsign",                      -- RowWoodBeam reads this (was hardcoded)
+        scrollThumb  = "decor-abilitybar-divider",              -- scrollbar thumb
+        foliageLeft  = "housing-decorative-foliage-left",       -- per-view header bookend (left end)
+        foliageRight = "housing-decorative-foliage-right",      -- per-view header bookend (right end)
+    }
+    return p
+end
 
 -- ----- Purpura (yassinebridi) -----------------------------------------------
 -- Source: https://github.com/yassinebridi/vim-purpura (colors/purpura.vim s:cd*
 -- dict). Deep-purple canvas; pink/magenta syntax; surface ramp derived from bg.
-Palettes.Purpura = {
+Palettes.Purpura = function() return {
     sunken          = hex("#10001a"),                   -- derived (deep void)
     bg              = hex("#1e0030", 0.95),             -- cdBack (Normal bg)
     panel_soft      = hex("#2a003a"),                   -- derived (bg -> tabCurrent)
@@ -1134,13 +1137,13 @@ Palettes.Purpura = {
     diag_warn           = hex("#ffc363"),  -- orange
     diag_info           = hex("#73bbf5"),  -- cdLightBlue
     diag_hint           = hex("#acff59"),  -- green
-}
+} end
 
 -- ----- Green (julien) -------------------------------------------------------
 -- Source: https://github.com/julien/vim-colors-green (colors/green.vim). Matrix
 -- monochrome: black canvas, 3 greens (#448c27 / #5ec435 / #72f13e), red errors.
 -- Surface ramp + warning hue derived (palette is near-monochrome).
-Palettes.Green = {
+Palettes.Green = function() return {
     sunken          = hex("#000000"),                   -- black (Normal bg)
     bg              = hex("#030702", 0.95),             -- derived near-black green
     panel_soft      = hex("#070e04"),                   -- derived
@@ -1179,7 +1182,7 @@ Palettes.Green = {
     diag_warn           = hex("#c4d62a"),  -- derived yellow-green
     diag_info           = hex("#5ec435"),  -- mid green (no blue upstream)
     diag_hint           = hex("#72f13e"),  -- bright green
-}
+} end
 
 -- ----- Pumpkin Spice --------------------------------------------------------
 -- Source: community brand palette from Madailein Hatter, supplied directly on
@@ -1276,7 +1279,7 @@ Palettes.Green = {
 -- No brand hex was altered, the inversion survives (panel L=0.0252 still sits
 -- under canvas L=0.0339), and the addon reads warm at the size it is actually
 -- seen. Aegis needs none of this -- same palette, different geometry.
-Palettes.PumpkinSpice = {
+Palettes.PumpkinSpice = function() return {
     sunken          = hex("#2E361E"),                   -- DEEP FOREST, SATURATED: the frame. 9 sites
                                                         -- the Canvas skinner paints the whole window
                                                         -- from this, so it is the largest surface.
@@ -1341,7 +1344,7 @@ Palettes.PumpkinSpice = {
     diag_warn           = hex("#D9932F"),  -- amber (added)
     diag_info           = hex("#8CA6B8"),  -- derived slate: the palette's only cool tone
     diag_hint           = hex("#A3B57A"),  -- sage (the green ladder's top rung)
-}
+} end
 
 -- ----- BlizzardUI -----------------------------------------------------------
 -- Matches the default Blizzard WoW frame (PortraitFrameTemplate / ButtonFrame-
@@ -1365,7 +1368,7 @@ Palettes.PumpkinSpice = {
 --   panel / sunken     -> Marble near-black content insets (#0d0d0d ..)
 --   border             -> #5a4a2e bronze-brown (the UI-Frame metal edge tone)
 --   accent / headers   -> Blizzard Gold #ffd100 (titles, section labels)
-Palettes.BlizzardUI = {
+Palettes.BlizzardUI = function() return {
     -- Surface ramp: warm stone-brown frame body + near-black Marble insets,
     -- matching UI-Background-Rock (#332e2a) and UI-Background-Marble (#0d0d0d).
     sunken          = hex("#080808"),                   -- deepest inset well (below Marble)
@@ -1406,7 +1409,12 @@ Palettes.BlizzardUI = {
     diag_warn           = hex("#ffd100"),  -- gold
     diag_info           = hex("#4ea3f1"),  -- blue (info channel)
     diag_hint           = hex("#1eff00"),  -- green (hint channel)
-}
+    -- nativeButtons: BlizzardUI builds its action buttons as native UIPanelButtonTemplate
+    -- (left unskinned -- the real Blizzard button), instead of HDG's hand-built dark
+    -- atlas. Read by HDG.UI:Button at build time. Structural (not a repaint), so
+    -- switching to/from BlizzardUI needs a /reload to rebuild the buttons.
+    nativeButtons       = true,
+} end
 -- chrome = nil (intentional). A Blizzard nine-slice gold frame was tried (a
 -- companion HDGR_BlizzardFrame.lua) but force-fit badly against HDG's OWN title
 -- bar: the Blizzard ButtonFrame art assumes a content-inset window with a title
@@ -1415,44 +1423,23 @@ Palettes.BlizzardUI = {
 -- standard window chrome, like every other non-Housing scheme. Post-mortem:
 -- docs/HDG_BLIZZARDUI_FRAME_RESEARCH.md.
 
--- nativeButtons: BlizzardUI builds its action buttons as native UIPanelButtonTemplate
--- (left unskinned -- the real Blizzard button), instead of HDG's hand-built dark
--- atlas. Read by HDG.UI:Button at build time. Structural (not a repaint), so
--- switching to/from BlizzardUI needs a /reload to rebuild the buttons.
-Palettes.BlizzardUI.nativeButtons = true
-
 -- ===== Scheme exports =======================================================
--- Each scheme is the BuildScheme output for its palette. Theme:LoadScheme
--- takes the name; the global table here is the registry.
-
-HDGR_SchemeConstants = {
-    ColorblindSafe   = BuildScheme(Palettes.ColorblindSafe),
-    Mocha            = BuildScheme(Palettes.Mocha),
-    TokyonightNight  = BuildScheme(Palettes.TokyonightNight),
-    RosePineMain     = BuildScheme(Palettes.RosePineMain),
-    GruvboxDarkHard  = BuildScheme(Palettes.GruvboxDarkHard),
-    GruvboxLightHard = BuildScheme(Palettes.GruvboxLightHard),
-    SolarizedDark    = BuildScheme(Palettes.SolarizedDark),
-    SolarizedLight   = BuildScheme(Palettes.SolarizedLight),
-    EverforestDark   = BuildScheme(Palettes.EverforestDark),
-    EverforestLight  = BuildScheme(Palettes.EverforestLight),
-    KanagawaWave     = BuildScheme(Palettes.KanagawaWave),
-    KanagawaLotus    = BuildScheme(Palettes.KanagawaLotus),
-    Nord             = BuildScheme(Palettes.Nord),
-    Dracula          = BuildScheme(Palettes.Dracula),
-    Nightfly         = BuildScheme(Palettes.Nightfly),
-    OneNord          = BuildScheme(Palettes.OneNord),
-    Badwolf          = BuildScheme(Palettes.Badwolf),
-    Housing          = BuildScheme(Palettes.Housing),   -- Badwolf clone + gold/wood overrides + chrome atlas
-    Purpura          = BuildScheme(Palettes.Purpura),
-    Green            = BuildScheme(Palettes.Green),
-    PumpkinSpice     = BuildScheme(Palettes.PumpkinSpice),  -- community brand palette (Madailein Hatter)
-    BlizzardUI       = BuildScheme(Palettes.BlizzardUI),
-}
+-- Each scheme is built from its palette on first use and kept. Theme:LoadScheme
+-- takes the name; the global table here is the registry. A player uses one of the
+-- 22, and building all of them at load held ~0.6 MB (memory census 2026-10-19).
+-- pairs() over it sees only the schemes built so far; HDGR_SchemeMeta.order lists
+-- them all.
+HDGR_SchemeConstants = setmetatable({}, { __index = function(t, name)
+    local palette = Palettes[name]
+    if not palette then return nil end   -- exception(nullable): not a registered scheme name
+    local scheme = BuildScheme(palette())
+    rawset(t, name, scheme)
+    return scheme
+end })
 
 -- Display metadata for the slash command + Config tab buttons.
--- ColorblindSafe first (accessibility default). Lives on a separate global so
--- pairs(HDGR_SchemeConstants) iterates only real schemes without a "_meta" guard.
+-- ColorblindSafe first (accessibility default). `order` is the list of every
+-- scheme; HDGR_SchemeConstants builds them on demand.
 HDGR_SchemeMeta = {
     order = {
         "ColorblindSafe",

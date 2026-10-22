@@ -12,7 +12,7 @@ local LC = HDG.LayoutConfig
 
 -- ===== View ==================================================================
 LC.window.views.lumberWindow = {
-    explicit       = true,
+    controllers = { "lumber" },
     standalone     = true,                   -- standalone (HDG.Window) view, not main-window tab
     width          = "auto",
     height         = "auto",
@@ -26,13 +26,6 @@ LC.window.views.lumberWindow = {
         tracking = { col = 1, row = 3, colSpan = 1, rowSpan = 1 },
         counter  = { col = 1, row = 4, colSpan = 1, rowSpan = 1 },
         action   = { col = 1, row = 5, colSpan = 1, rowSpan = 1 },
-    },
-    -- Persisted drag position (survives /reload + the session ticker's recomposes).
-    -- Without this the window reverts to the default anchor whenever it recomposes.
-    position = {
-        default   = { x = 200, y = -150 },
-        binding   = "lumber.windowPosition",
-        setAction = "LUMBER_WINDOW_POSITION_SET",
     },
 }
 

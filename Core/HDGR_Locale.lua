@@ -124,6 +124,12 @@ function L:Get(key)
     return key
 end
 
+-- Every locale falls back to enUS, so a key enUS holds always resolves to text.
+-- Layout:Validate checks the config's "locale:" keys with it.
+function L:Has(key)
+    return self._tables.enUS[key] ~= nil
+end
+
 -- Test helper -- wipe between cases.
 function L:_Reset()
     self._tables = {}

@@ -175,6 +175,15 @@ end
 -- Constants.MEMO_IDLE_DISPATCHES, so a view left behind stops pinning its
 -- derived copy of the catalog for the whole session.
 local _dispatchSeq = 0
+-- While the main window is shown its lists hold the rows these memos built, so
+-- an aged-out memo frees nothing and the next view switch rebuilds it (~1.3 MB
+-- for Decor). The window's visibility stage holds aging while it is open; closing
+-- drops every memo anyway (memory plan 2026-10-19 sec 6, item 8).
+local _agingHeld = false
+
+function Selectors:HoldAging(held)
+    _agingHeld = held
+end
 
 local function _callInner(def, state, ctx)
     -- Input-memo path: handles cache hit/miss via input-reference equality.
@@ -309,7 +318,7 @@ function Selectors:InvalidateMemos(invalidation)
         if def.memoized then
             local closure = computeReadsClosure(name)
             if HDG.Paths.MatchesAny(closure, invalidation)
-               or (def._usedAt and _dispatchSeq - def._usedAt > idleLimit) then
+               or (not _agingHeld and def._usedAt and _dispatchSeq - def._usedAt > idleLimit) then
                 _dropMemo(def)
             end
         end

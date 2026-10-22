@@ -10,7 +10,7 @@ local ChromeController = HDG.ChromeController
 
 -- Essence of Lumber badge: account-wide count painted onto the glyph, greyed
 -- when none owned. The count FontString is created once, lazily, on the glyph;
--- the per-alt breakdown lives in the EssenceBadge tooltip recipe. RefreshAll
+-- the per-alt breakdown lives in the EssenceBadge tooltip recipe. Refresh
 -- only fires while the main window paints, so the glyph is always present here.
 local function _paintEssence(rootFrame, state)
     local btn = HDG.UI.W(rootFrame, "chromePanel.essence")

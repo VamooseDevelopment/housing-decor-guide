@@ -46,8 +46,6 @@ local function _petRow(entry, families)
     return {
         speciesID   = entry.speciesID,
         petID       = entry.petID,
-        name        = entry.name,
-        customName  = entry.customName,
         displayName = entry.displayName,
         icon        = entry.icon,
         familyLabel = families[entry.petType],   -- exception(nullable): an unknown petType has no family string

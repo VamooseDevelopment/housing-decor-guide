@@ -191,11 +191,7 @@ function HDG:OnInitialize()
     if HDG.InitSettingsPanel then  -- exception(boundary): file may not be loaded in minimal test builds
         HDG.InitSettingsPanel()
     end
-    -- Boot bookend (debug-gated by tag level) + one-shot migration breadcrumb:
-    -- HDG.Migration:Run returns true only when a v2 SavedVariables actually migrated.
-    if HDG.Migration and HDG.Migration.lastResult == true then
-        HDG.Log:Info("boot", "SavedVariables migrated from HDG v2 -- collection/notes/favorites kept; caches + settings reset to fresh defaults")
-    end
+    -- Boot bookend (debug-gated by tag level).
     HDG.Log:Debug("boot", "OnInitialize complete")
     _heapSpanEnd("init")
 end
@@ -223,17 +219,6 @@ function HDG:OnEnable()
     _heapSpanEnd("windows")
     -- Restore main window open/closed state (FrameVisibility reads account.ui.mainWindowShown).
     HDG:RefreshMainWindow()
-
-    -- One-time HDG->HDGR v3.0 upgrade notice. Migration.lastResult is a table only when a
-    -- migration actually ran this load; gate on a RAW SV flag (not reactive state) so it
-    -- shows ONCE ever -- surviving reloads AND future schema-bump re-runs.
-    local mig = HDG.Migration and HDG.Migration.lastResult
-    if mig and _G.HDG_DB and not _G.HDG_DB.upgradeNoticeShown then  -- exception(boundary): one-time raw SV marker
-        local P = HDG.Format.BRAND_PREFIX
-        print(P .. " Updated to |cFF14b8a6v3.0|r -- your favorites, notes, styles, shopping lists and history all carried over.")
-        print(P .. " Settings were reset to new defaults; saved snapshots and smart-sets now live in their own tabs. Type /hdg to explore.")
-        _G.HDG_DB.upgradeNoticeShown = true  -- exception(boundary): one-time raw SV marker, not reactive state
-    end
 
     -- Housing catalog work is gated by HousingCatalogObserver's MAIN_WINDOW_OPENING subscriber.
     -- Per ADR-043: no work at PLAYER_LOGIN.
@@ -271,6 +256,16 @@ HDG.BlizzardEvents:_internalSubscribe("PLAYER_LOGOUT", function()
     HDG.Modules:Shutdown()
     HDG.Store:Flush()
 end)
+
+-- Wipe every HDG setting and reload (Settings > Hard reset, /hdg hardreset).
+-- HARD_RESET clears the account in place, but session data derived from it (the
+-- furnishing index, resolver caches) would keep the old account's shape for the
+-- rest of the session; the reload rebuilds all of it, as the button's hint says.
+function HDG:HardReset()
+    HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.HARD_RESET })
+    HDG.Log:Success("migration", "HDG has been hard-reset")
+    _G.ReloadUI()
+end
 
 SLASH_HDG1 = "/hdg"
 SLASH_HDG2 = "/hdgr"
@@ -328,15 +323,14 @@ SlashCmdList["HDG"] = function(msg)
             payload = { key = "showMinimapButton", value = not cfg.showMinimapButton },
         })
     elseif lower == "hardreset" then
-        HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.HARD_RESET })
-        HDG.Log:Success("migration", "HDG has been hard-reset")
+        HDG:HardReset()
     elseif lower == "resetlayout" then
         -- Clears account.ui.houseTab.* overrides; dashboard renders from WidgetDefaults.
         HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.HOUSETAB_RESET_LAYOUT })
         HDG.Log:Notify("info", "HouseTab layout reset to defaults")
     elseif lower == "refresh" then
-        -- Force a fresh catalog sweep.
-        HDG.HousingCatalogObserver:ReconcileFull()
+        -- Force a fresh catalog sweep that rebuilds every row.
+        HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.CATALOG_FORCE_RELOAD })
         HDG.Log:Notify("info", "catalog refresh started")
     elseif first == "theme" then
         -- /hdgr theme         -- list available themes

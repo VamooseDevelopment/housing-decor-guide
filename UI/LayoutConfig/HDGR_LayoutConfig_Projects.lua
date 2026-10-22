@@ -12,7 +12,7 @@ local LC = HDG.LayoutConfig
 -- ===== Views =================================================================
 
 LC.window.views.projectsLanding = {
-    explicit = true,
+    controllers = { "projects" },
     width    = "auto",
     height   = "auto",
     columns  = { 760 },
@@ -22,7 +22,7 @@ LC.window.views.projectsLanding = {
 
 -- Architect: picker | canvas | detail (col 3 dropped when no room selected, HouseTab pattern).
 LC.window.views.projectsArchitect = {
-    explicit       = true,
+    controllers = { "projects" },
     width          = "auto",
     height         = "auto",
     columns        = { 170, 620 },         -- fallback; projects.architectColumns takes over
@@ -40,7 +40,7 @@ LC.window.views.projectsArchitect = {
 -- Layouts: left scrollable version list | right detail (header + preview + stats).
 -- Columns {280, 470}; right column rows {34, 490, 110} = header | preview | stats.
 LC.window.views.projectsLayouts = {
-    explicit = true,
+    controllers = { "layouts" },
     width    = "auto",
     height   = "auto",
     columns  = { 280, 470 },
@@ -53,7 +53,7 @@ LC.window.views.projectsLayouts = {
 
 -- Decor picker: category rail | catalog list | 3D preview. Opened from "+ Add decor".
 LC.window.views.projectsPicker = {
-    explicit = true,
+    controllers = { "projects" },
     width    = "auto",
     height   = "auto",
     columns  = { 44, 440, 320 },   -- category rail | decor list | 3D preview
@@ -68,7 +68,7 @@ LC.window.views.projectsPicker = {
 -- Help: the workflow cycle diagram + per-stage detail. Opened by the Help!
 -- buttons (landing header + architect nav); Back returns via helpReturn.
 LC.window.views.projectsHelp = {
-    explicit = true,
+    controllers = { "projects" },
     width    = "auto",
     height   = "auto",
     columns  = { 760 },

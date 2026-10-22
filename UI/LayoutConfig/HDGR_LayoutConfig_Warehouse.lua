@@ -8,7 +8,7 @@ local LC = HDG.LayoutConfig
 -- ===== View ==================================================================
 -- 2x2 grid. Top row = lumber (stock 392 | history 462), bottom row = materials | used-in.
 LC.window.views.warehouse = {
-    explicit = true,
+    controllers = { "warehouse" },
     width    = "auto",
     height   = "auto",
     columns  = { 392, 462 },        -- stock | history  (materials | used-in share the split)

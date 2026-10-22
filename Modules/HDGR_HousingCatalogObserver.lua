@@ -19,8 +19,7 @@ local R = HDG.HousingCatalogObserver
 -- sweeps because the table references survive on R).
 R.byItemID       = R.byItemID       or {}
 R.byDecorID      = R.byDecorID      or {}  -- [decorID] = row (built alongside byItemID)
-R.byVendor       = R.byVendor       or {}
-R.allVendorNames = R.allVendorNames or {}
+R.byVendor       = R.byVendor       or {}  -- [name::zone] = vendor record (see Vendor records)
 R.tagIDToGroup   = R.tagIDToGroup   or {}
 -- Storage-entry events that land while a sweep is in flight -- or while nothing
 -- can tell whether the decor was already owned -- are parked here and replayed
@@ -38,6 +37,17 @@ R._commitPending  = R._commitPending  or false  -- exception(false-positive): id
 -- DEFERS the re-kick, it does not drop it: the settle callback replays it once
 -- the commit resolves, however many re-kicks it absorbed (_ReplayOwedRekick).
 R._rekickOwed     = R._rekickOwed     or false  -- exception(false-positive): idempotent module-load init
+-- HOUSING_STORAGE_UPDATED fires counted when the newest build with entries
+-- (settling or committed) began reading; -1 before the first. An update at or
+-- under it is already in that build (OnHousingStorageUpdated).
+R._storageSeen    = R._storageSeen    or -1     -- exception(false-positive): idempotent module-load init
+-- Whether the build handed to the settle timer has entries (false: a 0-entry abort).
+R._settlingHasEntries = R._settlingHasEntries or false  -- exception(false-positive): idempotent module-load init
+-- The catalog-change count the committed rows were built under, or false when they
+-- cannot be reused: a build reuses them only while it reads the same count
+-- (_stageReuse). False before the first build, after a build without tag groups,
+-- and after a clear or a manual reload.
+R._rowsStamp = R._rowsStamp or false  -- exception(false-positive): idempotent module-load init
 
 -- ===== Reconciler ============================================================
 -- Two entry points:
@@ -50,6 +60,14 @@ R._rekickOwed     = R._rekickOwed     or false  -- exception(false-positive): id
 function R:GetClientVer()
     local v = _G.GetBuildInfo and _G.GetBuildInfo()
     return tostring(v or "unknown")
+end
+
+-- True from RunSearch until the commit swaps the snapshot in: storage-entry
+-- events park meanwhile (ReconcileEntry) and land with the commit. Readers that
+-- count on those events (DestroyQueue) wait for DECOR_CATALOG_READY instead of
+-- reading the silence as the server's.
+function R:IsSweepPending()
+    return R._sweepInFlight or R._commitPending
 end
 
 function R:_CancelSettleTimer()
@@ -198,50 +216,202 @@ function R:ReconcileFull(reason)
     s:RunSearch()
 end
 
--- ===== Per-sweep index builders ==============================================
--- `acc` = per-sweep accumulator: { byItemID, byDecorID, byVendor, allVendorNames,
--- vendorNamesSeen, owned }. Atomic-assigned onto R at commit; subscribers never
--- see partial state.
+-- ===== Vendor records ========================================================
+-- One record per vendor (name, zone): name, zone, npcID, mapID, x, y, side,
+-- canWaypoint, and the items it sells. byVendor IS the records. A row's vendor
+-- entry keeps only the item's price there (cost, costEntries, faction) and reads
+-- the vendor's fields through its record, which is the entry's metatable, so
+-- v.name / v.zone / v.mapID read as before. A vendor field that differs from the
+-- record stays raw on the entry and wins. Before this, every vendor field sat on
+-- every entry, again on the index, and again as baked text (memory census
+-- 2026-10-19).
+local RECORD_FIELDS = { "name", "zone", "npcID", "mapID", "x", "y", "side", "canWaypoint" }
+local RECORD_FIELD_SET = {}
+for _, f in ipairs(RECORD_FIELDS) do RECORD_FIELD_SET[f] = true end
+local DROPPED_VENDOR_FIELDS = { standing = true }   -- nothing reads it
 
--- Index a (name, zone) vendor into acc.byVendor + dedup into allVendorNames.
--- Composite (name, zone) key: ~9 vendor names on 12.0.5 are shared across zones;
--- keying by name alone collapses distinct vendors into one bucket.
-local function _indexVendor(acc, name, zone, faction, standing, itemID)
-    local vkey = name .. "::" .. (zone or "")
-    local ven = acc.byVendor[vkey]
-    if not ven then
-        local Aug = HDG.StaticData.VendorAugment   -- exception(boundary): absent in headless until StaticData loads
-        ven = {
-            name = name, items = {}, zone = zone,
-            faction = faction or "", standing = standing or "",
-            -- Resolved npcID so consumers can look a vendor up by ID (event cards,
-            -- waypoints) without name reconciliation. Same resolution _bakeVendors uses.
-            npcID = Aug and Aug:ResolveName(name, zone),
-            _seenItems = {},
-        }
-        acc.byVendor[vkey] = ven
-        if not acc.vendorNamesSeen[name] then
-            acc.vendorNamesSeen[name] = true
-            acc.allVendorNames[#acc.allVendorNames + 1] = name
-        end
-    end
-    if not ven._seenItems[itemID] then
-        ven._seenItems[itemID] = true
-        table.insert(ven.items, itemID)
-    end
+-- The index the running sweep builds; nil between sweeps.
+local _sweepRecords = nil
+-- The running sweep's cost entries by raw Cost: line; nil between sweeps.
+local _sweepCostLines = nil
+
+local function _newRecord(v)
+    local rec = { items = {} }
+    for _, f in ipairs(RECORD_FIELDS) do rec[f] = v[f] end
+    rec.__index = rec   -- the record is its entries' metatable
+    return rec
 end
 
--- Feed a row's vendor sources into _indexVendor. row.vendors is the complete list:
--- _bakeVendors folds CatalogOverride type=5 vendors (hidden/placeholder sellers like
--- Chel the Chip) into it, so no separate row.sources pass is needed here.
+-- The record for a resolved vendor entry. A sweep's records join that sweep's
+-- index; a row built between sweeps (a decor just collected) shares the live
+-- index's record, or gets one of its own the index never lists -- the index has
+-- only ever changed at a sweep.
+local function _recordFor(v)
+    local key = v.name .. "::" .. (v.zone or "")
+    local rec = (_sweepRecords or R.byVendor)[key]
+    if not rec then
+        rec = _newRecord(v)
+        if _sweepRecords then _sweepRecords[key] = rec end
+    end
+    return rec
+end
+
+-- An entry that lacks a field its record has would read the record's value, so it
+-- stays whole (none in the recorded catalog; the sharing test counts them).
+local function _fitsRecord(v, rec)
+    for _, f in ipairs(RECORD_FIELDS) do
+        if v[f] == nil and rec[f] ~= nil then return false end
+    end
+    return true
+end
+
+-- A resolved vendor entry rebuilt as the item's price at the vendor plus its record.
+local function _linkVendor(v)
+    local whole = not (v.name and v.name ~= "")
+    local rec = not whole and _recordFor(v)
+    if rec and not _fitsRecord(v, rec) then rec = nil end
+    local entry = {}
+    for k, val in pairs(v) do
+        if not DROPPED_VENDOR_FIELDS[k] and not (rec and RECORD_FIELD_SET[k] and rec[k] == val) then
+            entry[k] = val
+        end
+    end
+    return rec and setmetatable(entry, rec) or entry
+end
+
+-- ===== Per-sweep index builders ==============================================
+-- `acc` = per-sweep accumulator: { byItemID, byDecorID, byVendor, seenItems, owned,
+-- shared }. Atomic-assigned onto R at commit; subscribers never see partial state.
+
+-- Add a row's item to each of its vendors' records (byVendor). Composite
+-- (name, zone) key: ~9 vendor names on 12.0.5 are shared across zones; keying by
+-- name alone collapses distinct vendors into one bucket. row.vendors is the
+-- complete list: _bakeVendors folds CatalogOverride type=5 vendors (hidden or
+-- placeholder sellers like Chel the Chip) into it.
 local function _indexVendorsFromRow(acc, row)
-    if row.vendors then
-        for _, v in ipairs(row.vendors) do
-            if v.name and v.name ~= "" then
-                _indexVendor(acc, v.name, v.zone, v.faction, v.standing, row.itemID)
+    for _, v in ipairs(row.vendors) do
+        if v.name and v.name ~= "" then
+            local rec = _recordFor(v)
+            local seen = acc.seenItems[rec]
+            if not seen then seen = {}; acc.seenItems[rec] = seen end
+            if not seen[row.itemID] then
+                seen[row.itemID] = true
+                rec.items[#rec.items + 1] = row.itemID
             end
         end
     end
+end
+
+-- ===== Shared row sub-tables ================================================
+-- Many rows carry identical sub-tables: the same vendor at the same price (733
+-- distinct of 2,046 vendor entries in the test catalog), the same cost (222 of
+-- 1,788 rows), the same source tags (654) and the same tag set (1,080). Once
+-- BuildRow returns nothing writes to these -- PatchCounts and _bakeVariantDyes
+-- touch only the counts and dyedVariants -- so each row points at one shared copy
+-- (memory census 2026-10-19: ~3 MB of the catalog).
+-- Each is looked up by what it is built FROM, at the point it is built, so a repeat
+-- is neither built nor compared. Signing every finished table by its content
+-- afterwards was the sweep's share lap: 54 of its 143 ms, in one frame at the
+-- first open (2026-10-22 profile). The interns live for one sweep; a row built
+-- between sweeps (a decor just collected) builds its own tables.
+local _sweepShared = nil
+
+local function _newShared()
+    return {
+        vendorEntries = {},   -- [costEntries or NONE][vendor key] = entry
+        vendorLists   = {},   -- trie by entry; the list at LEAF
+        cost          = {},   -- content key -> cost entries list
+        tags          = {},   -- [kind][inputs key] = source tag
+        tagLists      = {},   -- trie by tag; the list at LEAF
+        tagSets       = {},   -- sorted tag IDs -> Blizzard's tag table
+    }
+end
+
+-- A nil input's key, and where a trie node keeps its list.
+local NONE, LEAF = {}, {}
+
+local function _child(node, key)
+    local c = node[key]
+    if not c then c = {}; node[key] = c end
+    return c
+end
+
+-- The one list with these elements in this order. Its elements are shared
+-- already, so their identity stands for their content and the trie needs no key.
+local function _sharedList(root, list)
+    local node = root
+    for i = 1, #list do node = _child(node, list[i]) end
+    local hit = node[LEAF]
+    if hit then return hit end
+    node[LEAF] = list
+    return list
+end
+
+-- Inputs joined into one key. nil is a part of its own, apart from "".
+local function _keyPart(v)
+    if v == nil then return "\0" end
+    return v
+end
+
+-- Cost entries by content: lists from different Cost: lines can match. Runs once
+-- per distinct line (the raw-line memo answers the repeats), so its cost is small.
+-- A field missing from the list would be left out of the key and merge lists
+-- that differ, so it is an error.
+local COST_FIELDS = { "currencyID", "itemID", "amount", "icon" }
+local COST_FIELD_SET = {}
+for _, f in ipairs(COST_FIELDS) do COST_FIELD_SET[f] = true end
+local _costKeyBuf = {}
+local function _sharedCost(list)
+    local shared = _sweepShared
+    if not shared then return list end  -- exception(nullable): nil between sweeps, for a row built for a decor just collected
+    local n = 0
+    for i = 1, #list do
+        local e = list[i]
+        for k in pairs(e) do
+            if not COST_FIELD_SET[k] then
+                error(("catalog cost sharing: field %q is not in the cost key"):format(tostring(k)), 2)
+            end
+        end
+        for j = 1, #COST_FIELDS do
+            local v = e[COST_FIELDS[j]]
+            n = n + 1
+            -- Typed: an icon can be a file ID or a path that is all digits.
+            _costKeyBuf[n] = v == nil and "-" or (type(v) == "number" and "n" or "s") .. v
+        end
+    end
+    local key = table.concat(_costKeyBuf, "\31", 1, n)
+    local hit = shared.cost[key]
+    if hit then return hit end
+    shared.cost[key] = list
+    return list
+end
+
+-- Blizzard's tag table, kept as the API gave it, repeats too. It is not built
+-- here, so it is looked up by its sorted tag IDs; a hit whose names differ keeps
+-- its own table.
+local _tagIDBuf = {}
+local function _sharedTagSet(tags)
+    if not tags then return nil end  -- exception(boundary): Blizzard struct field optional
+    local shared = _sweepShared
+    if not shared then return tags end  -- exception(nullable): nil between sweeps, for a row built for a decor just collected
+    local n = 0
+    for id in pairs(tags) do
+        if type(id) ~= "number" then return tags end  -- exception(boundary): Blizzard keys tags by ID; any other key and the table stays as given, unshared
+        n = n + 1
+        _tagIDBuf[n] = id
+    end
+    for i = #_tagIDBuf, n + 1, -1 do _tagIDBuf[i] = nil end   -- a longer set's tail from the last use
+    table.sort(_tagIDBuf)
+    local key = table.concat(_tagIDBuf, ",")
+    local hit = shared.tagSets[key]
+    if not hit then
+        shared.tagSets[key] = tags
+        return tags
+    end
+    for id, name in pairs(tags) do
+        if hit[id] ~= name then return tags end
+    end
+    return hit
 end
 
 -- ===== Sweep stage profiling ================================================
@@ -261,9 +431,9 @@ end
 -- "~clock" is the cost of reading the clock, the floor every per-call figure
 -- must be read against.
 local SWEEP_STAGES = {
-    "entryInfo", "rowTable", "variants", "parseSource", "overrides+augment",
-    "tags+category+placement", "vendors", "cost", "recipe+sourceTypes+bonus",
-    "variantDyes", "sourceTags", "index",
+    "entryInfo", "reuse", "rowTable", "tagSet", "variants", "parseSource", "overrides+augment",
+    "expansion", "vendors", "cost", "recipe+sourceTypes+bonus",
+    "variantDyes", "sourceTags", "slim", "index",
 }
 -- Nested inside parseSource: the C_StringUtil.StripHyperlinks half of the parse,
 -- one call per sourceText line. Reported on its own row, not part of the sum.
@@ -339,6 +509,66 @@ local function _entryTypeOK(entryType)
     return _validEntryType[entryType] == true
 end
 
+-- The count scalars a storage change moves, read off an entry's info. A row's own
+-- first-acquisition bonus stands when the info leaves it out.
+local function _countsOf(info, row)
+    return {
+        quantity                 = info.totalNumStored           or 0,  -- exception(boundary): Blizzard struct field sparse (row.quantity KEEPS its name; source is the 12.0.5 field)
+        numPlaced                = info.totalNumPlaced           or 0,  -- exception(boundary): Blizzard struct field sparse
+        remainingRedeemable      = info.remainingRedeemable      or 0,  -- exception(boundary): Blizzard struct field sparse
+        destroyableInstanceCount = info.destroyableInstanceCount or 0,  -- exception(boundary): Blizzard struct field sparse
+        firstAcquisitionBonus    = info.firstAcquisitionBonus
+                                     or row.firstAcquisitionBonus or 0,  -- exception(boundary): Blizzard struct field sparse
+    }
+end
+
+-- True when the five count scalars an entry event carries already match the row:
+-- Blizzard fires HOUSING_STORAGE_ENTRY_UPDATED for every placement nudge, and a
+-- signal for an unchanged row rebuilt the whole Decor projection (about 6 MB per
+-- event with the Decor view showing, 2026-09-13 audit).
+local function _countsMatch(row, counts)
+    return row.quantity                 == counts.quantity
+       and row.numPlaced                == counts.numPlaced
+       and row.remainingRedeemable      == counts.remainingRedeemable
+       and row.destroyableInstanceCount == counts.destroyableInstanceCount
+       and row.firstAcquisitionBonus    == counts.firstAcquisitionBonus
+end
+
+-- The catalog-data events seen so far: a change since a build means its rows may
+-- be out of date (R._rowsStamp).
+local function _catalogChangeCount()
+    local BE = HDG.BlizzardEvents
+    return BE:FireCount("HOUSING_CATALOG_CATEGORY_UPDATED")
+         + BE:FireCount("HOUSING_CATALOG_SUBCATEGORY_UPDATED")
+end
+
+-- A refresh reuses the row the last build made for an entry. Only the counts and
+-- the dye stacks change with storage; the rest of a row comes from the entry's
+-- catalog fields and HDG's shipped data, and building it was ~24 MB of every
+-- 31 MB build (memory plan 2026-10-19 sec 6). Checked inputs: the recipe is the
+-- shipped DecorDB (StaticData.Recipes), not the session's recipe scan; category
+-- names resolve below; tag groups and catalog hotfixes gate the reuse itself
+-- (R._rowsStamp). An override cost's currency icon that C_CurrencyInfo missed
+-- stays missing until a reload instead of the next build. What changed waits in acc for the
+-- commit, which writes it onto the rows as it swaps the index in, so until then
+-- readers see the committed snapshot, as with a fresh build. Returns whether the
+-- entry is owned now.
+local function _stageReuse(acc, rid, row, info)
+    local counts = _countsOf(info, row)
+    if not _countsMatch(row, counts) then acc.patches[rid] = counts end
+    if row.canCustomize and _G.C_HousingCatalog.GetAllVariantInfosForEntry then  -- exception(boundary): absent in headless fixtures, as in BuildRow
+        local variants = _G.C_HousingCatalog.GetAllVariantInfosForEntry({
+            recordID = rid, entryType = info.entryType or 1,  -- exception(boundary): Blizzard struct field sparse
+        })
+        if type(variants) == "table" then acc.variants[rid] = variants end  -- exception(boundary): API returns nil on cold/invalidated cache
+    end
+    -- A name missed while the catalog streamed in resolves now, as a build would.
+    resolveCategoryName(row.categoryID)
+    resolveSubcategoryName(row.subcategoryID)
+    acc.reused = acc.reused + 1
+    return counts.quantity + counts.remainingRedeemable + counts.numPlaced > 0
+end
+
 -- Skips non-qualifying entries (non-zero subtype = variant placeholders; no
 -- itemID = catalog inconsistency).
 local function _processEntry(acc, entry)
@@ -367,11 +597,19 @@ local function _processEntry(acc, entry)
     -- info.recordID isn't always populated by the entry-info API; the entry
     -- itself carries it via the searcher result.
     info.recordID = info.recordID or rid
-    local row = R:BuildRow(info)   -- laps its own stages
-    if t then t, hk = _G.debugprofilestop(), collectgarbage("count") end
+    local row = acc.reuse and R.byDecorID[rid]  -- exception(nullable): an entry the last build did not have
+    local owned
+    if row and row.itemID == info.itemID then
+        owned = _stageReuse(acc, rid, row, info)
+        if t then t, hk = _lap("reuse", t, hk) end
+    else
+        row = R:BuildRow(info)   -- laps its own stages
+        if t then t, hk = _G.debugprofilestop(), collectgarbage("count") end
+        owned = row.isOwned
+    end
     acc.byItemID[row.itemID] = row
     acc.byDecorID[rid]       = row
-    if row.isOwned then acc.owned[rid] = true end
+    if owned then acc.owned[rid] = true end
     _indexVendorsFromRow(acc, row)
     if t then _lap("index", t, hk) end
 end
@@ -389,6 +627,10 @@ function R:_OnSearcherResults(searcher)
         self._perfSearchFiredAt = nil
         HDG.Perf:Mark("catalog searcher RTT (external -- Blizzard built the catalog)", rtt, "rtt")
     end
+    -- Taken before a single entry is read: the storage updates this build holds,
+    -- and the catalog changes its rows are built under.
+    local storageSeen = HDG.BlizzardEvents:FireCount("HOUSING_STORAGE_UPDATED")
+    local catalogStamp = _catalogChangeCount()
     local items = searcher:GetCatalogSearchResults()
     if not items then
         -- nil result set: nothing to commit yet. Stay "loading"; the next
@@ -397,12 +639,20 @@ function R:_OnSearcherResults(searcher)
         return
     end
 
-    R:_BuildTagIDIndex()  -- must precede the sweep so _bakeTags sees Expansion/Size tags
+    R:_BuildTagIDIndex()  -- must precede the sweep so _bakeExpansion sees Expansion tags
 
     -- Build into per-sweep acc; _CommitSweep atomic-assigns in the settle callback.
     local acc = {
         byItemID = {}, byDecorID = {}, byVendor = {},
-        allVendorNames = {}, vendorNamesSeen = {}, owned = {},
+        seenItems = {},   -- [record] = { [itemID] = true }: dedups each vendor's item list
+        owned = {},
+        shared = _newShared(),   -- what rows share, by what it is built from; dropped with acc
+        costLines = {},   -- raw Cost: line -> its entries (_costEntriesOf)
+        -- Reuse the committed rows unless a catalog change came after they were built.
+        reuse = R._rowsStamp == catalogStamp,
+        reused = 0,
+        patches = {},     -- [decorID] = counts: reused rows whose counts moved
+        variants = {},    -- [decorID] = variants: reused customizable rows, re-baked at commit
     }
     -- Perf: catalog-load cost (outside dispatch path; flush probe never sees it). boundary: Perf optional.
     local _perf  = HDG.Perf
@@ -410,29 +660,44 @@ function R:_OnSearcherResults(searcher)
     local _t0, _k0
     if _timed then _t0, _k0 = _perf:Open() end
     _sweepProf   = _timed and { ms = {}, kb = {}, n = {} } or nil
+    _sweepRecords = acc.byVendor   -- BuildRow links vendor entries into this sweep's records
+    _sweepCostLines = acc.costLines
+    _sweepShared    = acc.shared
     for _, entry in ipairs(items) do
         _processEntry(acc, entry)
     end
+    _sweepRecords, _sweepCostLines, _sweepShared = nil, nil, nil
     if acc.skippedPoisoned then
         HDG.Log:Warn("catalog_error", ("%d searcher row(s) skipped: unreadable entry IDs (secret/poisoned) -- sweep completed without them")
             :format(acc.skippedPoisoned))
     end
     if _timed then
-        local totalMs, totalKB = _perf:RecordOp("catalog.indexSweep (" .. #items .. " entries)", _t0, _k0)
+        local label = acc.reuse and ("catalog.indexSweep (%d entries, %d rows reused)"):format(#items, acc.reused)
+                                 or ("catalog.indexSweep (%d entries)"):format(#items)
+        local totalMs, totalKB = _perf:RecordOp(label, _t0, _k0)
         _reportSweepStages(_perf, totalMs, totalKB, #items)
         _sweepProf = nil
     end
-    table.sort(acc.allVendorNames)
-
     local result = {
         byItemID       = acc.byItemID,
         byDecorID      = acc.byDecorID,
         byVendor       = acc.byVendor,
-        allVendorNames = acc.allVendorNames,
         owned          = acc.owned,
         sweptAt        = _G.GetTime and _G.GetTime() or 0,  -- exception(boundary): GetTime/time absent in headless harness
         clientVer      = self:GetClientVer(),
+        reused         = acc.reuse and acc.reused,   -- false for a full build
+        patches        = acc.patches,
+        variants       = acc.variants,
+        -- A build's rows can be reused only if the tag groups had landed: rows built
+        -- without them carry no expansion or size, and a reuse would keep that.
+        rowsStamp      = next(R.tagIDToGroup) ~= nil and catalogStamp or false,
     }
+
+    -- A build with entries is the newest catalog from here, settled or not. A
+    -- 0-entry abort holds nothing, so it leaves the stamp and the next storage
+    -- update still re-kicks.
+    self._settlingHasEntries = next(acc.byDecorID) ~= nil
+    if self._settlingHasEntries then self._storageSeen = storageSeen end
 
     -- Settle 0.5s: coalesces searcher multi-fire bursts (boundary: loading screens / login cascade).
     self:_CancelSettleTimer()
@@ -440,9 +705,18 @@ function R:_OnSearcherResults(searcher)
     self._settleTimer = C_Timer.NewTimer(0.5, function()
         self._commitPending = false
         self._settleTimer = nil
-        R:_CommitSweep(result)
-        R:_ReplayOwedRekick()
+        R:_OnSettled(result)
     end)
+end
+
+-- A settled result set: commit it, hand back a re-kick deferred during the
+-- settle, then judge the decor arrivals that waited for this commit. Judged
+-- last, so a replayed re-kick that starts a new sweep makes them wait again
+-- instead of running a second search beside it.
+function R:_OnSettled(result)
+    R:_CommitSweep(result)
+    R:_ReplayOwedRekick()
+    R:_JudgeArrivalsAfterCommit()
 end
 
 -- A re-kick ReconcileFull deferred during the settle, handed back as the
@@ -496,6 +770,21 @@ function R:_DrainParkedEntries()
     end
 end
 
+-- The counts and dye stacks a refresh read for the rows it reused (_stageReuse).
+function R:_WriteReusedCounts(result)
+    if not result.reused then return end
+    local patched = 0
+    for decorID, counts in pairs(result.patches) do
+        R:PatchCounts(decorID, counts)
+        patched = patched + 1
+    end
+    for decorID, variants in pairs(result.variants) do
+        R:_bakeVariantDyes(R.byDecorID[decorID], variants)
+    end
+    HDG.Log:Info("catalog_swept", ("catalog refreshed in place -- %d rows reused, %d with new counts")
+        :format(result.reused, patched))
+end
+
 -- _CommitSweep: atomic index swap + dispatch catalog-ready notifications.
 function R:_CommitSweep(result)
     local itemCount = 0
@@ -514,11 +803,13 @@ function R:_CommitSweep(result)
         return
     end
 
-    -- ATOMIC ASSIGN: consumers see either old or new, never mid-build.
+    -- ATOMIC ASSIGN: consumers see either old or new, never mid-build. A reused
+    -- row takes its new counts and dye stacks in the same step.
     R.byItemID       = result.byItemID
     R.byDecorID      = result.byDecorID
     R.byVendor       = result.byVendor
-    R.allVendorNames = result.allVendorNames
+    R:_WriteReusedCounts(result)
+    R._rowsStamp     = result.rowsStamp
     R._catalogSchemaVersion = HDG.Constants.CATALOG_SCHEMA_VERSION
     R._sweepInFlight = false
 
@@ -598,18 +889,6 @@ function R:_UpdateVintage()
     end
 end
 
--- True when the five count scalars an entry event carries already match the row:
--- Blizzard fires HOUSING_STORAGE_ENTRY_UPDATED for every placement nudge, and a
--- signal for an unchanged row rebuilt the whole Decor projection (about 6 MB per
--- event with the Decor view showing, 2026-09-13 audit).
-local function _countsMatch(row, counts)
-    return row.quantity                 == counts.quantity
-       and row.numPlaced                == counts.numPlaced
-       and row.remainingRedeemable      == counts.remainingRedeemable
-       and row.destroyableInstanceCount == counts.destroyableInstanceCount
-       and row.firstAcquisitionBonus    == counts.firstAcquisitionBonus
-end
-
 -- One COUNTS_UPDATED per frame for a burst of entry events (a parked-entry
 -- replay, a bulk destroy): the rows are already patched synchronously by the
 -- time the signal goes out, so every reader sees fresh rows whichever frame
@@ -632,6 +911,71 @@ function R:_SignalCounts(decorID)
     end)
 end
 
+-- Decor arrivals. HOUSE_DECOR_ADDED_TO_CHEST names a decor that just arrived,
+-- and the HOUSING_STORAGE_ENTRY_UPDATED in the same burst is what flips its row.
+-- That event can read Blizzard's counts before they move: Mysterious Imported
+-- Piranha stayed at 0 after a vendor purchase until a fresh catalog search
+-- (live 12.1.5, 2026-10-18), so nothing ever corrected the row. Once the burst
+-- settles, an arrival whose row is still uncollected gets one re-search -- what
+-- Blizzard's own dashboard does -- and the warning shows how often it lags. The
+-- search runs whether or not the window is open: the merchant marks and the
+-- companion read the same rows, and buying at a vendor is mostly done with HDG
+-- closed.
+R._arrivals            = R._arrivals or nil   -- exception(false-positive): idempotent module-load init
+R._arrivalsAfterCommit = R._arrivalsAfterCommit or nil   -- exception(false-positive): idempotent module-load init
+function R:NoteDecorArrival(decorID)
+    if R._arrivals then
+        R._arrivals[#R._arrivals + 1] = decorID
+        return
+    end
+    R._arrivals = { decorID }
+    R._arrivalTimer = C_Timer.NewTimer(HDG.Constants.DECOR_ARRIVAL_CHECK_DELAY, function()
+        R._arrivalTimer = nil
+        local ids = R._arrivals
+        R._arrivals = nil
+        R:_JudgeArrivals(ids)
+    end)
+end
+
+function R:_JudgeArrivals(ids)
+    -- Not loaded yet: the first load reads the arrival itself.
+    if HDG.Store:GetState().session.catalog.status ~= "ready" then return end
+    -- A sweep about to commit swaps in a fresh snapshot and replays the parked
+    -- entry events: judge against that, not the tables it replaces (judging now
+    -- warned falsely and ran a second full sweep behind the first).
+    if R:IsSweepPending() then
+        local waiting = R._arrivalsAfterCommit or {}
+        for _, decorID in ipairs(ids) do waiting[#waiting + 1] = decorID end
+        R._arrivalsAfterCommit = waiting
+        return
+    end
+    local stale = {}
+    for _, decorID in ipairs(ids) do
+        local row = R.byDecorID[decorID]  -- exception(nullable): a decor the catalog has not shown us
+        if not (row and row.isOwned) then stale[#stale + 1] = tostring(decorID) end
+    end
+    if #stale == 0 then return end
+    HDG.Log:Warn("catalog_reconcile", string.format(
+        "decor %s still uncollected after arriving; re-searching the catalog", table.concat(stale, ", ")))
+    R:Refresh("decor-arrival")
+end
+
+function R:_JudgeArrivalsAfterCommit()
+    local ids = R._arrivalsAfterCommit
+    if not ids then return end
+    R._arrivalsAfterCommit = nil
+    R:_JudgeArrivals(ids)
+end
+
+function R:_CancelArrivalTimer()
+    R._arrivals = nil
+    R._arrivalsAfterCommit = nil
+    if R._arrivalTimer then
+        R._arrivalTimer:Cancel()
+        R._arrivalTimer = nil
+    end
+end
+
 -- ReconcileEntry(entryVariantID): targeted update from HOUSING_STORAGE_ENTRY_UPDATED.
 -- The payload is a HousingCatalogEntryVariantID {recordID, entryType,
 -- variantIdentifier} and its recordID IS the identity. The fetched info carries
@@ -646,13 +990,17 @@ function R:ReconcileEntry(entryID)
         return
     end
     local wasOwned = _priorOwnership(decorID)
-    -- A sweep in flight builds a private snapshot and swaps it in wholesale at
-    -- settle, so a patch made now lands in tables about to be replaced. Park the
-    -- event for _CommitSweep to replay, keeping wasOwned from BEFORE the swap so
-    -- the learned transition survives a snapshot that already shows it owned.
+    -- A sweep builds a private snapshot and swaps it in wholesale at settle, so a
+    -- patch made now lands in tables about to be replaced. Park the event for
+    -- _CommitSweep to replay, keeping wasOwned from BEFORE the swap so the
+    -- learned transition survives a snapshot that already shows it owned. That
+    -- holds from RunSearch until the commit: a built snapshot waiting out its
+    -- settle (_commitPending) is replaced just the same, and _sweepInFlight alone
+    -- missed it once two searches overlapped -- the first commit cleared the flag
+    -- while the second result set settled, and its swap undid the learn.
     -- Park too when nothing can say yet whether the decor was owned (wasOwned
     -- nil): applied now, a nudge of owned decor would read as a learn.
-    if R._sweepInFlight or wasOwned == nil then
+    if R:IsSweepPending() or wasOwned == nil then
         R._pendingEntries[#R._pendingEntries + 1] = { entryID = entryID, decorID = decorID, wasOwned = wasOwned }
         return
     end
@@ -718,14 +1066,7 @@ function R:_ApplyEntry(entryID, decorID, wasOwned)
     -- advancing), the path every catalog-derived selector reads (LEARNED/
     -- REMOVED only touch ownedDecorIDs, which those selectors do NOT read).
     -- `row` is always set (built above).
-    local counts = {
-        quantity                 = info.totalNumStored           or 0,  -- exception(boundary): Blizzard struct field sparse (row.quantity KEEPS its name; source is the 12.0.5 field)
-        numPlaced                = info.totalNumPlaced           or 0,  -- exception(boundary): Blizzard struct field sparse
-        remainingRedeemable      = info.remainingRedeemable      or 0,  -- exception(boundary): Blizzard struct field sparse
-        destroyableInstanceCount = info.destroyableInstanceCount or 0,  -- exception(boundary): Blizzard struct field sparse
-        firstAcquisitionBonus    = info.firstAcquisitionBonus
-                                     or row.firstAcquisitionBonus or 0,  -- exception(boundary): Blizzard struct field sparse
-    }
+    local counts = _countsOf(info, row)
     local moved = isOwned ~= wasOwned or not _countsMatch(row, counts)
     R:PatchCounts(decorID, counts)
     -- Re-derive dye variants: destroying/acquiring a specific dyed stack changes
@@ -767,6 +1108,13 @@ function R:_BuildTagIDIndex()
     end
 end
 
+-- The table every BuildRow fills, then copies the stored fields out of. The bakes
+-- grow it past 32 hash slots, and a fresh one per row was ~8 MB of garbage per
+-- full build (2026-10-20: 4.2 MB for the table, ~3.6 MB regrowing it as the bakes
+-- added fields). Wiped first, so a row that errored mid-bake leaves nothing behind.
+-- Nothing a bake writes keeps the table itself: the slim row takes its values.
+local _fatRow = {}
+
 -- BuildRow: transforms one catalog info table into the enriched row shape.
 -- NOT pure: makes boundary calls (dye variants, category names, VendorAugment).
 -- Snapshots live state at sweep time; stale until next sweep/reload.
@@ -774,60 +1122,55 @@ end
 function R:BuildRow(info)
     local t, hk
     if _sweepProf then t, hk = _G.debugprofilestop(), collectgarbage("count") end
-    local row = {
-        -- identity
-        itemID    = info.itemID,
-        decorID   = info.recordID,
-        -- Composed (NOT the shim's backfilled info.entryID): the 12.0.5 entryVariantID
-        -- shape. variantIdentifier 0 = base stack -- the destroy identity default;
-        -- dyed variants override it from GetAllVariantInfosForEntry (_bakeVariantDyes).
-        entryID   = { recordID = info.recordID, entryType = info.entryType, variantIdentifier = 0 },
-        entryType = info.entryType,
+    local row = wipe(_fatRow)
+    -- identity
+    row.itemID    = info.itemID
+    row.decorID   = info.recordID
+    -- entryID is composed from these on read (Row shape), not the shim's
+    -- backfilled info.entryID.
+    row.entryType = info.entryType
 
-        -- catalog scalars
-        name              = info.name,
-        iconTexture       = info.iconTexture,
-        iconAtlas         = info.iconAtlas,
-        quality           = info.quality,
-        size              = info.size,
-        placementCost     = info.placementCost,
-        -- Catalog struct may omit the allow-flags; default missing -> allowed
-        -- (HDG-verified semantics). Normalized to a strict boolean here so every
-        -- consumer (placement label, companion placement) reads it direct.
-        isAllowedIndoors  = info.isAllowedIndoors  ~= false,  -- exception(boundary): catalog API field nil-able
-        isAllowedOutdoors = info.isAllowedOutdoors ~= false,  -- exception(boundary): catalog API field nil-able
-        canCustomize      = info.canCustomize,
-        isPrefab          = info.isPrefab,
-        isUniqueTrophy    = info.isUniqueTrophy,
-        asset             = info.asset,
-        uiModelSceneID    = info.uiModelSceneID,
+    -- catalog scalars
+    row.name              = info.name
+    row.iconTexture       = info.iconTexture
+    row.iconAtlas         = info.iconAtlas
+    row.quality           = info.quality
+    row.size              = info.size
+    row.placementCost     = info.placementCost
+    -- Catalog struct may omit the allow-flags; default missing -> allowed
+    -- (HDG-verified semantics). Normalized to a strict boolean here so every
+    -- consumer (placement label, companion placement) reads it direct.
+    row.isAllowedIndoors  = info.isAllowedIndoors  ~= false  -- exception(boundary): catalog API field nil-able
+    row.isAllowedOutdoors = info.isAllowedOutdoors ~= false  -- exception(boundary): catalog API field nil-able
+    row.canCustomize      = info.canCustomize
+    row.isPrefab          = info.isPrefab
+    row.isUniqueTrophy    = info.isUniqueTrophy
+    row.asset             = info.asset
+    row.uiModelSceneID    = info.uiModelSceneID
 
-        -- categorization
-        -- categoryName / subcategoryName resolved at BuildRow time for direct render.
-        -- Only the FIRST category / subcategory id is read anywhere; the raw
-        -- arrays were kept on the row too and pinned Blizzard's per-sweep tables
-        -- for the session (2026-09-13 allocation audit).
-        categoryID      = info.categoryIDs    and info.categoryIDs[1],  -- exception(boundary): Blizzard struct optional array field
-        subcategoryID   = info.subcategoryIDs and info.subcategoryIDs[1],  -- exception(boundary): Blizzard struct optional array field
-        categoryName    = resolveCategoryName(info.categoryIDs    and info.categoryIDs[1]),
-        subcategoryName = resolveSubcategoryName(info.subcategoryIDs and info.subcategoryIDs[1]),
-        dataTagsByID    = info.dataTagsByID,
+    -- categorization
+    -- Only the FIRST category / subcategory id is read anywhere; the raw
+    -- arrays were kept on the row too and pinned Blizzard's per-sweep tables
+    -- for the session (2026-09-13 allocation audit). The names are read from
+    -- the caches resolved below (Row shape).
+    row.categoryID      = info.categoryIDs    and info.categoryIDs[1]  -- exception(boundary): Blizzard struct optional array field
+    row.subcategoryID   = info.subcategoryIDs and info.subcategoryIDs[1]  -- exception(boundary): Blizzard struct optional array field
 
-        -- Ownership counters. row.quantity / row.numPlaced KEEP their names (20+ readers)
-        -- but source from the 12.0.5 fields -- info.quantity/info.numPlaced were
-        -- Blizzard_DeprecatedHousingCatalog backfills, gone when the shim goes
-        -- (dump-verified 2026-07-16: totalNumStored=3 on a 3-owned entry).
-        quantity                 = info.totalNumStored           or 0,  -- exception(boundary): Blizzard struct field sparse
-        numPlaced                = info.totalNumPlaced           or 0,  -- exception(boundary): Blizzard struct field sparse
-        remainingRedeemable      = info.remainingRedeemable      or 0,  -- exception(boundary): Blizzard struct field sparse
-        destroyableInstanceCount = info.destroyableInstanceCount or 0,  -- exception(boundary): Blizzard struct field sparse
-        firstAcquisitionBonus    = info.firstAcquisitionBonus    or 0,  -- exception(boundary): Blizzard struct field sparse
+    -- Ownership counters. row.quantity / row.numPlaced KEEP their names (20+ readers)
+    -- but source from the 12.0.5 fields -- info.quantity/info.numPlaced were
+    -- Blizzard_DeprecatedHousingCatalog backfills, gone when the shim goes
+    -- (dump-verified 2026-07-16: totalNumStored=3 on a 3-owned entry).
+    row.quantity                 = info.totalNumStored           or 0  -- exception(boundary): Blizzard struct field sparse
+    row.numPlaced                = info.totalNumPlaced           or 0  -- exception(boundary): Blizzard struct field sparse
+    row.remainingRedeemable      = info.remainingRedeemable      or 0  -- exception(boundary): Blizzard struct field sparse
+    row.destroyableInstanceCount = info.destroyableInstanceCount or 0  -- exception(boundary): Blizzard struct field sparse
+    row.firstAcquisitionBonus    = info.firstAcquisitionBonus    or 0  -- exception(boundary): Blizzard struct field sparse
 
-        -- customization metadata
-    }
-    -- isOwned: includes remainingRedeemable (unclaimed tokens count as owned).
-    row.isOwned = (row.quantity + row.remainingRedeemable + row.numPlaced) > 0
+    resolveCategoryName(row.categoryID)        -- warm the caches the row's names read
+    resolveSubcategoryName(row.subcategoryID)
     if t then t, hk = _lap("rowTable", t, hk) end
+    row.dataTagsByID    = _sharedTagSet(info.dataTagsByID)
+    if t then t, hk = _lap("tagSet", t, hk) end
 
     -- Dye variants for customizable items. API takes {recordID, entryType} table arg
     -- (not positional -- exception(boundary): positional args silently errored under old pcall).
@@ -863,34 +1206,33 @@ function R:BuildRow(info)
 
     -- Bake derived/display fields onto the row so every consumer sees the
     -- same canonical shape. Each helper is small + focused + idempotent.
-    -- Order matters: bakes that depend on others (gateLine reads gates,
-    -- costLine reads costEntries) come after the producers.
+    -- Order matters: bakes that depend on others (sourceTags reads the gates
+    -- and vendors, costEntries reads the vendors) come after the producers.
     R:_bakeItemAugmentBackfill(row)  -- row.achievement / row.achievementID from aug.sources type=1
     if t then t, hk = _lap("overrides+augment", t, hk) end
-    R:_bakeTags(row)         -- row.expansion, row.sizeLabel, row.tags(+Label), row.dataTags
-    R:_bakeCategory(row)     -- row.categoryLabel
-    R:_bakePlacement(row)    -- row.placementLabel (budget icon prefixed)
-    if t then t, hk = _lap("tags+category+placement", t, hk) end
-    R:_bakeVendors(row)      -- per-vendor enrichment + row.vendorLines[]
+    R:_bakeExpansion(row)    -- row.expansion (the tag labels are built on read)
+    if t then t, hk = _lap("expansion", t, hk) end
+    R:_bakeVendors(row)      -- per-vendor enrichment + vendor records
     if t then t, hk = _lap("vendors", t, hk) end
-    R:_bakeCost(row)         -- row.costEntries (unified) + row.costLine
+    R:_bakeCost(row)         -- row.costEntries (unified)
     if t then t, hk = _lap("cost", t, hk) end
-    R:_bakeRecipe(row)       -- row.recipe + row.recipeLabel (MUST precede _bakeSourceTypes,
-                             -- which reads row.recipe to assign sourceType=6 / CRAFTED)
-    R:_bakeSourceTypes(row)  -- row.sourceType / sourceName / sourceDetail (vendor-first)
-    R:_bakeBonusXp(row)      -- row.bonusXpLabel (first-acquisition reward chip)
+    R:_bakeRecipe(row)       -- row.recipe (MUST precede _bakeSourceTypes, which reads
+                             -- row.recipe to assign sourceType=6 / CRAFTED)
+    R:_bakeSourceTypes(row)  -- row.sourceType (sourceName / sourceDetail are built on read)
     if t then t, hk = _lap("recipe+sourceTypes+bonus", t, hk) end
     R:_bakeVariantDyes(row, variants)  -- row.dyedVariants[] (per-owned-variant dye derivation)
     if t and row.variants then t, hk = _lap("variantDyes", t, hk) end   -- only rows that had variants to walk
     -- Single canonical source/gate bake. Produces row.sourceTags[] in
     -- SOURCE_KIND_PRIORITY order; entries carry text + extras (factionPrefix,
     -- achievementID, ...) for kinds that have them, nothing for chip-only
-    -- kinds (DROP, VENDOR, etc.). row.gateLine + row.primarySourceCode are
-    -- thin derivations of sourceTags[1] kept for backward-compat consumers.
+    -- kinds (DROP, VENDOR, etc.). row.primarySourceCode is a thin derivation
+    -- of sourceTags[1] kept for backward-compat consumers; gateLine is built on read.
     R:_bakeSourceTags(row)
-    if t then _lap("sourceTags", t, hk) end
+    if t then t, hk = _lap("sourceTags", t, hk) end
 
-    return row
+    local slim = R:_SlimRow(row)
+    if t then _lap("slim", t, hk) end
+    return slim
 end
 
 -- ===== BuildRow bake helpers =================================================
@@ -926,15 +1268,25 @@ function R:_bakeItemAugmentBackfill(row)
     end
 end
 
--- _bakeTags: classify dataTagsByID into expansion / size / styles-or-factions / other.
---   row.expansion / expansionLabel, sizeLabel, tags / tagsLabel (Styles+Factions),
---   dataTagsByID (verbatim). Expansion colors are Palette (scheme-invariant).
+-- _bakeExpansion: row.expansion, the one tag field a row stores. The sweep runs this
+-- and not _bakeTags, whose labels are display text built on read: the sweep built
+-- them for every row and the slim copy dropped them. Every Expansion tag is written
+-- in turn, as _classifyTag does, so the two agree.
+function R:_bakeExpansion(row)
+    if not row.dataTagsByID then return end  -- exception(boundary): Blizzard struct field optional
+    for tagID, displayName in pairs(row.dataTagsByID) do
+        if R.tagIDToGroup[tagID] == "Expansion" then row.expansion = displayName end
+    end
+end
+
+-- _bakeTags: the tag labels from dataTagsByID, built on read (_bakeDisplay):
+--   expansionLabel, sizeLabel, tagsLabel (Styles+Factions). Expansion colors are
+--   Palette (scheme-invariant).
 -- _classifyTag: inner helper extracted from the loop to keep _bakeTags flat.
-local function _classifyTag(row, tagID, displayName, descriptive, styleFaction, getCategory)
+local function _classifyTag(row, tagID, displayName, styleFaction, getCategory)
     local group = R.tagIDToGroup[tagID]   -- tagIDToGroup is init'd to {} at load (line ~47), never nil
     if group == "Expansion" then row.expansion = displayName; return end
     if group == "Size"      then row.sizeLabel = displayName; return end
-    descriptive[#descriptive + 1] = displayName
     if getCategory then
         local cat = getCategory(tagID)
         if cat == "Styles" or cat == "Factions" then
@@ -944,17 +1296,14 @@ local function _classifyTag(row, tagID, displayName, descriptive, styleFaction, 
 end
 
 function R:_bakeTags(row)
-    local descriptive, styleFaction = {}, {}
+    local styleFaction = {}
     local getCategory = HDG.TagData and HDG.TagData.GetCategory  -- exception(false-positive): HDG.TagData is TOC-guaranteed at runtime; headless test mock omits it
     if row.dataTagsByID then
         for tagID, displayName in pairs(row.dataTagsByID) do
-            _classifyTag(row, tagID, displayName, descriptive, styleFaction, getCategory)
+            _classifyTag(row, tagID, displayName, styleFaction, getCategory)
         end
-        table.sort(descriptive)
         table.sort(styleFaction)
     end
-    -- (dataTags / dataTagsLabel used to be stamped here too; nothing read them.)
-    row.tags          = styleFaction
     row.tagsLabel     = table.concat(styleFaction, ", ")
     -- Palette-colored expansion label (scheme-invariant; safe to bake).
     if row.expansion and row.expansion ~= "" then
@@ -1000,15 +1349,22 @@ function R:_bakePlacement(row)
 end
 
 -- _bakeVendors: enrich each vendor with VendorAugment fields (npcID, mapID, x, y,
--- canWaypoint) + bake vendorLines[] for direct row-factory use.
--- _resolveVendorNpc: extracted from loop to keep _bakeVendors flat.
-local function _resolveVendorNpc(v, Aug)
+-- canWaypoint), then link it to its vendor record.
+-- _resolveVendorNpc: extracted from loop to keep _bakeVendors flat. It fills one
+-- table reused for every vendor and returns it, for _linkVendor to copy from:
+-- written onto the parsed entry, the location fields grew it from 8 slots to 16
+-- just before _linkVendor copied it and dropped it.
+local _resolving = {}
+local function _resolveVendorNpc(parsed, Aug)
+    local v = _resolving
+    for k in pairs(v) do v[k] = nil end
+    for k, val in pairs(parsed) do v[k] = val end
     local npcID = Aug and Aug:ResolveName(v.name, v.zone)
     v.npcID       = npcID
     v.canWaypoint = false   -- true only once a location is known (below): an npcID alone maps nowhere
-    if not npcID then return end
+    if not npcID then return v end
     local meta = Aug:Get(npcID)
-    if not meta then return end
+    if not meta then return v end
     v.canWaypoint = HDG.VendorRank.HasLocation(meta.mapID, meta.x, meta.y)
     v.mapID   = meta.mapID
     v.x       = meta.x
@@ -1024,6 +1380,49 @@ local function _resolveVendorNpc(v, Aug)
     -- returns above and keep their catalog zone. This makes the zone filter,
     -- the byVendor index, and the per-item vendor display agree on one zone.
     v.zone    = meta.zone or v.zone
+    return v
+end
+
+-- What a resolved vendor carries. Its location fields follow from npcID (the
+-- VendorAugment row) and `standing` is dropped from the entry, so the other
+-- fields are its key. Keyed after resolution because VendorAugment moves vendors
+-- the catalog files under the wrong zone: two catalog zones can make one entry.
+-- A field outside the list would be left out of the key and merge entries that
+-- differ, so it is an error.
+local RESOLVED_VENDOR_FIELDS = {
+    name = true, zone = true, faction = true, standing = true, cost = true, costEntries = true,
+    npcID = true, canWaypoint = true, mapID = true, x = true, y = true, side = true,
+}
+local function _vendorKey(v)
+    for k in pairs(v) do
+        if not RESOLVED_VENDOR_FIELDS[k] then
+            error(("catalog vendor sharing: field %q is not in the vendor key"):format(tostring(k)), 3)
+        end
+    end
+    return v.name .. "\31" .. v.zone .. "\31" .. v.faction .. "\31" .. _keyPart(v.cost) .. "\31" .. _keyPart(v.npcID)
+end
+
+-- The item's price at a vendor, linked to the vendor's record: built once a sweep
+-- per resolved vendor, then shared. costEntries keys by identity, which the
+-- raw-line memo and _sharedCost make one list per content.
+local function _vendorEntry(parsed, Aug)
+    local v = _resolveVendorNpc(parsed, Aug)
+    local shared = _sweepShared
+    if not shared then return _linkVendor(v) end  -- exception(nullable): nil between sweeps, for a row built for a decor just collected
+    local byKey = _child(shared.vendorEntries, v.costEntries or NONE)  -- exception(optional): a block with no priced line has no costEntries
+    local key = _vendorKey(v)
+    local entry = byKey[key]
+    if not entry then
+        entry = _linkVendor(v)
+        byKey[key] = entry
+    end
+    return entry
+end
+
+local function _sharedVendors(list)
+    local shared = _sweepShared
+    if not shared then return list end  -- exception(nullable): nil between sweeps, for a row built for a decor just collected
+    return _sharedList(shared.vendorLists, list)
 end
 
 -- _dropNotSoldBy: remove the vendors a CatalogOverride `notSoldBy` names. The
@@ -1060,21 +1459,13 @@ function R:_bakeVendors(row)
             end
         end
     end
-    if not row.vendors then row.vendors, row.vendorLines = {}, {}; return end
+    if not row.vendors then row.vendors = _sharedVendors({}); return end
     _dropNotSoldBy(row)
     local Aug = HDG.StaticData.VendorAugment
-    local lines = {}
-    for _, v in ipairs(row.vendors) do
-        _resolveVendorNpc(v, Aug)
-        -- Baked line: "Name - Zone - 44.2, 62.7"
-        local parts = { v.name }
-        if v.zone and v.zone ~= "" then parts[#parts+1] = v.zone end
-        if v.x and v.y and v.x > 0 and v.y > 0 then
-            parts[#parts+1] = string.format("%.1f, %.1f", v.x, v.y)
-        end
-        lines[#lines+1] = table.concat(parts, " - ")
+    for i, v in ipairs(row.vendors) do
+        row.vendors[i] = _vendorEntry(v, Aug)   -- price here + the vendor's record
     end
-    row.vendorLines = lines
+    row.vendors = _sharedVendors(row.vendors)
 end
 
 -- _bakeVariantDyes: per-owned-dyed-variant display data baked once at sweep time.
@@ -1139,8 +1530,8 @@ function R:_bakeVariantDyes(row, variants)
     return row.undyedNumStored ~= undyedBefore or not _sameDyedVariants(dyedBefore, dyed)
 end
 
--- _bakeCost: unify vendor cost + override source cost into {currencyID, amount} entries
--- + bake costLine. row.costEntries for structured access; row.costLine for direct render.
+-- _bakeCost: unify vendor cost + override source cost into row.costEntries
+-- ({currencyID, amount} entries); costLine and costVariants are derived on read.
 
 -- gold(copper) + currency list -> normalized {currencyID, amount} entries.
 -- Override-sourced costs carry no icon of their own. Resolve it HERE, at the observer
@@ -1174,14 +1565,12 @@ end
 -- prices shipped as gold: StripHyperlinks reduces ANY unknown link to its digits,
 -- so "no entries but digits" is an unparsed shape, not a price. It must surface
 -- as no cost so the parser gets taught the shape, never as a plausible number.
+-- The vendor's own list, not a copy: nothing writes into an entries list once it is
+-- built, and the copy was the whole cost stage (759 KB a build, 2026-10-21 profile).
 local function _costFromVendor(vendor)
     if not vendor then return nil end  -- exception(nullable): row.vendors[1] on a vendorless row
     if not (vendor.costEntries and #vendor.costEntries > 0) then return nil end  -- exception(nullable): priceless vendor block
-    local entries = {}
-    for _, e in ipairs(vendor.costEntries) do
-        entries[#entries + 1] = { currencyID = e.currencyID, itemID = e.itemID, amount = e.amount, icon = e.icon }
-    end
-    return entries
+    return vendor.costEntries
 end
 
 -- Override fallback (only when catalog has no cost). First source with a .cost wins.
@@ -1215,7 +1604,7 @@ end
 
 -- Distinct cost variants across all vendor blocks (e.g. 30 coupons OR 500g = two options).
 -- headEntries / headLine are the head vendor's entries and formatted line that
--- _bakeCost already built (nil when the head vendor carries no price), so the
+-- _costVariantsOf already built (nil when the head vendor carries no price), so the
 -- head is not copied and formatted a second time just to be hashed; and a row
 -- with one vendor can only ever yield that one line, so it skips the dedup pass
 -- entirely -- two thirds of the catalog (2026-09-13 allocation audit).
@@ -1240,31 +1629,47 @@ local function _costVariants(row, headEntries, headLine)
     return lines
 end
 
+-- A shared vendor entry with another price: a copy, linked to the same record.
+local function _repricedVendor(v, entries)
+    local copy = {}
+    for k, val in pairs(v) do copy[k] = val end
+    copy.costEntries = entries
+    return setmetatable(copy, getmetatable(v))
+end
+
 function R:_bakeCost(row)
     local GOLD   = HDG.Constants.CURRENCY_GOLD
     -- Explicit CatalogOverrides `costOverride` wins: Blizzard's catalog sourceText
     -- lags merchant hotfixes (MOTHER's Chamber of Heart items shipped 100000 in the
     -- catalog while the vendor charged 10000). Stamp it onto every vendor so the
     -- vendor list, cost line, and variants all agree. Remove when the catalog is fixed.
+    -- The vendor entries are shared with other rows, so the price goes on copies.
     if row.costOverride then
-        local oe = _entriesFromCostSpec(row.costOverride, GOLD)
-        for _, v in ipairs(row.vendors or {}) do v.costEntries = oe end
-        row.costEntries  = oe
-        row.costLine     = _formatCostLine(oe)
-        row.costVariants = { row.costLine }
+        local oe = _sharedCost(_entriesFromCostSpec(row.costOverride, GOLD))
+        local priced = {}
+        for i, v in ipairs(row.vendors) do priced[i] = _repricedVendor(v, oe) end
+        row.vendors = priced
+        row.costEntries = oe
         return
     end
-    local vendor = row.vendors and row.vendors[1]
-    local vendorEntries = _costFromVendor(vendor)
-    local entries = vendorEntries or _costFromOverrideSources(row.sources, GOLD)
-    row.costEntries = entries or {}
-    row.costLine    = _formatCostLine(entries)
-    -- Per-option lines (>=1 when any cost). Multi-option drives vendor list to show item once per option.
-    -- Only the VENDOR-derived head feeds the variants: an override-sourced cost is
-    -- not a vendor option, exactly as before.
-    local variants = _costVariants(row, vendorEntries, vendorEntries and row.costLine or nil)
-    if #variants == 0 and row.costLine ~= "" then variants = { row.costLine } end
-    row.costVariants = variants
+    row.costEntries = _costFromVendor(row.vendors[1]) or _sharedCost(_costFromOverrideSources(row.sources, GOLD) or {})
+end
+
+-- costLine / costVariants: built on read (see Row shape) from what _bakeCost left.
+local function _costLineOf(row)
+    return _formatCostLine(row.costEntries)
+end
+
+-- Per-option lines (>=1 when any cost); several drive the vendor list to show the
+-- item once per option. Only the VENDOR-derived head feeds the variants: an
+-- override-sourced cost is not a vendor option.
+local function _costVariantsOf(row)
+    local line = _formatCostLine(row.costEntries)
+    if row.costOverride then return { line } end   -- exception(nullable): sparse override field
+    local head = _costFromVendor(row.vendors[1])
+    local variants = _costVariants(row, head, head and line or nil)
+    if #variants == 0 and line ~= "" then variants = { line } end
+    return variants
 end
 
 -- Map ItemAugment minRep to display string. Convention: 4=Neutral…8=Exalted, 9+=Renown.
@@ -1329,12 +1734,14 @@ end
 -- "Source (Zone)" for the drop/treasure/event records _ParseSourceText stamps.
 -- Module scope because BOTH source bakes want it: _bakeSourceTags for the chip
 -- and _bakeSourceTypes for the headline.
+local function _sourceWithZone(source, zone)
+    if zone and zone ~= "" then return source .. " (" .. zone .. ")" end  -- exception(optional): curated sources and drop records may name no zone
+    return source
+end
+
 local function _composeSourceText(rec)
     if not rec then return nil end   -- exception(nullable): row carries only the source kinds it has
-    if rec.zone and rec.zone ~= "" then
-        return rec.source .. " (" .. rec.zone .. ")"
-    end
-    return rec.source
+    return _sourceWithZone(rec.source, rec.zone)
 end
 
 -- Curated source type -> SOURCE_KINDS entry, shared by both bakes. WorldQuest
@@ -1431,7 +1838,7 @@ function R:_bakeSourceTypes(row)
         if src then
             row.sourceType = kind.donorCode
             -- exception(optional): a bare curated source carries a kind and no name, like the catalog's Shop/Promotion lines
-            row.sourceName = src.name and _composeSourceText({ source = src.name, zone = src.detail }) or ""
+            row.sourceName = src.name and _sourceWithZone(src.name, src.detail) or ""
         else
             row.sourceType, row.sourceName = 0, ""
         end
@@ -1440,96 +1847,167 @@ end
 
 -- _bakeSourceTags: canonical source/gate bake. Produces:
 --   row.sourceTags[] -- SOURCE_KIND_PRIORITY-ordered list of { kind, text?, ... }
---   row.gateLine     -- compact one-liner from sourceTags[1] (for row factories)
 --   row.primarySourceCode -- donor code of sourceTags[1].kind (HDG-compat)
 -- DROP fallback when no other signal exists (chip rendering always has something).
 -- Aug code 11 (PROFESSION) and 3 (WorldQuest->QUEST) handled as edge cases.
 -- _repTagEntry: extracts REP entry; static gate only (live progress via RepObserver).
+-- The two shapes, each a function of the inputs _sharedRep keys it by.
+local function _repFromGate(factionName, standing, factionID)
+    return {
+        kind          = "REP",
+        text          = (standing ~= "") and (standing .. " with " .. factionName) or factionName,
+        factionName   = factionName,
+        standing      = standing,
+        factionID     = factionID,
+        requiredCode  = _standingStringToCode(standing),
+        factionPrefix = _factionPrefixFor(factionID),
+    }
+end
+
+local function _repFromAugment(factionName, minRep, factionID)
+    local standing = _repStandingFromMinRep(minRep) or ""
+    return {
+        kind          = "REP",
+        text          = (standing ~= "") and (standing .. " with " .. factionName) or factionName,
+        factionName   = factionName,
+        standing      = standing,
+        factionID     = factionID,
+        minRep        = minRep,
+        requiredCode  = minRep,   -- ItemAugment minRep IS the standing code
+        factionPrefix = _factionPrefixFor(factionID),
+    }
+end
+
+-- Source tags are shared across rows, keyed per kind by what they are built from.
+-- `shape` names the builder in the key, so the two REP shapes never meet.
+local function _sharedRep(build, shape, factionName, rank, factionID)
+    local shared = _sweepShared
+    if not shared then return build(factionName, rank, factionID) end  -- exception(nullable): nil between sweeps, for a row built for a decor just collected
+    local byInputs = _child(shared.tags, "REP")
+    local key = shape .. "\31" .. factionName .. "\31" .. _keyPart(rank) .. "\31" .. _keyPart(factionID)
+    local tag = byInputs[key]
+    if not tag then
+        tag = build(factionName, rank, factionID)
+        byInputs[key] = tag
+    end
+    return tag
+end
+
+-- { kind } plus up to two fields, absent when nil: a nil written in a table
+-- constructor still takes a slot in 5.1. A kind always carries the same fields,
+-- so the kind and the two values are the key.
+local function _newTag(kind, f1, v1, f2, v2)
+    local tag = { kind = kind }
+    if v1 ~= nil then tag[f1] = v1 end
+    if v2 ~= nil then tag[f2] = v2 end
+    return tag
+end
+
+local function _sharedTag(kind, f1, v1, f2, v2)
+    local shared = _sweepShared
+    if not shared then return _newTag(kind, f1, v1, f2, v2) end  -- exception(nullable): nil between sweeps, for a row built for a decor just collected
+    local byInputs = _child(shared.tags, kind)
+    local key = _keyPart(v1) .. "\31" .. _keyPart(v2)
+    local tag = byInputs[key]
+    if not tag then
+        tag = _newTag(kind, f1, v1, f2, v2)
+        byInputs[key] = tag
+    end
+    return tag
+end
+
 local function _repTagEntry(row, aug)
     local fg = row.factionGate
     if fg and fg.factionName and fg.factionName ~= "" then
-        local standing  = fg.standing or ""
         local factionID = (aug and aug.factionID) or _factionIDByName(fg.factionName)
-        return {
-            text          = (standing ~= "") and (standing .. " with " .. fg.factionName) or fg.factionName,
-            factionName   = fg.factionName,
-            standing      = standing,
-            factionID     = factionID,
-            requiredCode  = _standingStringToCode(standing),
-            factionPrefix = _factionPrefixFor(factionID),
-        }
+        return _sharedRep(_repFromGate, "gate", fg.factionName, fg.standing or "", factionID)
     end
     if aug and aug.factionName and aug.factionName ~= "" then
-        local standing = _repStandingFromMinRep(aug.minRep) or ""
-        return {
-            text          = (standing ~= "") and (standing .. " with " .. aug.factionName) or aug.factionName,
-            factionName   = aug.factionName,
-            standing      = standing,
-            factionID     = aug.factionID,
-            minRep        = aug.minRep,
-            requiredCode  = aug.minRep,   -- ItemAugment minRep IS the standing code
-            factionPrefix = _factionPrefixFor(aug.factionID),
-        }
+        return _sharedRep(_repFromAugment, "augment", aug.factionName, aug.minRep, aug.factionID)
     end
-    if aug and aug.factionID then return {} end   -- chip-only REP
+    if aug and aug.factionID then return _sharedTag("REP") end   -- chip-only REP
     return nil
 end
 
 -- One source kind per row at most; the first contribution wins (catalog signal
--- before augment before override, in call order below). File-local rather than
--- a closure per row: the sweep runs this 2,052 times (2026-09-13 audit).
-local function _emitSourceTag(byKind, kind, entry)
-    if not kind or byKind[kind] then return end
-    entry.kind = kind
-    byKind[kind] = entry
+-- before augment before override, in call order below). The kinds collect in one
+-- table reused for every row, emptied as each bake starts: only the sorted list is
+-- kept, and the sweep runs this 2,308 times.
+local _tagByKind = {}
+local function _emitSourceTag(kind, tag)
+    if not kind or _tagByKind[kind] then return end
+    _tagByKind[kind] = tag
+end
+
+-- The row's tags in SOURCE_KIND_PRIORITY order, and the one shared list for that
+-- sequence: walked through the trie first, so a repeat builds no list.
+local function _tagListOf(byKind)
+    local tags = {}
+    for _, key in ipairs(HDG.Constants.SOURCE_KIND_PRIORITY) do
+        if byKind[key] then tags[#tags + 1] = byKind[key] end
+    end
+    return tags
+end
+
+local function _sharedTagList(byKind)
+    local shared = _sweepShared
+    if not shared then return _tagListOf(byKind) end  -- exception(nullable): nil between sweeps, for a row built for a decor just collected
+    local node = shared.tagLists
+    for _, key in ipairs(HDG.Constants.SOURCE_KIND_PRIORITY) do
+        local tag = byKind[key]
+        if tag then node = _child(node, tag) end
+    end
+    local hit = node[LEAF]
+    if not hit then
+        hit = _tagListOf(byKind)
+        node[LEAF] = hit
+    end
+    return hit
 end
 
 function R:_bakeSourceTags(row)
     local aug = HDG.StaticData.ItemAugment:Get(row.itemID)
-    local byKind = {}     -- {[kind] = entry} -- dedupes per-kind contributions
-    local function emit(kind, entry) _emitSourceTag(byKind, kind, entry) end
+    local byKind = _tagByKind   -- {[kind] = entry} -- dedupes per-kind contributions
+    for k in pairs(byKind) do byKind[k] = nil end
 
     local repEntry = _repTagEntry(row, aug)
-    if repEntry then emit("REP", repEntry) end
+    if repEntry then _emitSourceTag("REP", repEntry) end
 
     -- Catalog-derived gates (text-carrying).
     if row.quest and row.quest ~= "" then
-        emit("QUEST", { text = row.quest })
+        _emitSourceTag("QUEST", _sharedTag("QUEST", "text", row.quest))
     end
     if row.achievement and row.achievement ~= "" then
-        emit("ACH", { text = row.achievement, achievementID = row.achievementID })
+        _emitSourceTag("ACH", _sharedTag("ACH", "text", row.achievement, "achievementID", row.achievementID))
     end
     if row.recipe and row.recipe.expansion and row.recipe.expansion ~= "" then
-        emit("CRAFT", {
-            text       = row.recipe.expansion,
-            profession = row.recipe.profession,
-        })
+        _emitSourceTag("CRAFT", _sharedTag("CRAFT", "text", row.recipe.expansion, "profession", row.recipe.profession))
     elseif row.recipe then
         -- Recipe present but no expansion string -- chip-only CRAFT.
-        emit("CRAFT", {})
+        _emitSourceTag("CRAFT", _sharedTag("CRAFT"))
     end
 
     -- Non-gating signals: chip-only or "Source (Zone)" when descriptor text exists.
     -- Drop/Treasure/Event come from _ParseSourceText (stamps row.drop/treasure/event).
-    if row.vendors and #row.vendors > 0 then emit("VENDOR", {}) end
-    if row.drop      then emit("DROP",     { text = _composeSourceText(row.drop)     }) end
-    if row.treasure  then emit("TREASURE", { text = _composeSourceText(row.treasure) }) end
-    if row.event     then emit("EVENT",    { text = _composeSourceText(row.event)    }) end
-    if row.shop      then emit("SHOP",     {}) end   -- catalog bare "Shop"/"In-Game Shop" line
-    if row.promo     then emit("PROMO",    {}) end   -- catalog bare "Promotion" line
+    if row.vendors and #row.vendors > 0 then _emitSourceTag("VENDOR", _sharedTag("VENDOR")) end
+    if row.drop      then _emitSourceTag("DROP",     _sharedTag("DROP",     "text", _composeSourceText(row.drop)))     end
+    if row.treasure  then _emitSourceTag("TREASURE", _sharedTag("TREASURE", "text", _composeSourceText(row.treasure))) end
+    if row.event     then _emitSourceTag("EVENT",    _sharedTag("EVENT",    "text", _composeSourceText(row.event)))    end
+    if row.shop      then _emitSourceTag("SHOP",     _sharedTag("SHOP"))  end   -- catalog bare "Shop"/"In-Game Shop" line
+    if row.promo     then _emitSourceTag("PROMO",    _sharedTag("PROMO")) end   -- catalog bare "Promotion" line
 
     -- ItemAugment signals: catalog-undetectable kinds (SHOP/PROMO/TREASURE/DROP/etc).
-    -- VENDOR is chip-only. emit() dedupes per kind (catalog signal wins).
+    -- VENDOR is chip-only. _emitSourceTag() dedupes per kind (catalog signal wins).
     if aug and aug.sources then
         for _, s in ipairs(aug.sources) do
             local kind = _kindForSourceType(s.type)
             local k = kind and kind.key
             if k == "VENDOR" then
-                emit(k, {})
+                _emitSourceTag(k, _sharedTag(k))
             elseif k then
                 local txt = (s.name and s.name ~= "")
-                    and _composeSourceText({ source = s.name, zone = s.detail }) or nil
-                emit(k, { text = txt })
+                    and _sourceWithZone(s.name, s.detail) or nil
+                _emitSourceTag(k, _sharedTag(k, "text", txt))
             end
         end
     end
@@ -1542,10 +2020,10 @@ function R:_bakeSourceTags(row)
             local kind = _kindForSourceType(s.type)
             local k = kind and kind.key
             if k == "VENDOR" then
-                emit(k, {})
+                _emitSourceTag(k, _sharedTag(k))
             elseif k then
-                local txt = s.name and _composeSourceText({ source = s.name, zone = s.detail }) or nil
-                emit(k, { text = txt })
+                local txt = s.name and _sourceWithZone(s.name, s.detail) or nil
+                _emitSourceTag(k, _sharedTag(k, "text", txt))
             end
         end
     end
@@ -1553,47 +2031,128 @@ function R:_bakeSourceTags(row)
     -- No source signal at all -> honest chip-only [UNKN], never [DROP].
     -- Defaulting to DROP masked catalog/data gaps; UNKN surfaces them (and is
     -- filterable). DROP now appears only when the data actually says "Drop:".
-    if next(byKind) == nil then emit("UNKN", {}) end
+    if next(byKind) == nil then _emitSourceTag("UNKN", _sharedTag("UNKN")) end
 
-    -- Sort by SOURCE_KIND_PRIORITY; head entry is highest-priority kind (gateLine + primarySourceCode).
-    local tags = {}
-    for _, key in ipairs(HDG.Constants.SOURCE_KIND_PRIORITY) do
-        if byKind[key] then tags[#tags+1] = byKind[key] end
-    end
+    -- Sort by SOURCE_KIND_PRIORITY; head entry is highest-priority kind (primarySourceCode, gateLine on read).
+    local tags = _sharedTagList(byKind)
     row.sourceTags = tags
 
-    -- Derived single-value fields for back-compat.
+    -- Derived single-value field for back-compat.
     local head = tags[1]
-    if head and head.text then
-        -- Compact "[CHIP]  text" with optional faction crest prefix.
-        local prefix = head.factionPrefix and (head.factionPrefix .. " ") or ""
-        row.gateLine = prefix .. HDG.Format.SourceChip(head.kind) .. "  " .. head.text
-    else
-        row.gateLine = nil
-    end
     row.primarySourceCode = (head and HDG.Constants.SOURCE_KIND_BY_KEY[head.kind].donorCode) or 0
 end
 
--- _bakeBonusXp: first-acquisition XP chip. Baked when bonus > 0; render gated by isOwned at consumer.
-function R:_bakeBonusXp(row)
-    local fab = row.firstAcquisitionBonus or 0  -- exception(boundary): catalog struct field sparse
-    if fab > 0 then
-        row.bonusXpLabel = XP_ICON .. " +" .. fab .. " XP"
-    end
+-- Compact "[CHIP]  text" from the head source tag, with the faction crest when it
+-- has one; nil for a chip-only head. Display text, so only _bakeDisplay builds it:
+-- the sweep built one per row and the slim copy dropped it.
+local function _gateLineOf(head)
+    if not (head and head.text) then return nil end  -- exception(nullable): a chip-only head carries no text
+    local prefix = head.factionPrefix and (head.factionPrefix .. " ") or ""
+    return prefix .. HDG.Format.SourceChip(head.kind) .. "  " .. head.text
 end
 
--- _bakeRecipe: cross-join with StaticData.Recipes. row.recipe nil when not crafted;
--- row.recipeLabel = "Profession - Requires Rep" for the detail panel.
+
+-- _bakeRecipe: cross-join with StaticData.Recipes. row.recipe nil when not crafted.
 function R:_bakeRecipe(row)
     local Recipes = HDG.StaticData.Recipes
-    if not Recipes then row.recipe, row.recipeLabel = nil, nil; return end
-    local rec = Recipes:Get(row.itemID)
-    if not rec then row.recipe, row.recipeLabel = nil, nil; return end
-    row.recipe = rec
-    local parts = {}
-    if rec.profession   and rec.profession   ~= "" then parts[#parts+1] = rec.profession end
-    if rec.requiresRep  and rec.requiresRep  ~= "" then parts[#parts+1] = rec.requiresRep end
-    row.recipeLabel = table.concat(parts, " - ")
+    if not Recipes then row.recipe = nil; return end
+    row.recipe = Recipes:Get(row.itemID)   -- exception(nullable): most decor is not crafted
+end
+
+-- ===== Row shape =============================================================
+-- A row stores what the hot loops and the in-place writers need. Display text and
+-- a few derived values are built when read, through one shared metatable, so a row
+-- fits in 32 hash slots instead of 64 (memory census 2026-10-19: rows held 8.7 MB
+-- at 2,307 decor). pairs(row) sees the stored fields only.
+
+-- Nothing reads these once the row is built.
+local ROW_DROPPED = {
+    size = true, isPrefab = true, asset = true, uiModelSceneID = true, category = true,
+    tags = true, zone = true, notSoldBy = true, vendorLines = true, recipeLabel = true,
+}
+
+-- Built on every read: cheap, or made from values that change (the counts). A derived
+-- read must touch stored fields only, or every such read would build display text.
+local ROW_DERIVED = {
+    -- variantIdentifier 0 = the base stack, the destroy identity default; dyed
+    -- variants carry Blizzard's own entryVariantID (_bakeVariantDyes).
+    entryID = function(row)
+        return { recordID = row.decorID, entryType = row.entryType, variantIdentifier = 0 }
+    end,
+    isOwned = function(row) return R:IsOwned(row) end,
+    -- Cache only: BuildRow resolves the names, and a selector read must not reach
+    -- Blizzard. A miss reads nil until a later sweep resolves it, as before.
+    categoryName    = function(row) return _categoryNameCache[row.categoryID] end,
+    subcategoryName = function(row) return _subcategoryNameCache[row.subcategoryID] end,
+    -- First-acquisition XP chip; the consumer gates it on ownership.
+    bonusXpLabel = function(row)
+        local fab = row.firstAcquisitionBonus
+        if fab > 0 then return XP_ICON .. " +" .. fab .. " XP" end
+        return nil
+    end,
+    costLine     = _costLineOf,
+    costVariants = _costVariantsOf,
+}
+
+-- Built once per row on first read, by the same bakes BuildRow runs, over a view
+-- that reads the row's stored and derived fields and keeps the bakes' writes. Only
+-- cold readers (detail panels, tooltips) ask, so few rows ever build it. Weak keys:
+-- a row from an older sweep takes its text with it; the cached table holds strings
+-- only, never the row.
+local ROW_DISPLAY = {
+    expansionLabel = true, sizeLabel = true, tagsLabel = true, categoryLabel = true,
+    placementLabel = true, gateLine = true, sourceName = true, sourceDetail = true,
+}
+local _display = setmetatable({}, { __mode = "k" })
+R._rowDisplay = _display   -- read by the memory census (HDGProbe /hdgmem catalog)
+
+local function _bakeDisplay(row)
+    local view = setmetatable({}, { __index = function(_, key)
+        local v = rawget(row, key)
+        if v ~= nil then return v end
+        local derive = ROW_DERIVED[key]
+        return derive and derive(row)
+    end })
+    R:_bakeTags(view)
+    R:_bakeCategory(view)
+    R:_bakePlacement(view)
+    R:_bakeSourceTypes(view)
+    view.gateLine = _gateLineOf(row.sourceTags[1])
+    local out = {}
+    for key in pairs(ROW_DISPLAY) do out[key] = rawget(view, key) end
+    return out
+end
+
+local ROW_META = {
+    __index = function(row, key)
+        local derive = ROW_DERIVED[key]
+        if derive then return derive(row) end
+        if not ROW_DISPLAY[key] then return nil end
+        local text = _display[row]
+        if not text then
+            text = _bakeDisplay(row)
+            _display[row] = text
+        end
+        return text[key]
+    end,
+    -- Writing a dropped, derived or display field would re-grow the row and hide the
+    -- derived value, so it is an error. New stored fields (dye counts) go through.
+    __newindex = function(row, key, value)
+        if ROW_DROPPED[key] or ROW_DERIVED[key] or ROW_DISPLAY[key] then
+            error(("catalog row field %q is derived or retired and cannot be written"):format(tostring(key)), 2)
+        end
+        rawset(row, key, value)
+    end,
+}
+
+-- The built row copied into a table holding only stored fields: the fat one is
+-- sized for every bake's output, and Lua never shrinks a table.
+function R:_SlimRow(fat)
+    local row = {}
+    for key, value in pairs(fat) do
+        if not (ROW_DROPPED[key] or ROW_DERIVED[key] or ROW_DISPLAY[key]) then row[key] = value end
+    end
+    return setmetatable(row, ROW_META)
 end
 
 -- _ParseSourceText: extract Vendor:/Zone:/Faction:/Cost:/Quest:/Achievement:/Category:
@@ -1655,6 +2214,21 @@ local function _extractCostEntries(raw)
                 entries[#entries + 1] = { currencyID = HDG.Constants.CURRENCY_GOLD, amount = g }
             end
         end
+    end
+    return entries
+end
+
+-- One entries list per distinct Cost: line in a sweep: 222 distinct lines of 1,800
+-- in the test catalog. A repeat line is answered here without a parse, and a new
+-- line's list is shared by content (_sharedCost). Lists are never written once
+-- built, so vendors can hold the same one.
+local function _costEntriesOf(raw)
+    local memo = _sweepCostLines
+    if not memo then return _extractCostEntries(raw) end  -- exception(nullable): nil between sweeps, for a row built for a decor just collected
+    local entries = memo[raw]
+    if not entries then
+        entries = _sharedCost(_extractCostEntries(raw))
+        memo[raw] = entries
     end
     return entries
 end
@@ -1819,7 +2393,7 @@ function R:_ParseSourceText(sourceText, row)
         elseif cost and current then
             current.cost = cost
             -- Parse currencies from raw line (SHL strips |Hcurrency: wrappers).
-            local entries = _extractCostEntries(raw)
+            local entries = _costEntriesOf(raw)
             if next(entries) then current.costEntries = entries end
         elseif quest then
             row.quest = quest
@@ -1831,7 +2405,7 @@ function R:_ParseSourceText(sourceText, row)
             -- Bare cost line (no "Cost:" prefix): achievement-vendor catalog format
             -- (e.g. "800|Hcurrency:3392|h"). Same handling as the Cost: branch.
             current.cost = line
-            local entries = _extractCostEntries(raw)
+            local entries = _costEntriesOf(raw)
             if next(entries) then current.costEntries = entries end
         end
         raw, pos = _nextSourceLine(sourceText, pos)
@@ -1995,11 +2569,6 @@ function R:GetVendorsForItem(itemID)
     return row and row.vendors
 end
 
-function R:GetCategoryForItem(itemID)
-    local row = R:GetRow(itemID)
-    return row and row.category
-end
-
 -- Crafted decor -- has a profession recipe (row.recipe -> sourceType 6 / [PROF] chip)
 -- -- is the only Bind-on-Equip, hence the only Auction-House-tradeable decor.
 -- Everything else (vendor / drop / quest / achievement) is BoP or Warbound.
@@ -2013,11 +2582,6 @@ function R:GetItemsByVendor(vendorName, vendorZone)
     if not R:IsReady() then return nil end
         -- byVendor keyed by (name, zone); ~9 display names are shared across zones.
     return R.byVendor[(vendorName or "") .. "::" .. (vendorZone or "")]
-end
-
-function R:GetAllVendorNames()
-    if not R:IsReady() then return {} end
-    return R.allVendorNames
 end
 
 function R:IterateRows(fn)
@@ -2293,15 +2857,15 @@ function R:PatchCounts(decorID, counts)
     row.remainingRedeemable      = counts.remainingRedeemable      or 0  -- exception(boundary): Blizzard struct field sparse
     row.destroyableInstanceCount = counts.destroyableInstanceCount or 0  -- exception(boundary): Blizzard struct field sparse
     row.firstAcquisitionBonus    = counts.firstAcquisitionBonus    or 0  -- exception(boundary): Blizzard struct field sparse
-    row.isOwned = R:IsOwned(row)
 end
 
 function R:ClearStore()
     R.byDecorID = {}
     R.byItemID  = {}
     R.byVendor  = {}
-    R.allVendorNames = {}
     R._catalogSchemaVersion = 0
+    R._storageSeen = -1
+    R._rowsStamp = false
 end
 
 -- ===== Module registration ====================================================
@@ -2324,6 +2888,7 @@ HDG.Modules:Declare({
         -- Actual sweep deferred to next catalog-tab activation (UI_SET_PERSISTENT subscriber).
         HOUSING_STORAGE_UPDATED              = { handler = "OnHousingStorageUpdated", debounce = 0.5 },
         HOUSING_STORAGE_ENTRY_UPDATED        = { handler = "OnHousingStorageEntryUpdated" },
+        HOUSE_DECOR_ADDED_TO_CHEST           = { handler = "OnHouseDecorAddedToChest" },
         HOUSING_CATALOG_CATEGORY_UPDATED     = { handler = "OnHousingCatalogCategoryChange" },
         HOUSING_CATALOG_SUBCATEGORY_UPDATED  = { handler = "OnHousingCatalogSubcategoryChange" },
         -- (HOUSING_DECOR_PLACE_SUCCESS/REMOVED/etc. are NOT here: redundant with
@@ -2337,6 +2902,14 @@ HDG.Modules:Declare({
     -- payload.event = triggering Blizzard event (diagnostic; shows in the dispatch log
     -- so refresh-queued sweeps can be attributed to their source event).
     OnHousingStorageUpdated = function(self)
+        -- Searching loads storage, so an update fires as the first search runs, and
+        -- the debounce hands it over after the build has read it: that was a second
+        -- full build (~30 MB) at every first open (memory plan 2026-10-19 sec 6).
+        -- The count says whether any update in the burst came after the build began.
+        if HDG.BlizzardEvents:FireCount("HOUSING_STORAGE_UPDATED") <= R._storageSeen then
+            HDG.Log:Info("catalog_swept", "storage update already in the catalog build -- no rebuild")
+            return
+        end
         HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.CATALOG_REFRESH_QUEUED,
                              payload = { event = "HOUSING_STORAGE_UPDATED" } })
     end,
@@ -2350,6 +2923,11 @@ HDG.Modules:Declare({
         end
         HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.CATALOG_REFRESH_QUEUED,
                              payload = { event = "HOUSING_STORAGE_ENTRY_UPDATED" } })
+    end,
+    -- Fires before Blizzard's counts update, so it never reads them: it only
+    -- arms the check that the entry event above did flip the row.
+    OnHouseDecorAddedToChest = function(self, _decorGUID, decorID)
+        R:NoteDecorArrival(decorID)
     end,
     OnHousingCatalogCategoryChange = function(self)
         -- Rare hotfix events. Same queuing semantics.
@@ -2369,16 +2947,30 @@ HDG.Modules:Declare({
             if actionType == A.UI_SET_PERSISTENT then
                 -- Only proceed when account.ui.view was the written key.
                 if type(invalidation) == "table" and invalidation[1] ~= "account.ui.view" then return end
+                -- A tab switch brings no data. While a build with entries settles, that
+                -- build answers what the switch would re-kick (an update newer than it
+                -- is owed on its own), so a re-kick only builds it again. A 0-entry
+                -- settle or a silent searcher still falls through to the retry.
+                if R._commitPending and R._settlingHasEntries then return end
                 local view = HDG.Store:GetState().account.ui.view
                 if view then R:_OnViewChange(view) end
             elseif actionType == A.MAIN_WINDOW_OPENING then
                 -- Load unconditionally on first open (most views derive from the catalog).
                 -- RequestLoad is idempotent; re-opens are no-ops.
                 R:RequestLoad("main-window-opening")
+                -- A storage event while the window was closed only marked the
+                -- catalog stale (refreshPending). A tab switch acts on that mark,
+                -- and reopening on the same tab must too, or an arrival seen only
+                -- through HOUSING_STORAGE_UPDATED shows late. RequestLoad starts
+                -- the first load itself, so this waits for a ready catalog.
+                if HDG.Store:GetState().session.catalog.status == "ready" then
+                    R:_OnViewChange(HDG.Store:GetState().account.ui.view)
+                end
                 R:ReconcileRooms()          -- live room catalog (cheap; Layout-mode searcher)
                 R:QueueCategoryTreeRebuild()   -- Blizzard category/subcategory nav snapshot
             elseif actionType == A.CATALOG_FORCE_RELOAD then
-                R:ReconcileFull("manual-refresh")   -- (parked) catalog-intro Refresh button
+                R._rowsStamp = false                -- a manual reload rebuilds every row
+                R:ReconcileFull("manual-refresh")   -- /hdgr refresh
             elseif actionType == A.MAIN_WINDOW_TOGGLE then
                 -- Resume/pause searcher auto-update with window show/hide (Blizzard symmetry).
                 if R._searcher then
@@ -2429,6 +3021,7 @@ HDG.Modules:Declare({
     onShutdown = function(self)
         R:_CancelSettleTimer()
         R:_CancelCategoryTreeTimer()
+        R:_CancelArrivalTimer()
         if self._storeToken then
             HDG.Store:Unsubscribe(self._storeToken)
             self._storeToken = nil

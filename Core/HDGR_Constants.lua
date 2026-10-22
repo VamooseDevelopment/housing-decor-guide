@@ -57,6 +57,13 @@ HDG.Constants = {
     -- Catalog row schema version. Bump when the observer row shape changes.
     -- No migration needed -- catalog is fully re-fetched from C_HousingCatalog on every sweep.
     CATALOG_SCHEMA_VERSION = 4,   -- 4 (2026-09-13): dropped the never-read categoryIDs / subcategoryIDs / customizations / dyeIDs / variants / dataTags / dataTagsLabel row fields
+    -- Seconds after HOUSE_DECOR_ADDED_TO_CHEST before checking that the decor's row
+    -- turned collected. The storage entry event that flips it lands in the same
+    -- burst (same second, live 12.1.5), so this leaves it room without a visible lag.
+    DECOR_ARRIVAL_CHECK_DELAY = 1.0,
+    -- Seconds after login (or /reload) before a zone alert loads a cold catalog:
+    -- login is when every addon loads and the client is busiest (owner 2026-10-22).
+    ZONE_ALERT_LOGIN_DELAY = 30,
     -- Atlas for snapshot ("All Placed Decor") cards -- the decorate-mode house glyph.
     SNAPSHOT_ICON_ATLAS = "decor-controls-decoratemode-active",
     -- Atlas for empty shopping-list cards -- the shopping-cart glyph (matches the
@@ -541,6 +548,11 @@ HDG.Constants = {
             [82] = "flexes", [96] = "sits down", [100] = "sleeps",
         },
     },
+
+    -- Decor tags-row chips: one widget, one set of slot selectors, one wired click
+    -- each. Here, not beside the selectors: LayoutConfig_Decor loads before them and
+    -- built its own count, so the controller wired slots the window never had.
+    TAG_SLOT_COUNT = 12,
 
     -- Top-row filter chip values. SSoT for Selectors, LayoutConfig, Controller_Decor, and the reducer.
     -- Adding or removing a bucket is one edit here.
@@ -1131,8 +1143,7 @@ HDG.Constants = {
         CATALOG_LOAD_FAILED       = "HDGR_CATALOG_LOAD_FAILED",       -- payload: { reason }
         CATALOG_REFRESH_QUEUED    = "HDGR_CATALOG_REFRESH_QUEUED",
         CATALOG_REFRESH_COMPLETED = "HDGR_CATALOG_REFRESH_COMPLETED", -- payload: { rowCount }
-        CATALOG_INTRO_SET_PHASE   = "HDGR_CATALOG_INTRO_SET_PHASE",   -- payload: { phase = "hidden"|"loading"|"success" }
-        CATALOG_FORCE_RELOAD      = "HDGR_CATALOG_FORCE_RELOAD",      -- loading-overlay Refresh; observer forces a sweep past coalesce
+        CATALOG_FORCE_RELOAD      = "HDGR_CATALOG_FORCE_RELOAD",      -- /hdgr refresh; observer rebuilds every row past coalesce
         -- Blizzard category/subcategory nav tree; shared by Style Curator + Projects decor picker.
         CATALOG_CATEGORY_TREE_UPDATED = "HDGR_CATALOG_CATEGORY_TREE_UPDATED", -- payload: { byID, subcatByID, rootIDs }
         CATALOG_VARIANTS_LOADED   = "HDGR_CATALOG_VARIANTS_LOADED",   -- payload: { count }
@@ -1519,7 +1530,8 @@ HDG.Constants.PET_DECOR_BY_DECOR_ID = {
 }
 
 -- A memoized selector's cached value is dropped after this many dispatches
--- without a hit (Selectors:InvalidateMemos ages them). Every memo used to live
+-- without a hit (Selectors:InvalidateMemos ages them), only while the main window
+-- is closed (Selectors:HoldAging). Every memo used to live
 -- for the session whether its view was ever revisited: 70 live memos, ~5 MB
 -- (2026-09-13 audit). A hit resets the age; a miss recomputes once.
 HDG.Constants.MEMO_IDLE_DISPATCHES = 400

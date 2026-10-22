@@ -60,28 +60,3 @@ Selectors:Register("catalog.isError", {
     end,
 })
 
--- ===== Initial-load overlay ("catalogIntro" view) ===========================
--- A window-wide overlay shown ONLY during the first catalog load this session.
--- phase: "hidden" (content) | "loading" (animated dots + Refresh) | "success"
--- (0.5s "loaded" flash, then hidden). Drives the overlay panel's visibility +
--- the headline text. Pure projections of session.ui.catalogIntro.phase.
-Selectors:Register("catalog.intro.isVisible", {
-    reads = { "session.ui.catalogIntro.phase" },
-    fn = function(state)
-        local p = state.session.ui.catalogIntro.phase
-        return p == "loading" or p == "success"
-    end,
-})
-Selectors:Register("catalog.intro.isLoading", {
-    reads = { "session.ui.catalogIntro.phase" },
-    fn = function(state) return state.session.ui.catalogIntro.phase == "loading" end,
-})
-Selectors:Register("catalog.intro.headline", {
-    reads = { "session.ui.catalogIntro.phase" },
-    fn = function(state)
-        if state.session.ui.catalogIntro.phase == "success" then
-            return HDG.Locale:Get("CATALOG_INTRO_SUCCESS")
-        end
-        return HDG.Locale:Get("CATALOG_INTRO_LOADING")
-    end,
-})

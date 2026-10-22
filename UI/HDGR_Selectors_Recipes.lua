@@ -57,6 +57,23 @@ local function _canonProfession(name)
     return entry and entry.name or name
 end
 
+-- True when a capture says what the seed entry already says: the seed ships from
+-- scans, so most captures match it (321 of 346 on one account, 2026-10-21), and a
+-- copy of each was most of this selector's 749 KB a build.
+local function _captureMatchesSeed(ov, entry)
+    if _canonProfession(ov.profession) ~= entry.profession then return false end
+    local seedReagents = entry.reagents
+    if not seedReagents then return next(ov.reagents) == nil end  -- exception(optional): a seed entry may ship without reagents
+    for rid, qty in pairs(ov.reagents) do
+        local sr = seedReagents[rid]  -- exception(nullable): a reagent the seed does not list
+        if not (sr and sr.qty == qty) then return false end
+    end
+    for rid in pairs(seedReagents) do
+        if ov.reagents[rid] == nil then return false end
+    end
+    return true
+end
+
 Selectors:Register("recipes.db", {
     reads    = { "account.recipeCapture", "session.resolvers.staticData.tick" },  -- staticData.tick: ADR-003c GetAll facade contract
     memoized = true,
@@ -67,7 +84,9 @@ Selectors:Register("recipes.db", {
         for _, entry in pairs(seed) do
             if entry.itemID then
                 local ov = cap[entry.itemID]  -- exception(nullable): most entries have no override
-                if ov then
+                if ov and _captureMatchesSeed(ov, entry) then
+                    merged[entry.itemID] = entry   -- the capture agrees: share the seed ref
+                elseif ov then
                     local m = {}
                     for k, v in pairs(entry) do m[k] = v end
                     m.profession = _canonProfession(ov.profession)
@@ -108,15 +127,30 @@ Selectors:Register("recipes.db", {
 -- reads both identically; the seed's name carries over when known (PowerCrafter
 -- falls back to slot.name/itemID otherwise). Keyed by output itemID -- same as
 -- ProfessionsDB, so queue recipeIDs (crafted-decor itemIDs) index directly.
+-- Seed records decode on first lookup and stay in the graph: readers only ever
+-- index it (a queued recipe and the reagents under it), and decoding all ~1,600
+-- up front was most of a first Recipes visit (3.5 MB, 2026-10-20 profile).
+local function _seedRecord(graph, itemID)
+    local rec = HDG.StaticData.Professions:Get(itemID)  -- exception(nullable): gathered and vendor reagents have no producer
+    if rec then rawset(graph, itemID, rec) end
+    return rec
+end
+local SEED_GRAPH_META = { __index = _seedRecord }
+
+-- What a captured record keeps of the one it replaces: an earlier overlay's
+-- record, else the seed's header (no slots decoded).
+local function _priorFields(graph, itemID)
+    local prior = rawget(graph, itemID)  -- exception(nullable): only a sub-recipe capture lands first
+    if prior then return prior.name, prior.categoryName, prior.outputQtyMin end
+    return HDG.StaticData.Professions:GetHeader(itemID)
+end
+
 Selectors:Register("recipes.craftGraph", {
     reads    = { "account.recipeCapture", "account.subRecipeCapture",
-                 "session.resolvers.staticData.tick" },  -- staticData.tick: ADR-003c GetAll facade contract
+                 "session.resolvers.staticData.tick" },  -- staticData.tick: ADR-003c facade contract
     memoized = true,
     fn = function(state)
-        local graph = {}
-        for itemID, entry in pairs(HDG.StaticData.Professions:GetAll()) do
-            graph[itemID] = entry   -- seed fallback: share the ref
-        end
+        local graph = setmetatable({}, SEED_GRAPH_META)
         local function overlay(store)
             for itemID, rec in pairs(store) do
                 -- Sort by itemID. rec.reagents is an {id=qty} MAP, and pairs() order is
@@ -130,17 +164,18 @@ Selectors:Register("recipes.craftGraph", {
                     slots[#slots + 1] = { type = "basic", qty = qty, itemID = rid }
                 end
                 table.sort(slots, function(a, b) return a.itemID < b.itemID end)
-                local seed = graph[itemID]  -- exception(nullable): captured recipe may be absent from seed
+                -- All nil when the seed does not ship the captured recipe.
+                local seedName, seedCategory, seedOutput = _priorFields(graph, itemID)
                 graph[itemID] = {
                     itemID       = itemID,
                     recipeID     = rec.spellID,
                     profession   = rec.profession,
-                    categoryName = rec.categoryName or (seed and seed.categoryName),
-                    name         = seed and seed.name,
+                    categoryName = rec.categoryName or seedCategory,
+                    name         = seedName,
                     slots        = slots,
                     -- Per-craft yield PowerCrafter divides demand by. Capture first; the
                     -- seed's value when the record was scanned before the field existed.
-                    outputQtyMin = rec.outputQtyMin or (seed and seed.outputQtyMin),  -- exception(optional): sparse -- only multi-output recipes carry it
+                    outputQtyMin = rec.outputQtyMin or seedOutput,  -- exception(optional): sparse -- only multi-output recipes carry it
                 }
             end
         end
@@ -282,7 +317,7 @@ Selectors:Register("warehouse.usedInTitle", {
 -- ===== Warehouse view selectors ==========================================
 -- ============================================================================
 
--- buildLumberRequiredMap: walk HDGR_ProfessionsDB, accumulate lumber needed
+-- buildLumberRequiredMap: walk recipes.db (DecorDB reagents), accumulate lumber needed
 -- across recipes whose produced decor isn't owned. Not cached (COLLECTION_ITEM_LEARNED
 -- mutates ownedDecorIDs in-place, so pointer-equality cache misses real ownership
 -- changes). Sub-ms in Lua; selector memo de-dupes within a dispatch cycle.
@@ -1107,6 +1142,11 @@ end
 
 -- groupedRows: profession-grouped (all/known) or bucket-grouped (ready).
 -- All rows carry craftableState for the right-edge star.
+-- A recipe row holds what this projection adds (kind, craftableState, groupLabel,
+-- readiness) and reads the recipe's own fields from its allRecipes row, which is
+-- memoized and shared: a copy of those nine fields per row was most of this
+-- selector (~350 KB a call, 2026-10-20 profile).
+local GROUPED_ROW_META = { __index = function(row, key) return row._recipe[key] end }
 Selectors:Register("recipes.groupedRows", {
     memoized = true,  -- perf: sort/group over ~1050 filtered recipes
     -- selectedRecipeID retired: selection owned by SelectionBehaviorMixin;
@@ -1146,21 +1186,13 @@ Selectors:Register("recipes.groupedRows", {
             pre = kept
         end
 
+        -- isSelected retired: SelectionBehavior stamps ed.selected (on the withQty row).
         local function makeRow(r)
-            return {
-                kind             = "recipeRow",
-                recipeID         = r.recipeID,
-                itemID           = r.itemID,
-                name             = r.name,
-                profession       = r.profession,
-                expansion        = r.expansion,
-                expansionShort   = r.expansionShort,
-                icon             = r.icon,
-                isKnown          = r.isKnown,
-                isDecorCollected = r.isDecorCollected,
-                -- isSelected retired: SelectionBehavior stamps ed.selected.
-                craftableState   = craftableState(r.itemID),
-            }
+            return setmetatable({
+                _recipe        = r,
+                kind           = "recipeRow",
+                craftableState = craftableState(r.itemID),
+            }, GROUPED_ROW_META)
         end
 
         if listFilter == "ready" then
@@ -1240,9 +1272,14 @@ Selectors:Register("recipes.queuedQtyMap", {
 })
 
 -- groupedRows.withQty: groupedRows + queuedQty stamped (drives +/- steppers).
--- Shallow-copies recipe rows (Iron Invariant: pure selectors). Headers pass through.
+-- Never writes the grouped rows (Iron Invariant: pure selectors). Headers pass through.
+-- A list row holds the queued count and what the list writes (selected), and reads
+-- the rest from its grouped row: those are memoized and shared, and a full copy of
+-- each (~1,050 rows) was up to 0.7 MB a call (2026-10-20 profile).
+local QTY_ROW_META = { __index = function(row, key) return row._row[key] end }
+
 Selectors:Register("recipes.groupedRows.withQty", {
-    memoized = true,  -- perf: shallow-copies ~1050 rows; skips re-copy when queue/grouped unchanged
+    memoized = true,  -- perf: wraps ~1050 rows; skips re-wrap when queue/grouped unchanged
     calls = {"recipes.groupedRows", "recipes.queuedQtyMap"},
     fn = function(state, ctx)
         local rows = Selectors:Call("recipes.groupedRows",  state, ctx)
@@ -1250,10 +1287,7 @@ Selectors:Register("recipes.groupedRows.withQty", {
         local out  = {}
         for i, r in ipairs(rows) do
             if r.kind == "recipeRow" then
-                local c = {}
-                for k, v in pairs(r) do c[k] = v end
-                c.queuedQty = qty[r.recipeID] or 0
-                out[i] = c
+                out[i] = setmetatable({ _row = r, queuedQty = qty[r.recipeID] or 0 }, QTY_ROW_META)
             else
                 out[i] = r
             end
@@ -1395,13 +1429,11 @@ end
 -- Assigned to forward-declared upvalue so filteredRecipes' reagent-search path
 -- binds to the same fn. sourceCategory: "Vendor:1234", "Gathering", "Crafted", etc.
 reagentInfo = function(itemID)
-    local db = HDG.StaticData.Reagents:GetAll()
-    local row = db and db[itemID]
-    if row then
-        local source = row[1] or "Other"
+    local source, baked = HDG.StaticData.Reagents:Get(itemID)
+    if source then
         local clean = source:match("^([^:]+)") or source   -- strip ":price" suffix
-        -- Name via resolver (locale-correct); baked row[2] is its cold-load placeholder.
-        return _localName(itemID, row[2]), clean
+        -- Name via resolver (locale-correct); the baked name is its cold-load placeholder.
+        return _localName(itemID, baked), clean
     end
     return _localName(itemID, nil), "Other"
 end

@@ -529,14 +529,12 @@ function LC:Wire(rootFrame)
     -- Stash for enable/disable in Refresh (frame lookup via rootFrame.widgets).
     _deleteBtn = HDG.UI.W(rootFrame, "projectsLayoutsDetailPanel.deleteBtn")
     -- Dynamic tooltip: the effect when deletable, the reason when not (live version).
-    if _deleteBtn then
-        HDG.TooltipEngine:Attach(_deleteBtn, function(self)
-            if self:IsEnabled() then
-                return { title = "Delete", body = "Delete this what-if layout. This can't be undone." }
-            end
-            return { title = "Cannot delete the live version -- duplicate it first" }
-        end)
-    end
+    HDG.TooltipEngine:Attach(_deleteBtn, function(self)
+        if self:IsEnabled() then
+            return { title = "Delete", body = "Delete this what-if layout. This can't be undone." }
+        end
+        return { title = "Cannot delete the live version -- duplicate it first" }
+    end)
 
     self:_RegisterPopups()
 end
@@ -564,12 +562,9 @@ function LC:Refresh(_rootFrame, _ctx)
     _ensureSelection()
 
     -- Enable/disable the Delete button based on whether the selected version is live.
-    if _deleteBtn and _deleteBtn.SetEnabled then
-        local state  = HDG.Store:GetState()  -- exception(false-positive): top-level controller helper, not a row factory
-        local detail = HDG.Selectors:Call("projects.layoutDetail", state, {})
-        local canDel = detail.hasSelection and detail.canDelete
-        _deleteBtn:SetEnabled(canDel and true or false)
-    end
+    local state  = HDG.Store:GetState()  -- exception(false-positive): top-level controller helper, not a row factory
+    local detail = HDG.Selectors:Call("projects.layoutDetail", state, {})
+    _deleteBtn:SetEnabled((detail.hasSelection and detail.canDelete) and true or false)
 
     -- All other rendering flows through bindings:
     --   projects.layoutListRows  -> projectsLayoutsListPanel.list (scrollbox)

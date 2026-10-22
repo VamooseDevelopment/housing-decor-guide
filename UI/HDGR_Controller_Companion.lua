@@ -207,12 +207,10 @@ function CompanionController:Wire(rootFrame)
         HDG.Store:Dispatch({ type = A.COMPANION_TOGGLE_COST, payload = {} })
     end)
     local costBtn = HDG.UI.W(rootFrame, "companionPanel.costToggle")
-    if costBtn then
-        HDG.TooltipEngine:Attach(costBtn, function()
-            local showing = HDG.Store:GetState().session.ui.companion.showCost  -- exception(false-positive): tooltip callback, not a row factory
-            return { title = showing and "Hide placement cost" or "Show placement cost" }
-        end)
-    end
+    HDG.TooltipEngine:Attach(costBtn, function()
+        local showing = HDG.Store:GetState().session.ui.companion.showCost  -- exception(false-positive): tooltip callback, not a row factory
+        return { title = showing and "Hide placement cost" or "Show placement cost" }
+    end)
 
     -- Indoor/Outdoor 3-state cycle (all -> indoor -> outdoor -> all).
     HDG.UI.OnClick(rootFrame, "companionPanel.ioToggle", function()

@@ -22,7 +22,7 @@ local LC = HDG.LayoutConfig
 -- ===== View =================================================================
 
 LC.window.views.zoneScanner = {
-    explicit    = true,
+    controllers = { "zoneScanner" },
     standalone  = true,
     width       = "auto",
     height      = "auto",

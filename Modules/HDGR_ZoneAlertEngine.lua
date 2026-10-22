@@ -51,6 +51,7 @@ HDG.Modules:Declare({
     dependencies = { "ZoneObserver" },
     -- Subscribes to Store, not Blizzard events. No namespace ownership.
     onEnable = function(self)
+        Z._loadAfter = _G.GetTime() + HDG.Constants.ZONE_ALERT_LOGIN_DELAY
         self._storeToken = HDG.Store:Subscribe(function(actionType)
             if actionType == HDG.Constants.ACTIONS.ZONE_CHANGED then
                 Z._alertedThisZone = false   -- new zone entry -> allow one alert
@@ -72,6 +73,24 @@ HDG.Modules:Declare({
     end,
 })
 
+-- The zone alert's catalog load, held until ZONE_ALERT_LOGIN_DELAY after login.
+-- Inside the wait it books one timer, which runs the whole check again: by then
+-- the player may have left the vendor zone, switched alerts off, or opened HDG
+-- (which loads the catalog itself), and each of those is judged afresh.
+function Z:_LoadCatalogAfterLogin()
+    local wait = Z._loadAfter - _G.GetTime()
+    if wait <= 0 then
+        HDG.HousingCatalogObserver:RequestLoad("zone-alert")
+        return
+    end
+    if Z._loadTimerBooked then return end
+    Z._loadTimerBooked = true
+    _G.C_Timer.After(wait, function()
+        Z._loadTimerBooked = false
+        Z:CheckAlerts()
+    end)
+end
+
 -- Run all alert checks against the current state. Called from the Store
 -- subscriber after ZONE_CHANGED lands -- by then session.zone.currentMapID
 -- and session.ui.zoneScanner.expanded have been updated by the reducer.
@@ -86,17 +105,20 @@ function Z:CheckAlerts()
     -- popup-show. boundary -- single Blizzard API call in this module.
     local inCombat = _G.InCombatLockdown and _G.InCombatLockdown() or false
 
-    -- A COLD CATALOG STAYS COLD. Nothing here may sweep it: the catalog loads
-    -- when a feature asks (window open, merchant, decor tooltip) and never at
-    -- login -- ADR-043, owner ruling 2026-07-11. ZoneObserver dispatches
-    -- ZONE_CHANGED from PLAYER_ENTERING_WORLD and zone alerts default on, so
-    -- from 2026-07-17 (a self-warm added so a fresh login could alert at once)
-    -- until 3.31.1 EVERY character login ran the full sweep in one frame:
-    -- /hdgr perf, 2026-09-03 -- catalog.indexSweep (2045 entries) 3297 ms,
-    -- requestedBy=zoneScanner; themindboggle's 3-4 s login freeze.
-    -- Bail WITHOUT marking: the DECOR_CATALOG_READY re-check fires this zone's
-    -- alert the moment the catalog does load.
-    if not HDG.HousingCatalogObserver:IsReady() then return end
+    -- A cold catalog loads here only where decor vendors stand (owner ruling
+    -- 2026-10-22). Until then a login never loaded it -- 3.31.1 took out the
+    -- July self-warm because every character login swept in one frame, 3297 ms
+    -- (/hdgr perf 2026-09-03, themindboggle's 3-4 s freeze) -- so a player who
+    -- logged in at a vendor saw no alert and an empty Zone Scanner until HDG
+    -- opened. The sweep is ~97 ms now (2026-10-22), and a zone with no decor
+    -- vendor still never loads the catalog (~6 MB kept). Bail WITHOUT marking:
+    -- the DECOR_CATALOG_READY re-check fires this zone's alert when it lands.
+    if not HDG.HousingCatalogObserver:IsReady() then
+        if HDG.StaticData.VendorAugment:GetVendorsByMap(state.session.zone.currentMapID) then  -- exception(nullable): most maps have no decor vendor
+            Z:_LoadCatalogAfterLogin()
+        end
+        return
+    end
     local hasUnc  = HDG.Selectors:Call("zone.hasUncollectedItems", state, {})
     local hasSL   = HDG.Selectors:Call("zone.hasShoppingListItems", state, {})
     -- Catalog swept but zone has nothing -- bail WITHOUT marking, so a

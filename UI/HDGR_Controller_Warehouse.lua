@@ -278,9 +278,7 @@ HDG.Rows:Register("usedInRow", {
 -- ===== Wire =================================================================
 
 function WarehouseController:Wire(rootFrame)
-    -- Bail early if warehouse widgets are absent (other standalone frames).
     local matsList = HDG.UI.W(rootFrame, "warehouseMaterialsPanel.list")
-    if not matsList then return end
 
     -- All-materials selection sync. warehouse.allMaterialsRows drops the
     -- selection read so clicks don't rebuild the list.

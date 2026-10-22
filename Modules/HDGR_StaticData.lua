@@ -13,11 +13,13 @@
 --   HDGR_VendorAugment         -> VendorAugment:Get / ResolveName / GetVendorsByMap
 --   HDGR_ItemAugment           -> ItemAugment:Get  (sparse; rep gates + sourceType)
 --   HDGR_DecorDB               -> Recipes:Get / GetAll  (recipe-backed subset)
---   HDGR_ProfessionsDB         -> Professions:GetRecipe / GetAll
+--   HDGR_ProfessionsDB         -> Professions:VisitAll  (packed; decoded on read)
+--   HDGR_ProfessionQualityGroups -> Professions:GetQualityVariants
 --   HDGR_ProfessionThresholds  -> Professions:GetThresholds
 --   HDGR_ReagentsDB            -> Reagents:Get / GetAll
 --   HDGR_FacetDB               -> Facets:Get / GetAll
 --   HDGR_FacetVocab            -> Facets:GetVocab
+--   HDGR_FacetAxes             -> Facets:GetAxes
 --   HDGR_PetSizeDB             -> PetSizes:Get  (sparse; nil = never measured)
 --   HDGR_StyleDefinitions      -> Styles:GetDefinitions
 --   HDGR_CollectionDefinitions -> Collections:GetDefinitions
@@ -50,8 +52,10 @@ end
 -- ============================================================================
 ---@class HDG.StaticData.VendorAugment
 S.VendorAugment = S.VendorAugment or {}
-S.VendorAugment._byName = nil    -- built at OnInitialize
-S.VendorAugment._byMapID = nil   -- built at OnInitialize
+-- Built on first use (_EnsureIndexes), not at login: the first reader is the catalog
+-- sweep on the first Decor open.
+S.VendorAugment._byName = nil
+S.VendorAugment._byMapID = nil
 
 function S.VendorAugment:Get(npcID)
     local t = _table("HDGR_VendorAugment")  -- exception(boundary): _table fails loud if HDGR_VendorAugment DB missing
@@ -143,10 +147,6 @@ S.CatalogOverrides = S.CatalogOverrides or {}
 function S.CatalogOverrides:Get(itemID)
     local t = _table("HDGR_CatalogOverrides")
     return t[itemID]
-end
-
-function S:OnInitialize()
-    S.VendorAugment:_EnsureIndexes()
 end
 
 -- ============================================================================
@@ -266,78 +266,100 @@ function S.Recipes:VisitReagents(entry, visitor)
 end
 
 -- ============================================================================
--- Professions  (HDGR_ProfessionsDB by recipeID + HDGR_ProfessionThresholds)
+-- Professions  (HDGR_ProfessionsDB by itemID + HDGR_ProfessionQualityGroups +
+--               HDGR_ProfessionThresholds)
 -- ============================================================================
 
 ---@class HDG.StaticData.Professions
 S.Professions = S.Professions or {}
 
-function S.Professions:GetAll()
-    return _table("HDGR_ProfessionsDB")
+-- Each recipe ships as one string (build_pruned_professions.lua; as tables they
+-- held 1.7 MB from login, memory plan 2026-10-19 S2):
+--   name^recipeID^categoryName^outputQtyMin^slot~slot~...
+--   slot = kind,qty,itemID[,name]     kind: b = basic, f = finishing, m = modifying
+-- The key is the itemID; an absent field is empty. Decoded records are cached
+-- weakly: the craft graph holds the ones in use, and the rest go back to the
+-- collector.
+local SLOT_TYPE = { b = "basic", f = "finishing", m = "modifying" }
+local _records, _recordsSource
+
+local function _decodeSlot(text)
+    local kind, qty, itemID, name = text:match("^(%a),(%d+),(%d+),?(.*)$")
+    return { type = SLOT_TYPE[kind], qty = tonumber(qty), itemID = tonumber(itemID),
+             name = name ~= "" and name or nil }
+end
+
+local function _decodeRecord(itemID, packed)
+    local name, recipeID, categoryName, outputQtyMin, slotText =
+        packed:match("^([^^]*)%^(%d+)%^([^^]*)%^(%d*)%^(.*)$")
+    assert(name, "HDG.StaticData: malformed HDGR_ProfessionsDB record " .. tostring(itemID))
+    local slots = {}
+    for text in slotText:gmatch("[^~]+") do slots[#slots + 1] = _decodeSlot(text) end
+    return { name = name, recipeID = tonumber(recipeID), itemID = itemID,
+             categoryName = categoryName ~= "" and categoryName or nil,
+             outputQtyMin = tonumber(outputQtyMin), slots = slots }
+end
+
+-- The decoded record for one packed entry. The cache follows the table so a
+-- swapped global (tests) never serves the old one's records.
+local function _record(db, itemID, packed)
+    if _recordsSource ~= db then
+        _records, _recordsSource = setmetatable({}, { __mode = "v" }), db
+    end
+    local rec = _records[itemID]
+    if not rec then
+        rec = _decodeRecord(itemID, packed)
+        _records[itemID] = rec
+    end
+    return rec
+end
+
+-- visitor(itemID, record) for every recipe, decoded; returning truthy stops the walk.
+function S.Professions:VisitAll(visitor)
+    local db = _table("HDGR_ProfessionsDB")
+    for itemID, packed in pairs(db) do
+        if visitor(itemID, _record(db, itemID, packed)) then return end
+    end
+end
+
+-- The decoded recipe that makes itemID, or nil when nothing in the seed does.
+function S.Professions:Get(itemID)
+    local db = _table("HDGR_ProfessionsDB")
+    local packed = db[itemID]  -- exception(nullable): gathered and vendor reagents have no recipe
+    if not packed then return nil end
+    return _record(db, itemID, packed)
+end
+
+-- name, categoryName, outputQtyMin of the recipe that makes itemID, read off its
+-- packed string without decoding the slots; nothing when the seed has no recipe.
+-- The craft graph's capture overlay wants only these from the record it replaces.
+function S.Professions:GetHeader(itemID)
+    local packed = _table("HDGR_ProfessionsDB")[itemID]  -- exception(nullable): a captured recipe the seed does not ship
+    if not packed then return nil end
+    local name, categoryName, outputQtyMin = packed:match("^([^^]*)%^%d+%^([^^]*)%^(%d*)%^")
+    assert(name, "HDG.StaticData: malformed HDGR_ProfessionsDB record " .. tostring(itemID))
+    return name, categoryName ~= "" and categoryName or nil, tonumber(outputQtyMin)
 end
 
 function S.Professions:GetThresholds()
     return _table("HDGR_ProfessionThresholds")
 end
 
--- Quality-variant groups: tiered reagents have separate itemIDs per quality
--- tier; `slot.variants` lists the siblings. Reverse map lets material counting
--- sum across the whole quality group (any quality satisfies the slot).
--- Returns { otherSiblingID, ... } or nil. Lazily built; rebuilt when the
--- source table identity changes.
-local _qvCache, _qvSource
-
--- Sibling list for group[i]: every other id in the quality group.
-local function _buildSiblings(group, i)
-    local others = {}
-    for j, other in ipairs(group) do
-        if j ~= i then others[#others + 1] = other end
-    end
-    return others
-end
-
--- Index one variant-bearing slot into _qvCache: each member of the quality
--- group maps to its sibling list.
-local function _indexVariantSlot(slot)
-    local group = { slot.itemID }
-    for _, v in ipairs(slot.variants) do group[#group + 1] = v end
-    for i, id in ipairs(group) do
-        local others = _buildSiblings(group, i)
-        -- A reagent can appear in slots listing partial sibling sets;
-        -- keep the largest group seen.
-        if not _qvCache[id] or #others > #_qvCache[id] then
-            _qvCache[id] = others
-        end
-    end
-end
-
-local function _ensureQualityVariants()
-    local db = _table("HDGR_ProfessionsDB")
-    if _qvSource == db then return end
-    _qvCache, _qvSource = {}, db
-    for _, recipe in pairs(db) do
-        if recipe.slots then
-            for _, slot in ipairs(recipe.slots) do
-                if slot.itemID and slot.variants and #slot.variants > 0 then
-                    _indexVariantSlot(slot)
-                end
-            end
-        end
-    end
-end
-
+-- Quality siblings: tiered reagents have separate itemIDs per quality tier, and
+-- any tier satisfies a slot, so material counting sums the whole group. Returns
+-- { otherSiblingID, ... } or nil. The seed's groups are precomputed by the
+-- generator (HDGR_ProfessionQualityGroups): bag counting asks at login, and
+-- deriving them from the recipes would decode every one.
 function S.Professions:GetQualityVariants(itemID)
     if not itemID then return nil end
     -- Captured quality groups win: the profession-book scan records the LIVE tier
     -- siblings (account.reagentVariants), covering new 12.1 tiered reagents the
-    -- seed's frozen slot.variants can't know. ANY tier satisfies a slot, so bag
-    -- counting must sum the whole group. DELIBERATE ADR-003c deviation: this one
+    -- seed's frozen groups can't know. DELIBERATE ADR-003c deviation: this one
     -- accessor reads live Store state, so the facade is no longer "immutable within
     -- a session" here (addendum in HDGR_ARCHITECTURE.md; all four consumers are modules).
     local captured = HDG.Store:GetState().account.reagentVariants[itemID]  -- exception(nullable): most reagents aren't tiered
     if captured then return captured end
-    _ensureQualityVariants()
-    return _qvCache[itemID]
+    return _table("HDGR_ProfessionQualityGroups")[itemID]  -- exception(nullable): most reagents aren't tiered
 end
 
 -- Walk basic-typed slots on a recipe. visitor(slot) called per slot;
@@ -358,11 +380,18 @@ end
 ---@class HDG.StaticData.Reagents
 S.Reagents = S.Reagents or {}
 
+-- source, name for a reagent, or nil. source is "Gathering", "Crafted", "Drop",
+-- "Vendor" or "Vendor:<copper>"; name is the baked English placeholder. Each entry
+-- ships as one "source|name" string (build_reagents.lua; as two-field tables they
+-- held ~0.75 MB, memory census 2026-10-19).
 function S.Reagents:Get(itemID)
     if not itemID then return nil end
-    return _table("HDGR_ReagentsDB")[itemID]
+    local packed = _table("HDGR_ReagentsDB")[itemID]  -- exception(nullable): not every item is a reagent
+    if not packed then return nil end
+    return packed:match("^([^|]*)|(.*)$")
 end
 
+-- Every reagent itemID as the keys; read an entry through Get, never the value.
 function S.Reagents:GetAll()
     return _table("HDGR_ReagentsDB")
 end
@@ -374,6 +403,7 @@ end
 ---@class HDG.StaticData.Facets
 S.Facets = S.Facets or {}
 
+-- A record is a byte string, laid out by HDGR_FacetAxes (see GetAxes).
 function S.Facets:Get(itemID)
     if not itemID then return nil end
     return _table("HDGR_FacetDB")[itemID]
@@ -385,6 +415,13 @@ end
 
 function S.Facets:GetVocab()
     return _table("HDGR_FacetVocab")
+end
+
+-- Axis names in record slot order. In a record, byte k is where axis k's tags
+-- start and byte k+1 where they end (exclusive); each tag is one byte, its index
+-- in GetVocab()[axis]. Layout written by housingdecorguide-tools/facetdb/export_facetdb.py.
+function S.Facets:GetAxes()
+    return _table("HDGR_FacetAxes")
 end
 
 -- ============================================================================
@@ -507,15 +544,27 @@ function S.Schemes:Get(name)
 end
 
 -- ============================================================================
--- PetFacts  (HDGR_PetTaxonomyDB / PetVoiceDB / PetAnimDB / PetSceneDecorDB / PetSizeDB)
+-- PetFacts  (HDGR_PetTaxonomyDB / PetVoiceDB / PetAnimDB / PetSceneDecorDB / PetSizeDB / PetCantAttachDB)
 -- ============================================================================
 -- The Menagerie's data facade (HDGR_MENAGERIE_LATTICE_PLAN_2026-08-24 section 1). The
 -- raw _G.HDGR_Pet*DB tables are read NOWHERE else; reverse indexes (kind counts,
 -- clade counts, voice sharing) build lazily once and rebuild only if the DB
 -- table reference changes (test seam -- same idiom as Recipes above).
+--
+-- Records the Menagerie reads one pet at a time (anim profiles, voices, scene
+-- rows) ship as strings and are decoded here on each call, into a fresh table the
+-- caller may keep. As nested tables the pet DBs held 4.6 MB (memory census
+-- 2026-10-19). Formats: vpp-tools/export_pet_lua.py and build_sizedb.py.
 
 ---@class HDG.StaticData.PetFacts
 S.PetFacts = S.PetFacts or {}
+
+-- "a,b,c" -> { a, b, c } as numbers; "" -> {}.
+local function _numberList(s)
+    local out = {}
+    for n in s:gmatch("[^,]+") do out[#out + 1] = tonumber(n) end
+    return out
+end
 
 local _pfKinds, _pfClades, _pfVoiceShare, _pfSource
 
@@ -533,8 +582,8 @@ local function _ensurePetIndexes()
         k.count = k.count + 1
         _pfClades[clade] = (_pfClades[clade] or 0) + 1
     end
-    for _, e in pairs(_table("HDGR_PetVoiceDB").species) do
-        _pfVoiceShare[e.v] = (_pfVoiceShare[e.v] or 0) + 1
+    for _, voice in pairs(_table("HDGR_PetVoiceDB").species) do
+        _pfVoiceShare[voice] = (_pfVoiceShare[voice] or 0) + 1
     end
     _pfSource = db
 end
@@ -547,57 +596,85 @@ function S.PetFacts:Taxonomy(speciesID)
     return row[1], row[2]
 end
 
+-- Whether a species can ride decor, from DB2 BattlePetSpecies.Flags
+-- (CANT_ATTACH_TO_DECOR). The API carries it only on the 20-field pet info
+-- table, and reading that once per owned species cost 6.4 MB a first Menagerie
+-- visit; the flag matched the API on all 2,999 live species (/petflag,
+-- 2026-10-21). nil = a species newer than the data build: ask the game.
+function S.PetFacts:CanAttachToDecor(speciesID)
+    local db = _table("HDGR_PetCantAttachDB")
+    if speciesID > db.maxSpeciesID then return nil end
+    return not db.species[speciesID]
+end
+
 -- nil = no idle sound recorded (NOT proven-silent; see build_pet_sound.py header).
 function S.PetFacts:Voice(speciesID)
-    local e = _table("HDGR_PetVoiceDB").species[speciesID]  -- exception(nullable): absence means quiet
-    if not e then return nil end
+    local db = _table("HDGR_PetVoiceDB")
+    local voice = db.species[speciesID]  -- exception(nullable): absence means quiet
+    if not voice then return nil end
     _ensurePetIndexes()
-    local v = _table("HDGR_PetVoiceDB").voices[e.v]
+    local kits, durs = db.voices[voice]:match("^([^|]*)|([^|]*)$")
+    local delay = db.delays[speciesID]  -- exception(nullable): only a few voices carry a fidget delay
     -- `word` is deliberately NOT exposed. The DB carries it (the CASC folder
     -- stem the kits came from) but it is a build identifier, not English -- it
     -- reads as "bloodfangwidowspider" as often as "crab", and the UI shipped it
     -- raw once already. Anything that wants to name a voice needs a curated
     -- vocabulary first; the facade not offering it keeps that decision here.
-    return { kits = v.kits, durs = v.durs, index = e.v,
-             delayMin = e.d1, delayMax = e.d2,
-             sharedWith = _pfVoiceShare[e.v] - 1 }
+    return { kits = _numberList(kits), durs = durs ~= "" and _numberList(durs) or nil, index = voice,
+             delayMin = delay and delay[1], delayMax = delay and delay[2],
+             sharedWith = _pfVoiceShare[voice] - 1 }
 end
 
 -- The model's behaviour record: { idle = {{animID, variation, pct, ms},...},
 -- also = {animID,...}, glow = {lights, particles, additive}, labels? }.
--- SHARED reference -- callers read, never mutate. nil = model unparsed (6 of 967).
+-- Decoded per call. nil = model unparsed (6 of 967).
 function S.PetFacts:AnimProfile(speciesID)
     local db = _table("HDGR_PetAnimDB")
     local fdid = db.species[speciesID]  -- exception(nullable): species without a model join
     if not fdid then return nil end
-    local m = db.models[fdid]           -- exception(nullable): parseError models are not emitted
-    return m
+    local packed = db.models[fdid]      -- exception(nullable): parseError models are not emitted
+    if not packed then return nil end
+    local idleS, alsoS, glowS = packed:match("^([^|]*)|([^|]*)|([^|]*)$")
+    local idle = {}
+    for var, pct, ms in idleS:gmatch("(%d+):(%d+):(%d+)") do
+        idle[#idle + 1] = { 0, tonumber(var), tonumber(pct), tonumber(ms) }
+    end
+    return { idle = idle, also = _numberList(alsoS), glow = _numberList(glowS),
+             labels = db.labels[fdid] }   -- exception(nullable): most models carry no curated labels
 end
 
 function S.PetFacts:Height(speciesID)
     return _table("HDGR_PetSizeDB")[speciesID]  -- exception(nullable): PetSizeDB miss for a post-build species
 end
 
+-- actorScale, seatLift, girth for a species, or nothing for an unmeasured mesh.
+local function _sceneRow(speciesID)
+    local row = _table("HDGR_PetSceneScaleDB")[speciesID]  -- exception(nullable): unmeasured mesh
+    if not row then return end
+    local scale, lift, girth = row:match("^(%S+) (%S+) (%S+)$")
+    return tonumber(scale), tonumber(lift), tonumber(girth)
+end
+
 function S.PetFacts:SceneScale(speciesID)
     -- SizeDB height / vertex extent: a ModelScene actor renders the RAW vertex
     -- mesh (no DB2 scale factor applies), so this is what SetRequestedScale
     -- needs for the actor to render at the pet's true world height.
-    local row = _table("HDGR_PetSceneScaleDB")[speciesID]
-    return row and row[1] or 1.0  -- exception(optional): unmeasured mesh; emit convention
+    local scale = _sceneRow(speciesID)
+    return scale or 1.0  -- exception(optional): unmeasured mesh; emit convention
 end
 
 function S.PetFacts:SceneGirth(speciesID)
     -- Larger horizontal mesh span, world units: the camera frames on
     -- max(height, girth) so long bodies (snakes) are not cropped.
-    local row = _table("HDGR_PetSceneScaleDB")[speciesID]
-    return row and row[3] or 0  -- exception(optional): unmeasured mesh; emit convention
+    local _, _, girth = _sceneRow(speciesID)
+    return girth or 0  -- exception(optional): unmeasured mesh; emit convention
 end
 
 function S.PetFacts:SceneLift(speciesID)
     -- -meshLowestZ x sceneScale: added to the seat Z it drops a hovering
     -- mesh's bottom onto the seat (fliers are authored above their origin).
-    local row = _table("HDGR_PetSceneScaleDB")[speciesID]
-    return row and row[2] or 0  -- exception(optional): unmeasured mesh; emit convention
+    local _, lift = _sceneRow(speciesID)
+    return lift or 0  -- exception(optional): unmeasured mesh; emit convention
 end
 
 function S.PetFacts:KindIndex()

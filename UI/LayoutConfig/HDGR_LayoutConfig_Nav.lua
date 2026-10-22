@@ -11,7 +11,7 @@ local NAV_WIDTH = LC.NAV_WIDTH   -- 150
 -- ===== View ==================================================================
 -- height=100 is a placeholder; the `left` slot spans frameH at compose time.
 LC.window.views.nav = {
-    explicit   = true,
+    controllers = { "nav" },
     standalone = true,
     width      = NAV_WIDTH,
     height     = 100,            -- placeholder; left slot spans frameH to body height

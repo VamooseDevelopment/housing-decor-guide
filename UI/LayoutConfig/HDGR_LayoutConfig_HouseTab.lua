@@ -16,7 +16,7 @@ local LC = HDG.LayoutConfig
 -- (visible-bound panel alone doesn't shrink the window -- colSpan=2 chrome keeps it live).
 
 LC.window.views.houseTab = {
-    explicit       = true,
+    controllers = { "houseTab" },
     width          = "auto",
     height         = "auto",
     columns        = { 900 },              -- fallback; the dynamic selector takes over at layout time

@@ -12,7 +12,7 @@ local LC = HDG.LayoutConfig
 -- ===== View ==================================================================
 
 LC.window.views.alts = {
-    explicit = true,
+    controllers = { "alts" },
     width    = "auto",       -- 4 + 600 + 4 = 608
     height   = "auto",       -- chrome + status now come from the window's slots
     columns  = { 600 },

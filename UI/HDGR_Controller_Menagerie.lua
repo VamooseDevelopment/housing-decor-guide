@@ -217,7 +217,7 @@ local function _layoutMenagerieRow(row)
 end
 
 local function _paintMenagerieRow(row, ed)
-    row._nameFs:SetText(ed.name)
+    row._nameFs:SetText(ed.displayName)
     -- Under the Room axis the row says how well it fits BEFORE what it is: that
     -- is the question the room asked. Every other axis shows the kind alone.
     row._kindFs:SetText(ed.fit and (ed.fit .. "  " .. ed.kindLabel) or ed.kindLabel)

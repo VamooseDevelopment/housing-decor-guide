@@ -9,7 +9,7 @@ local LC = HDG.LayoutConfig
 
 -- Master-detail: left browser 280 | right inspector 560.
 LC.window.views.projectsBlueprints = {
-    explicit = true,
+    controllers = { "blueprints" },
     width    = "auto",
     height   = "auto",
     columns  = { 280, 560 },

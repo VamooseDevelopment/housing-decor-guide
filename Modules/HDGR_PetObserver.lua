@@ -13,6 +13,7 @@
 --   :GetAttachable()          -> array of entries, height-ascending
 --   :GetFamilies()            -> localized family names, indexed by petType
 --   :GetBySpecies(speciesID)  -> one entry, or nil
+--   :DisplayID(speciesID)     -> the exemplar's creature display, or nil
 --   :Resolve(speciesID)       -> modelPreview info table, or nil
 --
 -- ============================================================================
@@ -47,32 +48,86 @@ P._pending    = false
 P._dirty      = true    -- the index is rebuilt on the first read after a journal change, not on the event
 P._summonedGUID = nil
 
--- One owned pet -> index entry, or nil when it cannot ride decor.
-local function _entryFor(petID)
+-- ===== Rebuild profiling ====================================================
+-- The first Menagerie visit allocated 6.4 MB inside menagerie.axisValues
+-- (profile 2026-10-20), and this rebuild was it: one 20-field pet info table
+-- per owned species, read for canAttachToDecor and dropped. One op per rebuild,
+-- one quiet row per pass; the passes partition it, and "~unlapped" is what they
+-- did not cover. The op holds the collector, so each row is true allocation.
+-- "infoTable" laps only the species newer than the data build, so its call
+-- count is how often the table is still read. One nil-check per lap with perf off.
+local REBUILD_STAGES = { "ownedIDs", "exemplars", "infoTable", "petInfo", "entry", "list", "families" }
+local _prof = nil   -- { ms = {stage=ms}, kb = {stage=KB}, n = {stage=count}, t, k } during a timed rebuild
+
+local function _lap(stage)
+    if not _prof then return end
+    local now, know = _G.debugprofilestop(), collectgarbage("count")
+    _prof.ms[stage] = (_prof.ms[stage] or 0) + (now - _prof.t)
+    _prof.kb[stage] = (_prof.kb[stage] or 0) + (know - _prof.k)
+    _prof.n[stage]  = (_prof.n[stage]  or 0) + 1
+    _prof.t, _prof.k = now, know
+end
+
+local function _reportRebuild(perf, t0, k0, owned, species, attachable)
+    local label = ("pets.rebuild (%d owned, %d species, %d attachable)"):format(owned, species, attachable)
+    local totalMs, totalKB = perf:RecordOp(label, t0, k0)
+    local lappedMs, lappedKB = 0, 0
+    for _, stage in ipairs(REBUILD_STAGES) do
+        local n = _prof.n[stage]
+        if n then
+            perf:RecordOpQuiet(("pets.rebuild.%s (%d calls)"):format(stage, n), _prof.ms[stage], _prof.kb[stage])
+            lappedMs, lappedKB = lappedMs + _prof.ms[stage], lappedKB + _prof.kb[stage]
+        end
+    end
+    perf:RecordOpQuiet("pets.rebuild.~unlapped", totalMs - lappedMs, totalKB - lappedKB)
+end
+
+-- Can this species ride decor? The data build answers for every species it
+-- knew. A newer one asks the pet info table, the only API form carrying the
+-- flag: 20 fields, ~1.9 KB a call, which is what the whole rebuild used to pay
+-- per species.
+local function _canAttach(speciesID, petID)
+    local can = HDG.StaticData.PetFacts:CanAttachToDecor(speciesID)
+    if can ~= nil then return can end
     local info = _G.C_PetJournal.GetPetInfoTableByPetID(petID)
-    if not info then return nil end   -- exception(boundary): journal miss on a GUID that just went stale
-    if not info.canAttachToDecor then return nil end
+    _lap("infoTable")
+    if not info then return false end   -- exception(boundary): journal miss on a GUID that just went stale
+    return info.canAttachToDecor
+end
+
+-- One species' exemplar -> index entry, or nil when it cannot ride decor. The
+-- multi-return read allocates no table, and gives every field the entry keeps
+-- (they matched the info table's on all 2,036 species of a full collection,
+-- /petflag 2026-10-21).
+--
+-- EIGHT fields, and it must stay at most eight: a table's fields are sized to a
+-- power of two, so a ninth doubles the entry (~1 KB -> ~0.5 KB at eight, over
+-- ~1,950 entries the index keeps all session). Only displayName is read of the
+-- names; the display ID is read for the one pet on screen (P:DisplayID).
+local function _entryFor(speciesID, petID)
+    if not _canAttach(speciesID, petID) then return nil end
+    local sp, customName, _, _, _, _, _, name, icon, petType = _G.C_PetJournal.GetPetInfoByPetID(petID)
+    _lap("petInfo")
+    if not sp then return nil end   -- exception(boundary): journal miss on a GUID that just went stale
+    -- Menagerie taxonomy baked at row build (_bakeSourceTypes for pets --
+    -- plan section 2): selectors strict-read these, no per-paint joins.
+    -- nil,nil = a species newer than the last data build; the card shows "?".
+    local kind, clade = HDG.StaticData.PetFacts:Taxonomy(speciesID)
     return {
         petID      = petID,
-        speciesID  = info.speciesID,
-        name       = info.name,
-        customName = info.customName,   -- exception(boundary): nil unless the player renamed it
+        speciesID  = speciesID,
         -- The name the player actually SEES, derived once. It is the list's sort
         -- key and its search key, and four call sites used to each re-derive it --
         -- one of them disagreeing would sort a renamed pet away from where the
-        -- eye looks for it.
-        displayName = info.customName or info.name,
-        icon       = info.icon,
-        petType    = info.petType,
-        displayID  = info.displayID,    -- exception(boundary): nil for a species with no display
+        -- eye looks for it. customName is nil unless the player renamed it.
+        displayName = customName or name,
+        icon       = icon,
+        petType    = petType,
         -- nil for a species that was never measured. NOT defaulted: see
         -- StaticData.PetSizes -- there is nothing honest to substitute.
-        height     = HDG.StaticData.PetSizes:Get(info.speciesID),
-        -- Menagerie taxonomy baked at row build (_bakeSourceTypes for pets --
-        -- plan section 2): selectors strict-read these, no per-paint joins.
-        -- nil,nil = a species newer than the last data build; the card shows "?".
-        kind       = HDG.StaticData.PetFacts:Taxonomy(info.speciesID),
-        clade      = select(2, HDG.StaticData.PetFacts:Taxonomy(info.speciesID)),
+        height     = HDG.StaticData.PetSizes:Get(speciesID),
+        kind       = kind,
+        clade      = clade,
     }
 end
 
@@ -114,7 +169,8 @@ end
 -- documented guarantee -- an order-dependent exemplar could change the displayed
 -- name between sessions when one copy is renamed and another is not.
 -- Rebuild the whole index. Wholesale is cheap enough: one GetOwnedPetIDs plus a
--- table read per pet, against a collection that tops out in the low thousands.
+-- multi-return read per pet and one more per species, against a collection that
+-- tops out in the low thousands.
 -- Runs lazily: PET_JOURNAL_LIST_UPDATE fires in bursts at every login, for every
 -- player, and used to rebuild the ~1 MB index each time whether or not the Pets
 -- or Menagerie views ever read it (2026-09-13 audit). A journal change now only
@@ -125,11 +181,17 @@ end
 
 function P:Rebuild()
     self._dirty = false
+    local perf = HDG.Perf
+    local t0, k0
+    if perf:Enabled() then
+        t0, k0 = perf:Open()
+        _prof = { ms = {}, kb = {}, n = {}, t = t0, k = k0 }
+    end
     local ids = _G.C_PetJournal.GetOwnedPetIDs() or {}  -- exception(boundary): nil before the journal populates
-    -- Pass 1: the exemplar per species (lowest petID) through the multi-return
-    -- read, which allocates no table. Pass 2 fetches the info TABLE -- the only
-    -- form that carries canAttachToDecor, ~3 KB a call -- for exemplars only,
-    -- never for a collector's second and third copies of a species.
+    _lap("ownedIDs")
+    -- Pass 1: the exemplar per species (lowest petID). Pass 2 builds the entry
+    -- for each exemplar that can ride decor, never for a collector's second and
+    -- third copies of a species.
     local exemplar = {}
     for i = 1, #ids do
         local petID = ids[i]
@@ -138,17 +200,26 @@ function P:Rebuild()
             exemplar[speciesID] = petID
         end
     end
-    local bySpecies = {}
+    _lap("exemplars")
+    local bySpecies, species = {}, 0
     for speciesID, petID in pairs(exemplar) do
-        local entry = _entryFor(petID)
+        species = species + 1
+        local entry = _entryFor(speciesID, petID)
         if entry then bySpecies[speciesID] = entry end
+        _lap("entry")
     end
     local list = {}
     for _, entry in pairs(bySpecies) do list[#list + 1] = entry end
     table.sort(list, _byDisplayName)
+    _lap("list")
     self._attachable = list
     self._bySpecies  = bySpecies
     self._families   = _families()
+    _lap("families")
+    if _prof then
+        _reportRebuild(perf, t0, k0, #ids, species, #list)
+        _prof = nil
+    end
 end
 
 -- ===== what is out ==========================================================
@@ -204,6 +275,18 @@ function P:GetBySpecies(speciesID)
     return self._bySpecies[speciesID]   -- exception(nullable): the player may not own that species
 end
 
+-- The creature display of an indexed species' exemplar, read live: only the pet
+-- on screen needs it, so the index does not keep it for all ~1,950. nil for a
+-- species not in the index, or one with no display (the scene renders its 2D
+-- fallback).
+function P:DisplayID(speciesID)
+    self:_Ensure()
+    local entry = self._bySpecies[speciesID]
+    if not entry then return nil end   -- exception(nullable): unowned / non-attachable species
+    local _, _, _, _, _, displayID = _G.C_PetJournal.GetPetInfoByPetID(entry.petID)
+    return displayID   -- exception(boundary): nil for a species with no display, or a GUID that just went stale
+end
+
 -- Widget-seam resolve for modelPreview's pet path, mirroring
 -- HousingCatalogObserver:Resolve(itemID): the live read happens HERE, behind the
 -- module boundary, so the selector supplying speciesID stays pure. nil for a
@@ -218,7 +301,7 @@ function P:Resolve(speciesID)
     -- a REGISTERED scene, which is what makes the modelPreview camera work at all.
     local cardSceneID = _G.C_PetJournal.GetPetModelSceneInfoBySpeciesID(speciesID)
     return {
-        petDisplayID   = entry.displayID,
+        petDisplayID   = self:DisplayID(speciesID),
         uiModelSceneID = cardSceneID,
         name           = entry.displayName,
         iconTexture    = entry.icon,
@@ -277,8 +360,10 @@ HDG.Modules:Declare({
         PET_JOURNAL_LIST_UPDATE = { handler = "OnListUpdate" },
         COMPANION_UPDATE        = { handler = "OnCompanionUpdate" },
     },
+    -- No Rebuild here: the index starts dirty and the first Pets or Menagerie read
+    -- builds it. Building at enable held ~2.1 MB from login for players who never
+    -- open a pet view (memory census 2026-10-19).
     onEnable = function()
-        P:Rebuild()
         -- Seed it: a pet already out at login must paint "Dismiss" before any
         -- COMPANION_UPDATE arrives.
         P._summonedGUID = _G.C_PetJournal.GetSummonedPetGUID()

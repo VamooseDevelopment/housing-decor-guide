@@ -47,8 +47,9 @@ end
 -- PERSISTENT account.rooms with clean room:N IDs (legacy floor-encoded IDs
 -- kept only as .legacyID lineage for this transform + the what-if dedup rule
 -- + capture re-matching); versions become layouts holding placements. Gen-1
--- fossil collections at the SV ROOT (HDG_DB.collections) are never read and
--- left untouched. boundary: legitimate SV migration -- runs once per DB at
+-- fossil collections at the SV ROOT (HDG_DB.collections) are never read here;
+-- Store clears them at load with the rest of 2.x's top-level keys
+-- (RETIRED_ROOT_KEYS). boundary: legitimate SV migration -- runs once per DB at
 -- LoadFromSavedVariables (EnsureStateShape re-runs are version-gated no-ops).
 -- v7 -> v8 fossil scrub (pre-release test DBs only -- v7 never shipped).
 -- A v7 DB carries ROOM-KEYED placements with no shape/capturedID; under v8
@@ -476,7 +477,8 @@ end
 -- + the changeSeq; session.furnIndex is the maintained reverse index.
 
 HDG.Actions:Register{ name = "FURN_SET_CREATE",
-    invalidates = { "account.furnishingSets", "session.furn" },
+    invalidates = { "account.furnishingSets", "session.furn",
+                    "account.furnishingSetSeq" },
     reduce = function(state, payload)
         local acct = state.account
         acct.furnishingSetSeq = acct.furnishingSetSeq + 1
@@ -567,7 +569,8 @@ HDG.Actions:Register{ name = "FURN_SET_PROMOTE",
     end }
 
 HDG.Actions:Register{ name = "FURN_ROOM_CREATE",
-    invalidates = { "account.rooms", "account.projects.layouts", "session.furn", "session.furnIndex" },
+    invalidates = { "account.rooms", "account.projects.layouts", "session.furn", "session.furnIndex",
+                    "account.roomSeq" },
     reduce = function(state, payload)
         local acct = state.account
         acct.roomSeq = acct.roomSeq + 1
@@ -666,7 +669,9 @@ HDG.Actions:Register{ name = "FURN_ROOM_UNEQUIP",
     end }
 
 HDG.Actions:Register{ name = "FURN_ROOM_DUPLICATE",
-    invalidates = { "account.rooms", "account.furnishingSets", "account.projects.layouts", "session.furn", "session.furnIndex" },
+    invalidates = { "account.rooms", "account.furnishingSets", "account.projects.layouts", "session.furn", "session.furnIndex",
+                    "account.furnishingSetSeq",
+                    "account.roomSeq" },
     reduce = function(state, payload)
         -- Variant for what-if work: library sets are SHARED (edit propagates by
         -- design), the local set is CLONED (the variant owns its own pieces).

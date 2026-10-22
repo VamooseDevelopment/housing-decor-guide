@@ -46,9 +46,6 @@ HDG.Locale:Register("enUS", {
     -- Data states (loading / error / blank overlays)
     DECOR_LOADING          = "Scanning catalog...",
     DECOR_LOADING_RETRY    = "Loading may have failed -- switch views to retry.",
-    CATALOG_INTRO_LOADING  = "Loading catalog",
-    CATALOG_INTRO_SUCCESS  = "Catalog loaded!",
-    CATALOG_INTRO_REFRESH  = "Refresh",
     DECOR_ERROR_HEADLINE   = "Catalog not loaded",
     DECOR_ERROR_SUB        = "Open the Housing Catalog in-game to scan.",
     DECOR_BLANK            = "No decor matches your filters.",

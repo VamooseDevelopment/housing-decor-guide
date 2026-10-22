@@ -265,6 +265,7 @@ function M:SetItems(widget, items, retainScroll)
         and ScrollBoxConstants.RetainScrollPosition
         or  ScrollBoxConstants.DiscardScrollPosition
     widget._scrollBox:SetDataProvider(CreateDataProvider(items or {}), flag)
+    HDG.UI.RestoreListScroll(widget, widget._scrollBox)   -- refilled after the window closed
 end
 
 function M:Clear(widget)
