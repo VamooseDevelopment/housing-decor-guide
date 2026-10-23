@@ -12,6 +12,10 @@
 --     slots, verified 12.0.14 / BagBrother 2026-06) route through. One hook
 --     covers both without reaching into either framework's internals.
 --
+-- Blizzard's bank (character AND Warband tabs, one BankPanel) paints its icon with
+-- self.icon:SetTexture inside BankPanelItemButtonMixin:Refresh, bypassing the helper
+-- above, so it gets its own post-hook on that Refresh.
+--
 -- Gated by the BAG_BADGE config (Helpers section). Reagent membership is static
 -- data, so it's memoised to a per-itemID boolean -> the per-slot check is O(1).
 
@@ -100,10 +104,9 @@ local function bagItemID(button)
     return nil
 end
 
-local function onSetTexture(button)
-    if type(button) ~= "table" then return end   -- exception(boundary): SetItemButtonTexture passes the button frame
-    if button.BGR then return end   -- exception(boundary): Baganator item-grid button; handled by its corner widget
-    local itemID = enabled() and bagItemID(button) or nil
+-- Shows the badge when itemID is a decor reagent, else hides one already made: pooled
+-- buttons are reused for other slots, so an empty or plain slot clears the last occupant's.
+local function paintBadge(button, itemID)
     if itemID and isDecorReagent(itemID) then
         local badge = ensureBadge(button)
         badge._outline:Show()
@@ -112,6 +115,20 @@ local function onSetTexture(button)
         button._hdgrDecorBadge._outline:Hide()
         button._hdgrDecorBadge:Hide()
     end
+end
+
+local function onSetTexture(button)
+    if type(button) ~= "table" then return end   -- exception(boundary): SetItemButtonTexture passes the button frame
+    if button.BGR then return end   -- exception(boundary): Baganator item-grid button; handled by its corner widget
+    paintBadge(button, enabled() and bagItemID(button) or nil)
+end
+
+-- ===== Bank provider (Blizzard bank: character + Warband tabs) ===============
+local function onBankRefresh(button)
+    -- exception(boundary): Blizzard field, filled by RefreshItemInfo inside the Refresh this
+    -- follows; nil = empty slot. Read here, not re-fetched, so a tab repaint allocates nothing.
+    local info = button.itemInfo
+    paintBadge(button, enabled() and info and info.itemID or nil)
 end
 
 -- ===== Baganator provider ===================================================
@@ -158,6 +175,11 @@ function BB:Install()
     -- widget instead -- it paints icons without the mixin helper).
     if ItemButtonMixin and ItemButtonMixin.SetItemButtonTexture then  -- exception(boundary): Blizzard mixin presence
         hooksecurefunc(ItemButtonMixin, "SetItemButtonTexture", onSetTexture)
+    end
+    -- Bank buttons come from a pool on the first bank open, after this install, so the mixin
+    -- copied onto them already carries the hook (there are no static bank button instances).
+    if BankPanelItemButtonMixin and BankPanelItemButtonMixin.Refresh then  -- exception(boundary): Blizzard mixin presence
+        hooksecurefunc(BankPanelItemButtonMixin, "Refresh", onBankRefresh)
     end
     local baganator = _G.Baganator   -- exception(boundary): optional third-party addon global
     if baganator and baganator.API and baganator.API.RegisterCornerWidget then

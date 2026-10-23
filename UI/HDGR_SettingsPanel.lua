@@ -83,7 +83,7 @@ local SEARCH_TAGS = {
     tooltipDecorTag        = { "tooltip", "reagent", "decor", "crafting", "recipe", "bag" },
     catalogTooltip         = { "tooltip", "decor", "source", "cost", "catalog", "helper" },
     materialTooltipItemData = { "tooltip", "item", "material", "reagent", "warehouse", "altoholic", "auction" },
-    bagBadge               = { "bag", "badge", "icon", "reagent", "decor", "marker", "helper" },
+    bagBadge               = { "bag", "bank", "warband", "badge", "icon", "reagent", "decor", "marker", "helper" },
     merchantDecorOverlay   = { "vendor", "merchant", "decor", "collected", "marker", "helper" },
     merchantQtyPicker      = { "vendor", "merchant", "buy", "quantity", "picker", "bulk", "purchase" },
     catalogDecorOverlay    = { "catalog", "decor", "uncollected", "marker", "plus", "helper" },
@@ -352,9 +352,10 @@ local function _buildHelpersSubcategory(category)
         .. "every material hover considerably taller.")
 
     layout:AddInitializer(CreateSettingsListSectionHeaderInitializer("Bags"))
-    BindProxyBool(sub, layout, "bagBadge", "Mark decor reagents in bags",
-        "Show a small HDG icon in the top-right corner of bag items used in decor recipes. "
-        .. "Works with the default bags, Bagnon, Baganator, and Ellesmere.")
+    BindProxyBool(sub, layout, "bagBadge", "Mark decor reagents in bags and bank",
+        "Show a small HDG icon in the top-right corner of bag and bank items used in decor recipes. "
+        .. "Bags: works with the default bags, Bagnon, Baganator, and Ellesmere. "
+        .. "Bank: the default bank's character and Warband tabs.")
 
     layout:AddInitializer(CreateSettingsListSectionHeaderInitializer("Vendors"))
     BindProxyBool(sub, layout, "merchantDecorOverlay", "Mark collected decor at vendors",

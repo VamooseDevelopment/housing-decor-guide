@@ -1,3 +1,9 @@
+## [3.39.1] - 2026-10-24 (October 2026)
+
+### Added
+- **Decor reagents are marked in your bank too.** The small HDG icon that marks decor reagents in
+  your bags now shows on the bank's character and Warband tabs as well. (Thanks wofw68.)
+
 ## [3.39.0] - 2026-10-22 (October 2026)
 
 ### Fixed

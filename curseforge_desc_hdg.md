@@ -12,15 +12,9 @@
 
 ---
 
-## What's New in v3.39.0
+## What's New in v3.39.1
 
-- **HDG uses far less memory.** It does less when you log in, keeps the catalog in a much more compact form, and closing the window gives back what its lists and menus were holding. Everything looks and works the same.
-- **The zone alert works from login.** Log in to a zone with decor you haven't collected and the alert and the Zone Scanner's list appear about 30 seconds later, without opening HDG first.
-- **Find Decor shows each crafted decor's profession,** and searching for a profession, such as Tailoring, finds the decor it makes.
-- **Decor you've just collected shows as collected,** at vendors too, without a reload.
-- **Switching colour scheme or font updates everything at once,** instead of waiting for a reload.
-- **Keys still reach the game in combat** when Hide in combat is turned off.
-- **Updating straight from HDG 2.x (before 3.0, June 2026) now starts you fresh.** Anyone who has run 3.0 or later keeps everything.
+- **Decor reagents are marked in your bank too.** The small HDG icon that marks decor reagents in your bags now shows on the bank's character and Warband tabs as well. It's under Settings > Helpers, Mark decor reagents in bags and bank.
 
 ## The Decor Catalog
 
@@ -89,7 +83,7 @@ A companion window injects into Blizzard's House Editor so you can **place decor
 - **Zone alerts** -- entering a zone with a decor vendor (selling something you're missing or have listed) can pop a window, ping chat, and play a sound -- each toggle optional. The Zone Scanner window names the zone, and a cart tick turns shopping-list matching on or off.
 - **Your Data** -- collection KPIs, achievement progress (decor, coupons, lumber milestones), and full crafting/farming history.
 - **Config** -- multiple color themes with a live preview, UI scaling, and account profiles.
-- **Helpers** -- optional collection marks on Blizzard's own windows: a collected/needed mark on vendor items and in the Housing catalog, and a reagent mark on bag slots, plus a decor-sourcing block on catalog tooltips. Each toggles under Settings > Helpers.
+- **Helpers** -- optional collection marks on Blizzard's own windows: a collected/needed mark on vendor items and in the Housing catalog, and a reagent mark on bag and bank slots, plus a decor-sourcing block on catalog tooltips. Each toggles under Settings > Helpers.
 
 ## Integrations (all optional)
 
@@ -111,7 +105,7 @@ A companion window injects into Blizzard's House Editor so you can **place decor
 ---
 
 **Author:** Vamoose
-**Version:** 3.39.0
+**Version:** 3.39.1
 **Game Version:** 12.1.0 (Midnight)
 **Source / Issues:** https://github.com/VamooseDevelopment/housing-decor-guide
 **Discord:** https://discord.gg/RWZaxJaHFP
