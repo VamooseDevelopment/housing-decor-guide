@@ -363,7 +363,7 @@ local function _buildHelpersSubcategory(category)
         .. _G.CreateAtlasMarkup("common-icon-checkmark", 14, 14)
         .. " on housing decor you've collected and "
         .. _G.CreateAtlasMarkup("common-icon-plus", 14, 14, 0, 0, 255, 26, 26)
-        .. " on decor you still need. Default merchant window only.")
+        .. " on decor you still need. Works with the default merchant window and Krowi's Extended Vendor UI.")
     BindProxyBool(sub, layout, "merchantQtyPicker", HDG.Locale:Get("CFG_MERCHANT_QTY_PICKER"),
         "Right-click a housing decor item at a vendor to open a quantity picker: set how "
         .. "many to buy, see the total against your gold and decor storage, and buy in one go. "

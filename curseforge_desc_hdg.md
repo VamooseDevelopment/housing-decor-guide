@@ -12,9 +12,9 @@
 
 ---
 
-## What's New in v3.39.1
+## What's New in v3.39.2
 
-- **Decor reagents are marked in your bank too.** The small HDG icon that marks decor reagents in your bags now shows on the bank's character and Warband tabs as well. It's under Settings > Helpers, Mark decor reagents in bags and bank.
+- **Collected and needed marks show at vendors with Krowi's Extended Vendor UI.** That addon draws its own vendor slots over the game's, so HDG's marks were there but hidden underneath. HDG now marks its slots too.
 
 ## The Decor Catalog
 
@@ -83,7 +83,7 @@ A companion window injects into Blizzard's House Editor so you can **place decor
 - **Zone alerts** -- entering a zone with a decor vendor (selling something you're missing or have listed) can pop a window, ping chat, and play a sound -- each toggle optional. The Zone Scanner window names the zone, and a cart tick turns shopping-list matching on or off.
 - **Your Data** -- collection KPIs, achievement progress (decor, coupons, lumber milestones), and full crafting/farming history.
 - **Config** -- multiple color themes with a live preview, UI scaling, and account profiles.
-- **Helpers** -- optional collection marks on Blizzard's own windows: a collected/needed mark on vendor items and in the Housing catalog, and a reagent mark on bag and bank slots, plus a decor-sourcing block on catalog tooltips. Each toggles under Settings > Helpers.
+- **Helpers** -- optional collection marks on Blizzard's own windows: a collected/needed mark on vendor items (Krowi's Extended Vendor UI included) and in the Housing catalog, and a reagent mark on bag and bank slots, plus a decor-sourcing block on catalog tooltips. Each toggles under Settings > Helpers.
 
 ## Integrations (all optional)
 
@@ -105,7 +105,7 @@ A companion window injects into Blizzard's House Editor so you can **place decor
 ---
 
 **Author:** Vamoose
-**Version:** 3.39.1
+**Version:** 3.39.2
 **Game Version:** 12.1.0 (Midnight)
 **Source / Issues:** https://github.com/VamooseDevelopment/housing-decor-guide
 **Discord:** https://discord.gg/RWZaxJaHFP

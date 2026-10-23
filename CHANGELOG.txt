@@ -1,3 +1,10 @@
+## [3.39.2] - 2026-10-24 (October 2026)
+
+### Fixed
+- **Collected and needed marks show at vendors with Krowi's Extended Vendor UI.** That addon draws
+  its own vendor slots over the game's, so HDG's marks were there but hidden underneath. HDG now
+  marks its slots too. (Thanks lobharvey.)
+
 ## [3.39.1] - 2026-10-24 (October 2026)
 
 ### Added
