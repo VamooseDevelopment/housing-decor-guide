@@ -316,8 +316,6 @@ HDG.Locale:Register("ruRU", {
     TIP_WARN_HARD_RESET_TITLE = "|cffff6060Полный сброс всех данных|r",
     TIP_WOWHEAD_BODY = "Открыть страницу предмета на Wowhead в браузере",
     TIP_WOWHEAD_TITLE = "Wowhead",
-    TRN_SEARCH_PLACEHOLDER = "Поиск учителя / зоны...",
-    TRN_TITLE = "Учителя",
     WARE_ALL_MATS_HDR = "Материалы",
     WARE_AUTOSHOW_TOGGLE = "Авто-показ при сборе",
     WARE_LUMBER_HDR_BAG = "Сумка",

@@ -133,6 +133,7 @@ LC.widgets["petBlankPanel.label"] = {
 -- own gated twin: one widget with two identities reads worse than two widgets with
 -- one each. Both write the same transient, so the query survives a mode switch.
 LC.widgets["petPanel.search"] = {
+    search = true,   -- magnifier + clear "x", as Recipe Sources (Vamoose, 2026-10-26)
     tooltip = false,
     kind = "editbox", ["in"] = "decor.filterRowBottom", font = "body",
     height = 22, width = 240, order = 10,

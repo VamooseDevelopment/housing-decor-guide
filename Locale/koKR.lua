@@ -318,8 +318,6 @@ HDG.Locale:Register("koKR", {
     TIP_WARN_HARD_RESET_TITLE = "|cffff6060모든 데이터 완전 초기화|r",
     TIP_WOWHEAD_BODY = "브라우저에서 이 아이템의 Wowhead 페이지 열기",
     TIP_WOWHEAD_TITLE = "Wowhead",
-    TRN_SEARCH_PLACEHOLDER = "훈련사 / 구역 검색...",
-    TRN_TITLE = "훈련사",
     WARE_ALL_MATS_HDR = "재료",
     WARE_AUTOSHOW_TOGGLE = "수확 시 자동 표시",
     WARE_LUMBER_HDR_BAG = "가방",

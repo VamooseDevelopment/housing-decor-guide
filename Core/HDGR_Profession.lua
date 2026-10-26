@@ -18,6 +18,8 @@
 --   HDG.Profession.GetByName(name) entry table or nil (English name -> entry;
 --                                   used by the SV backfill to recover the ID)
 --   HDG.Profession.NameOf(id)      canonical English display name or nil
+--   HDG.Profession.RecordOf(char, id) the character's record for that profession, or nil
+--   HDG.Profession.NamesOf(char)   the character's professions as { [English name] = true }
 
 HDG = HDG or {}
 HDG.Profession = HDG.Profession or {}
@@ -59,4 +61,25 @@ end
 function P.NameOf(id)
     local entry = P.GetByID(id)
     return entry and entry.name or nil
+end
+
+-- ===== Character records ====================================================
+-- char.professions is keyed by the client's language ("Schneiderei"), so every join
+-- against the English data goes through the professionID each record carries.
+
+function P.RecordOf(char, profID)
+    if profID == nil then return nil end   -- exception(nullable): an un-stamped record's profession has no id, and nil must not match other id-less records
+    for _, prof in pairs(char.professions) do
+        if prof.professionID == profID then return prof end
+    end
+    return nil
+end
+
+function P.NamesOf(char)
+    local out = {}
+    for _, prof in pairs(char.professions) do
+        local entry = P.GetByID(prof.professionID)   -- exception(boundary): SV migration -- a non-enUS record from before ID-stamping has no professionID until its next scan
+        if entry then out[entry.name] = true end
+    end
+    return out
 end

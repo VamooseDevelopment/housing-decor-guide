@@ -2015,8 +2015,8 @@ local function _makeIsStackedContainer(config)
 end
 
 -- Mis-keying audit: catch widget specs accidentally placed in
--- config.panels (structurally invisible bug class -- see HouseTab/Trainers
--- May 2026 pass). Three rules:
+-- config.panels (structurally invisible bug class -- two tabs' LayoutConfigs
+-- carried it, May 2026). Three rules:
 --   config.panels   -> must not have `in` (panels use `cell`)
 --                      must not be a leaf widget kind (has dispatch)
 --   config.sections -> must not have `kind` (sections are layout, not widget)

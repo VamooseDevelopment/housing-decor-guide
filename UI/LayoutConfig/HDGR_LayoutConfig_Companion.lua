@@ -196,6 +196,7 @@ for i, c in ipairs(MODE_CHIPS) do
 end
 -- Search flexes to fill toolbar slack after the chips.
 LC.widgets["companionPanel.search"] = {
+    search = true,   -- magnifier + clear "x", as Recipe Sources (Vamoose, 2026-10-26)
     tooltip = false,
     kind = "editbox", ["in"] = "companion.toolbar", font = "small",
     height = 22, width = "fill", order = 60,

@@ -965,25 +965,65 @@ end
 local DROPDOWN_VISIBLE_ROWS = 20
 local DROPDOWN_ROW_EXTENT   = 20
 
--- Add one menu item. checkbox: isSelected re-reads live state per poll (stays open).
--- radio: compares against `current` snapshot (picking closes the menu).
+-- An item's `right` text (a count, or a header's column name) sits in a right-aligned
+-- column, Blizzard's Currency Transfer pattern (Blizzard_Menu/11_0_0_MenuImplementationGuide).
+-- The menu gives every row its widest row's width, so a RIGHT anchor lines the column up.
+-- The extent the initializer returns replaces the measured one, so it carries the whole row.
+local DROPDOWN_RIGHT_GAP   = 16
+local DROPDOWN_CHECK_GAP   = 7    -- Blizzard's checkbox-to-label gap (MenuVariants.CreateCheckbox)
+local DROPDOWN_COUNT_FONT  = "GameFontDisable"
+local DROPDOWN_HEADER_FONT = "GameFontNormalSmall"
+
+local function _attachRightColumn(desc, text, font, leadWidth)
+    desc:AddInitializer(function(button)
+        local fs = button:AttachFontString()
+        fs:SetFontObject(font)
+        fs:SetHeight(DROPDOWN_ROW_EXTENT)
+        fs:SetPoint("RIGHT")
+        fs:SetJustifyH("RIGHT")
+        fs:SetText(text)
+        return leadWidth(button) + button.fontString:GetUnboundedStringWidth()
+               + DROPDOWN_RIGHT_GAP + fs:GetUnboundedStringWidth(), DROPDOWN_ROW_EXTENT
+    end)
+end
+
+local function _checkboxLead(button) return button.leftTexture1:GetWidth() + DROPDOWN_CHECK_GAP end
+local function _titleLead() return 0 end
+
+-- A title with a right column is a column header: both halves take the header font.
+local function _addDropdownTitle(root, opt)
+    local desc = root:CreateTitle(opt.text or "")
+    if not opt.right then return end   -- exception(nullable): a plain title has no column
+    desc:AddInitializer(function(button) button.fontString:SetFontObject(DROPDOWN_HEADER_FONT) end)
+    _attachRightColumn(desc, opt.right, DROPDOWN_HEADER_FONT, _titleLead)
+end
+
+-- isSelected re-reads live state per poll (the menu stays open across toggles).
+local function _addDropdownCheckbox(root, opt, currentSelector, onSelect)
+    local value = opt.value
+    local isAll = opt.isAll == true
+    local desc = root:CreateCheckbox(opt.text or "",
+        function()
+            local set = HDG.Selectors:Call(currentSelector, HDG.Store:GetState(), {})
+            if isAll then return next(set) == nil end
+            return set[value] == true
+        end,
+        function() onSelect(value) end,
+        value)
+    if opt.right then   -- exception(nullable): only counted menus carry a right column
+        _attachRightColumn(desc, opt.right, DROPDOWN_COUNT_FONT, _checkboxLead)
+    end
+end
+
+-- Add one menu item. radio: compares against `current` snapshot (picking closes the menu).
 local function _addDropdownItem(root, opt, current, currentSelector, onSelect)
     local kind = opt.kind or "radio"
     if kind == "divider" then
         root:CreateDivider()
     elseif kind == "title" then
-        root:CreateTitle(opt.text or "")
+        _addDropdownTitle(root, opt)
     elseif kind == "checkbox" then
-        local value = opt.value
-        local isAll = opt.isAll == true
-        root:CreateCheckbox(opt.text or "",
-            function()
-                local set = HDG.Selectors:Call(currentSelector, HDG.Store:GetState(), {})
-                if isAll then return next(set) == nil end
-                return set[value] == true
-            end,
-            function() onSelect(value) end,
-            value)
+        _addDropdownCheckbox(root, opt, currentSelector, onSelect)
     else  -- radio
         local value = opt.value
         root:CreateRadio(opt.text or "",

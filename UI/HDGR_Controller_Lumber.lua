@@ -136,7 +136,7 @@ end
 
 function HDG.LumberController:Refresh(_rootFrame, _ctx)
     -- All rendering flows through bindings + the row factory; nothing
-    -- imperative needs to happen here. (Same shape as TrainersController.)
+    -- imperative needs to happen here.
 end
 
 HDG.Controllers:Register("lumber", HDG.LumberController)

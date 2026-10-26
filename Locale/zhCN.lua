@@ -317,8 +317,6 @@ HDG.Locale:Register("zhCN", {
     TIP_WARN_HARD_RESET_TITLE = "|cffff6060强制重置所有数据|r",
     TIP_WOWHEAD_BODY = "在浏览器中打开此物品的Wowhead页面",
     TIP_WOWHEAD_TITLE = "Wowhead",
-    TRN_SEARCH_PLACEHOLDER = "搜索训练师/区域...",
-    TRN_TITLE = "训练师",
     WARE_ALL_MATS_HDR = "材料",
     WARE_AUTOSHOW_TOGGLE = "采集时自动显示",
     WARE_LUMBER_HDR_BAG = "背包",

@@ -62,7 +62,7 @@ local function _navFoldTipDef(self_)
 end
 
 -- Fold chevron glyph: ">" folded / "v" open -- the text-chevron idiom the Styles
--- and Trainers category rows already use.
+-- category rows already use.
 local function _foldGlyph(collapsed)
     return collapsed and ">" or "v"
 end

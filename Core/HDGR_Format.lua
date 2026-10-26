@@ -35,6 +35,7 @@ end
 --   FormatCost(amount, e)        -> "1,234 <icon>" for a currency OR item-token cost entry
 --   CostName(e)                  -> "Mark of Honor" / "Ancient Mana" / "Gold" / nil
 --   CostKey(e)                   -> "item:137642" / "currency:3363" / "currency:-1"
+--   FormatRecipeCost(source)     -> "1 Secret of Draenor Tailoring" / "400 <icon>" (recipe source price)
 
 function F.FormatAmount(n)
     if not n or n <= 0 then return "" end
@@ -143,20 +144,49 @@ function F.RelativeTime(elapsedSeconds)
     return math.floor(d / 86400) .. "d ago"
 end
 
--- "(|cAARRGGBB Name|r)" with class color from Constants (white fallback).
-function F.ClassColorName(name, class)
-    local hex = HDG.Constants.CLASS_COLORS[class] or "ffffffff"
-    return "(|c" .. hex .. name .. "|r)"
+-- "|cAARRGGBBName|r" in the class color (Constants.CLASS_COLORS, keyed by classFile).
+-- Pure data, so it works headless too.
+function F.ClassName(name, classFile)
+    local hex = HDG.Constants.CLASS_COLORS[classFile] or "ffffffff"   -- exception(nullable): legacy roster records predate classFile capture
+    return "|c" .. hex .. name .. "|r"
 end
 
--- Render {{currencyID, amount}, ...} cost as an inline icon line ("150 <icon>  +  1,500 <icon>").
-function F.FormatVendorCost(cost)
-    if not cost or #cost == 0 then return "" end
-    local out = {}
-    for _, c in ipairs(cost) do
-        out[#out + 1] = F.FormatCurrency(c[2], c[1])  -- c = {currencyID, amount}
+-- "(Name)" in the class color, for the Acquisition source lines.
+function F.ClassColorName(name, class)
+    return "(" .. F.ClassName(name, class) .. ")"
+end
+
+-- A recipe source's price (HDGR_RecipeSourceAugment: `copper` plus `currency` =
+-- { {"c", currencyID, n}, {"i", itemID, n} }) as one line: "10 <coin>",
+-- "400 <icon>", "1 Secret of Draenor Tailoring". Gold and currencies render through
+-- FormatCost like any cost entry. An item token is written out by name: the augment
+-- ships no icon for it, and it is no catalog item whose link would carry one.
+-- CostName goes through ItemNameResolver, so a selector calling this declares
+-- session.itemNames.names.
+-- Copper renders gold, silver and copper: FormatGold floors to whole gold, and a
+-- trainer fee is often under one (500 copper, 40 silver), which showed blank.
+-- The silver/copper coins stay here, on the one recipe-price path, so Mogul and
+-- the vendor columns keep FormatGold's whole-gold reading.
+function F.FormatRecipeCost(source)
+    local parts = {}
+    if source.copper then  -- exception(optional): a source priced only in currencies or items has no copper
+        local coins = { F.FormatGold(source.copper) }
+        local silver, copper = math.floor(source.copper % 10000 / 100), source.copper % 100
+        if silver > 0 then coins[#coins + 1] = silver .. " " .. HDG.Constants.COIN_SILVER_ATLAS end
+        if copper > 0 then coins[#coins + 1] = copper .. " " .. HDG.Constants.COIN_COPPER_ATLAS end
+        if coins[1] == "" then table.remove(coins, 1) end
+        parts[#parts + 1] = table.concat(coins, " ")
     end
-    return table.concat(out, "  +  ")
+    if source.currency then  -- exception(optional): a gold-only or free source has no currency list
+        for _, c in ipairs(source.currency) do
+            if c[1] == "i" then
+                parts[#parts + 1] = F.FormatAmount(c[3]) .. " " .. F.CostName({ itemID = c[2] })
+            else
+                parts[#parts + 1] = F.FormatCost(c[3], { currencyID = c[2] })
+            end
+        end
+    end
+    return table.concat(parts, "  +  ")
 end
 
 -- Profession display name -> atlas (PROFESSION_DATA). Lazy reverse map. nil when unknown.

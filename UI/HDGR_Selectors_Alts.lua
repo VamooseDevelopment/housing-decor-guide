@@ -43,19 +43,6 @@ local function aliasIndex(name)
     return canonical and HDG.Expansion.GetIndex(canonical) or nil
 end
 
--- char.professions is keyed by the LOCALIZED profession name (the scanner writes
--- base.professionName). The summary + seed lookups run off canonical PROFESSION_DATA
--- (English), so joining by name misses on every non-enUS client. Resolve instead by
--- the stable professionID stamped on each record (EnsureStateShape backfills it onto
--- older records). Small linear scan -- a char has at most a dozen professions.
-local function profByID(char, profID)
-    if not (profID and char.professions) then return nil end
-    for _, prof in pairs(char.professions) do
-        if prof.professionID == profID then return prof end
-    end
-    return nil
-end
-
 -- Per-(profession, expansion) decor recipe index. Built directly from
 -- HDGR_DecorDB (the curated 305-entry craftable-decor list -- every
 -- entry is a decor recipe by construction). Registered as a memoized
@@ -187,7 +174,7 @@ end
 -- lacks the profession, or has no skillLines).
 local function _visitCharForBestSkill(char, profID, cells)
     if char.hidden then return end
-    local prof = profByID(char, profID)
+    local prof = HDG.Profession.RecordOf(char, profID)
     if not (prof and prof.skillLines) then return end
     for key, sl in pairs(prof.skillLines) do
         local idx = aliasIndex(key)
@@ -204,7 +191,7 @@ end
 -- filtered to recipes that belong to this cell's expansion bucket.
 local function _visitCharForUnionKnown(char, profID, recipeSet, unionSet)
     if char.hidden then return end
-    local prof = profByID(char, profID)
+    local prof = HDG.Profession.RecordOf(char, profID)
     if not (prof and prof.knownRecipes) then return end
     for recipeID in pairs(prof.knownRecipes) do
         if recipeSet[recipeID] then

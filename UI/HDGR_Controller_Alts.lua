@@ -76,20 +76,10 @@ local function _countKnownForRecipeSet(prof, recipeSet)
     return n
 end
 
--- char.professions is keyed by the LOCALIZED profession name; join by the stable
--- professionID stamped on each record instead (mirrors Selectors_Alts.profByID).
-local function _profByID(char, profID)
-    if not (profID and char.professions) then return nil end
-    for _, prof in pairs(char.professions) do
-        if prof.professionID == profID then return prof end
-    end
-    return nil
-end
-
 -- One tooltip-line entry for a char + (profID, idx) cell. Returns nil if hidden / no data.
 local function _buildCharStatLine(char, profID, idx, recipeSet, total)
     if char.hidden then return nil end
-    local prof = _profByID(char, profID)
+    local prof = HDG.Profession.RecordOf(char, profID)
     if not (prof and prof.skillLines) then return nil end
     local NormalizeAlias = HDG.Expansion.NormalizeAlias
     local GetIndex       = HDG.Expansion.GetIndex

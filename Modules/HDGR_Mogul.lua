@@ -5,8 +5,8 @@
 --   * Recipes from HDGR_ProfessionsDB (keyed by recipeID, .slots = list of
 --     {type, itemID, qty} with type == "basic" for raw reagents)
 --   * Lumber set from HDG.Constants.LUMBER_DATA
---   * Known recipes per char from account.characters[K].professions[P].
---     knownRecipes (recipeID -> true)
+--   * Known recipes from recipes.knowledge (mine / alts), derived from
+--     account.characters[K].professions[P].knownRecipes (recipeID -> true)
 --   * Owned decor from account.collection.ownedDecorIDs (for Collection mode)
 --
 -- Two modes:
@@ -428,7 +428,6 @@ end
 -- ===== DecorDB reverse indexes =============================================
 -- byOutputItemID: output itemID -> decor entry (char-view knowledge join).
 -- bySpellID: for alt-knowledge join (char.professions[P].knownRecipes keyed by spellID).
--- C_SpellBook.IsSpellKnown is what RecipeKnowledgeScanner uses to populate state.account.recipes.
 local _decorByOutputItemID
 local function decorByOutputItemID()
     if _decorByOutputItemID then return _decorByOutputItemID end
@@ -444,42 +443,31 @@ end
 function Mogul:GetDecorByOutputItemID() return decorByOutputItemID() end
 
 -- ===== Candidate builders ===================================================
--- char: current char's known recipes. account: union across non-hidden chars.
--- state.account.recipes = RecipeKnowledgeScanner output (keyed by output itemID).
-function Mogul:Candidates(viewMode)
-    viewMode = viewMode or "char"
-    local state = HDG.Store:GetState()
-    local recipes = state.account.recipes
-    local idx = decorByOutputItemID()
+-- char: the logged-in character's known recipes. account: those plus every non-hidden
+-- alt's. Both come from recipes.knowledge (mine / alts sets of crafted itemIDs); mogul.plan
+-- declares the call.
+local NOTHING_SKIPPED = {}
 
-    local out = {}
-    for outputItemID, entry in pairs(recipes) do
-        local known
-        if viewMode == "account" then
-            known = entry.selfKnown or entry.altKnown
-        else
-            known = entry.selfKnown
-        end
-        if known then
-            local decor = idx[outputItemID]
-            if decor and decor.spellID and decor.reagents then
-                out[#out + 1] = decor
-            end
+-- Append the decor entry for each known itemID not in `skip` (the alts pass skips mine).
+local function _appendCandidates(out, knownSet, idx, skip)
+    for itemID in pairs(knownSet) do
+        local decor = idx[itemID]
+        if decor and decor.spellID and decor.reagents and not skip[itemID] then
+            out[#out + 1] = decor
         end
     end
-    return out
 end
 
--- Known state from account.recipes. Returns RECIPE_STATE constant for the row factory's known-marker.
-function Mogul:KnownStateForItemID(itemID)
-    local RS = HDG.Constants.RECIPE_STATE
-    if not itemID then return RS.UnknownOnAccount end
-    local recipes = HDG.Store:GetState().account.recipes
-    local k = recipes[itemID]
-    if not k then return RS.UnknownOnAccount end
-    if k.selfKnown then return RS.KnownByCharacter end
-    if k.altKnown  then return RS.KnownByAlt end
-    return RS.UnknownOnAccount
+function Mogul:Candidates(viewMode)
+    viewMode = viewMode or "char"
+    local knowledge = HDG.Selectors:Call("recipes.knowledge", HDG.Store:GetState())
+    local idx = decorByOutputItemID()
+    local out = {}
+    _appendCandidates(out, knowledge.mine, idx, NOTHING_SKIPPED)
+    if viewMode == "account" then
+        _appendCandidates(out, knowledge.alts, idx, knowledge.mine)
+    end
+    return out
 end
 
 -- BestAltForSpellID: first non-hidden alt who knows the recipe. Nil if none.

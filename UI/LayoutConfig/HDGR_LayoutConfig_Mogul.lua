@@ -587,6 +587,7 @@ LC.widgets["mogulPanel.goblinCol_soldPerDay"] = {
 }
 -- Filter row.
 LC.widgets["mogulPanel.goblinSearch"] = {
+    search = true,   -- magnifier + clear "x", as Recipe Sources (Vamoose, 2026-10-26)
     tooltip = false,
     kind = "editbox", ["in"] = "mogul.goblinFilterRow", font = "body",
     height = 22, width = 145, order = 10,

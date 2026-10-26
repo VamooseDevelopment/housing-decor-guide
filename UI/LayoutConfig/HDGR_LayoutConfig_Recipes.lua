@@ -365,6 +365,7 @@ LC.widgets["recipesListPanel.listFilterDropdown"] = {
     dispatch = { type = "RECIPES_SET_LIST_FILTER", payloadKey = "filter" },
 }
 LC.widgets["recipesListPanel.search"] = {
+    search = true,   -- magnifier + clear "x", as Recipe Sources (Vamoose, 2026-10-26)
     tooltip = false,
     kind = "editbox", ["in"] = "recipes.filterBar", font = "body",
     height = 22, width = "fill", order = 10,

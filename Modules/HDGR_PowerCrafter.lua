@@ -34,7 +34,7 @@
 --     no producing recipe on file; such a reagent is omitted until a scan
 --     captures its recipe.
 --   * knownRecipeItemIDs is a set: `{ [itemID] = true }`. The CALLER decides
---     whether to filter by selfKnown, altKnown, or both -- PowerCrafter
+--     whether to filter by recipes.knowledge mine, alts, or both -- PowerCrafter
 --     just applies the set as the "auto-expand intermediate" gate.
 --
 -- Output schemas:

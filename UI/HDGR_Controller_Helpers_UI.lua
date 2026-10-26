@@ -78,6 +78,11 @@ function UI.WireTextChanged(widget, fn)
         if not userInput then return end
         fn((self.GetText and self:GetText()) or "")
     end)
+    -- A `search = true` box's clear "x" calls SetText(""), which fires OnTextChanged without
+    -- userInput -- the guard above skips it, so the state would keep the old needle while the
+    -- box reads empty. The x reports itself through the same fn instead, so every search box
+    -- wired here clears through its own action.
+    widget._hdgrOnClear = function() fn("") end
 end
 
 function UI.WireSearchBox(rootFrame, widgetId, tabName, stateKey)

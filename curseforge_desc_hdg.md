@@ -12,9 +12,14 @@
 
 ---
 
-## What's New in v3.39.2
+## What's New in v3.40.0
 
-- **Collected and needed marks show at vendors with Krowi's Extended Vendor UI.** That addon draws its own vendor slots over the game's, so HDG's marks were there but hidden underneath. HDG now marks its slots too.
+- **Recipe Sources: where to learn every decor recipe.** A new Crafting tab lists all 346 decor recipes with every trainer, vendor, drop and quest that teaches them -- prices, rep requirements, waypoints and a map -- plus a By Teacher view showing what each trainer and vendor teaches and which of your alts need training. It replaces the Trainers tab.
+- **See which alts know a recipe**, by name in their class colors.
+- **Where to look inside a building.** Cards say "Basement of Brokenspear Tavern", "Up the ramp inside the tower" and the like.
+- **Every vendor that sells a decor recipe.** Shop by Vendor lists 44 recipe vendors, up from 20.
+- **Trainer names and locations fixed.** 32 trainers pointed at the wrong NPC; every trainer and recipe vendor was checked against the game.
+- **Search boxes** have a magnifier and a clear button.
 
 ## The Decor Catalog
 
@@ -38,7 +43,7 @@
 
 - **Recipes** -- browse craftable decor across professions and expansions. Filter by **Known / Ready / Unknown** -- "Ready" buckets recipes by how much of the materials you already hold, and "Unknown" finds recipes *nobody on your account* has yet. Queue crafts, preview the result in 3D, and see a materials panel (totals or per-recipe, direct or fully raw, bucketed by source) with an AH cost estimate.
 - **Warehouse** -- track lumber and every reagent (bag / bank / warband bank, separately), how much you need for your queue *and* for all uncollected recipes, and a "Used In" cross-reference so you know what's worth farming. Lumber tracker auto-pops when you harvest lumber. Hovering any material lists every character holding some, so you know where your stock actually is. A title-bar badge tracks your account-wide Essence of Lumber, with a per-character mouseover.
-- **Trainers** -- a profession trainer directory by expansion and faction, each with location, coordinates, and a one-click waypoint, plus a dedicated **Midnight Recipe Sources** table.
+- **Recipe Sources** -- where to learn every decor recipe: every trainer, vendor, drop and quest with prices, rep requirements, waypoints and a map, filters by profession, expansion, source, zone, reputation and currency, and a By Teacher view with what each trainer and vendor teaches and which of your alts need training.
 - **Alts** -- an account-wide grid of your best skill in every profession across every expansion, with per-character detail and decor-recipe completeness so you always know which alt to log in.
 
 ## Lumber Tracker & Radar
@@ -105,7 +110,7 @@ A companion window injects into Blizzard's House Editor so you can **place decor
 ---
 
 **Author:** Vamoose
-**Version:** 3.39.2
+**Version:** 3.40.0
 **Game Version:** 12.1.0 (Midnight)
 **Source / Issues:** https://github.com/VamooseDevelopment/housing-decor-guide
 **Discord:** https://discord.gg/RWZaxJaHFP

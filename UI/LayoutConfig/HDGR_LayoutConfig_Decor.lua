@@ -384,6 +384,7 @@ LC.widgets["decorPanel.count"] = {
     binding = "decor.headerLabel",
 }
 LC.widgets["decorPanel.search"] = {
+    search = true,   -- magnifier + clear "x", as Recipe Sources (Vamoose, 2026-10-26)
     tooltip = false,
     kind = "editbox", ["in"] = "decor.filterRowBottom", font = "body",
     height = 22, width = 240, order = 10,

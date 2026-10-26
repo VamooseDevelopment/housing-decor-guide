@@ -440,13 +440,6 @@ HDGR_DecorDB = {
             [241281] = { name = "Composite Flora", qty = 4 },
             [256963] = { name = "Thalassian Lumber", qty = 4 },
         },
-        recipeSource = {
-            type = "drop",
-            source = "Heavy Trunks in Delves",
-            zone = "Delves",
-            skill = 10,
-            notes = "Tradeable on AH",
-        },
     },
     [1233132] = { -- Entropic Illuminant
         name = "Entropic Illuminant",
@@ -463,13 +456,6 @@ HDGR_DecorDB = {
             [241283] = { name = "Wondrous Synergist", qty = 1 },
             [256963] = { name = "Thalassian Lumber", qty = 12 },
         },
-        recipeSource = {
-            type = "drop",
-            source = "Repeatable zone treasures (Voidstorm / Slayer's Rise)",
-            zone = "Voidstorm",
-            skill = 10,
-            notes = "Also drops from 600x Artisan Enchanter's Moxie surplus bags. Bind on Pickup, very low drop rate.",
-        },
     },
     [1233137] = { -- Haranir Preserving Agents
         name = "Haranir Preserving Agents",
@@ -484,14 +470,6 @@ HDGR_DecorDB = {
             [236950] = { name = "Mote of Primal Energy", qty = 1 },
             [241281] = { name = "Composite Flora", qty = 4 },
             [256963] = { name = "Thalassian Lumber", qty = 4 },
-        },
-        recipeSource = {
-            type = "vendor",
-            skill = 70,
-            vendors = {
-                { npcID = 243359, cost = { {3256, 150} }, factionID = 0, minRep = 0 },
-                { npcID = 243286, cost = { {3256, 150} }, factionID = 0, minRep = 0 },
-            },
         },
     },
     [1233133] = { -- Rootbound Vat
@@ -509,13 +487,6 @@ HDGR_DecorDB = {
             [241283] = { name = "Wondrous Synergist", qty = 4 },
             [256963] = { name = "Thalassian Lumber", qty = 16 },
         },
-        recipeSource = {
-            type = "vendor",
-            skill = 10,
-            vendors = {
-                { npcID = 240407, cost = { {3256, 150}, {3316, 1500} }, factionID = 2704, minRep = 13 },
-            },
-        },
     },
     [1233135] = { -- Sunsmoke Censer
         name = "Sunsmoke Censer",
@@ -530,14 +501,6 @@ HDGR_DecorDB = {
             [236949] = { name = "Mote of Light", qty = 1 },
             [241281] = { name = "Composite Flora", qty = 4 },
             [256963] = { name = "Thalassian Lumber", qty = 6 },
-        },
-        recipeSource = {
-            type = "vendor",
-            skill = 70,
-            vendors = {
-                { npcID = 243359, cost = { {3256, 150} }, factionID = 0, minRep = 0 },
-                { npcID = 243286, cost = { {3256, 150} }, factionID = 0, minRep = 0 },
-            },
         },
     },
     [1233138] = { -- Silvermoon Spire Fountain
@@ -555,13 +518,6 @@ HDGR_DecorDB = {
             [241281] = { name = "Composite Flora", qty = 4 },
             [241283] = { name = "Wondrous Synergist", qty = 4 },
             [256963] = { name = "Thalassian Lumber", qty = 20 },
-        },
-        recipeSource = {
-            type = "drop",
-            source = "Heavy Trunks in Delves",
-            zone = "Delves",
-            skill = 85,
-            notes = "Tradeable on AH",
         },
     },
     [1296429] = { -- Ersatz Venom Splatter
@@ -876,12 +832,6 @@ HDGR_DecorDB = {
             [151564] = { name = "Empyrium", qty = 50 },
             [251767] = { name = "Fel-Touched Lumber", qty = 12 },
         },
-        recipeSource = {
-            type = "trainer",
-            npc = "Legion Blacksmithing trainer",
-            cost = "60g training fee",
-            skill = 85,
-        },
     },
     -- EXPANSION: Kul Tiran Blacksmithing / Zandalari Blacksmithing
     [56016] = { -- Brennadam Grinder
@@ -928,12 +878,6 @@ HDGR_DecorDB = {
             [152579] = { name = "Storm Silver Ore", qty = 5 },
             [180733] = { name = "Luminous Flux", qty = 5 },
             [251768] = { name = "Darkpine Lumber", qty = 5 },
-        },
-        recipeSource = {
-            type = "trainer",
-            npc = "Kul Tiran / Zandalari Blacksmithing trainer",
-            cost = "40s training fee",
-            skill = 140,
         },
     },
     -- EXPANSION: Shadowlands Blacksmithing
@@ -985,14 +929,6 @@ HDGR_DecorDB = {
             [171833] = { name = "Elethium Ore", qty = 6 },
             [180733] = { name = "Luminous Flux", qty = 3 },
             [251772] = { name = "Arden Lumber", qty = 8 },
-        },
-        recipeSource = {
-            type = "trainer",
-            npc = "Smith Au'berk",
-            zone = "Oribos",
-            mapID = 1670,
-            cost = "5g training fee",
-            skill = 85,
         },
     },
     -- EXPANSION: Dragon Isles Blacksmithing
@@ -1081,13 +1017,6 @@ HDGR_DecorDB = {
             [238204] = { name = "Sterling Alloy", qty = 5 },
             [256963] = { name = "Thalassian Lumber", qty = 12 },
         },
-        recipeSource = {
-            type = "vendor",
-            skill = 70,
-            vendors = {
-                { npcID = 240838, cost = { {3257, 150} }, factionID = 2710, minRep = 13 },
-            },
-        },
     },
     [1276112] = { -- Masterwork Crafting Hammer
         name = "Masterwork Crafting Hammer",
@@ -1103,13 +1032,6 @@ HDGR_DecorDB = {
             [238202] = { name = "Gloaming Alloy", qty = 2 },
             [238204] = { name = "Sterling Alloy", qty = 2 },
             [256963] = { name = "Thalassian Lumber", qty = 6 },
-        },
-        recipeSource = {
-            type = "vendor",
-            skill = 70,
-            vendors = {
-                { npcID = 243286, cost = { {3257, 150} }, factionID = 0, minRep = 0 },
-            },
         },
     },
     [1276109] = { -- Ornamental Silvermoon Hanger
@@ -1127,13 +1049,6 @@ HDGR_DecorDB = {
             [238204] = { name = "Sterling Alloy", qty = 3 },
             [256963] = { name = "Thalassian Lumber", qty = 8 },
         },
-        recipeSource = {
-            type = "drop",
-            source = "Saltheril's Soiree event loot objects (Misplaced Tome, Ranger's Cache, Dead Drop, Coalesced Light)",
-            zone = "Eversong Woods",
-            skill = 50,
-            notes = "Tradeable on AH. Drop rates were nerfed post-launch.",
-        },
     },
     [1276110] = { -- Gilded Silvermoon Hanger
         name = "Gilded Silvermoon Hanger",
@@ -1150,13 +1065,6 @@ HDGR_DecorDB = {
             [238204] = { name = "Sterling Alloy", qty = 3 },
             [256963] = { name = "Thalassian Lumber", qty = 8 },
         },
-        recipeSource = {
-            type = "vendor",
-            skill = 70,
-            vendors = {
-                { npcID = 240838, cost = { {3257, 150} }, factionID = 2710, minRep = 13 },
-            },
-        },
     },
     [1276111] = { -- Ren'dorei Anvil
         name = "Ren'dorei Anvil",
@@ -1172,13 +1080,6 @@ HDGR_DecorDB = {
             [238202] = { name = "Gloaming Alloy", qty = 5 },
             [238204] = { name = "Sterling Alloy", qty = 5 },
             [256963] = { name = "Thalassian Lumber", qty = 12 },
-        },
-        recipeSource = {
-            type = "vendor",
-            skill = 70,
-            vendors = {
-                { npcID = 248328, cost = { {3257, 150} }, factionID = 2699, minRep = 13 },
-            },
         },
     },
     [1296497] = { -- Amani Forgemaster's Rack
@@ -1534,12 +1435,6 @@ HDGR_DecorDB = {
             [22449] = { name = "Large Prismatic Shard", qty = 2 },
             [242691] = { name = "Olemba Lumber", qty = 9 },
         },
-        recipeSource = {
-            type = "trainer",
-            npc = "Outland Enchanting trainer",
-            cost = "2s 50c training fee",
-            skill = 60,
-        },
     },
     -- EXPANSION: Northrend Enchanting
     [56266] = { -- Mark of the Mages' Eye
@@ -1724,14 +1619,6 @@ HDGR_DecorDB = {
             [151568] = { name = "Primal Sargerite", qty = 3 },
             [251767] = { name = "Fel-Touched Lumber", qty = 8 },
         },
-        recipeSource = {
-            type = "trainer",
-            npc = "Enchanter Nalthanis",
-            zone = "Dalaran",
-            mapID = 627,
-            cost = "60g training fee",
-            skill = 85,
-        },
     },
     -- EXPANSION: Kul Tiran Enchanting / Zandalari Enchanting
     [56401] = { -- Drust Enchanter's Rod
@@ -1885,14 +1772,6 @@ HDGR_DecorDB = {
             [251665] = { name = "Silverleaf Thread", qty = 50 },
             [256963] = { name = "Thalassian Lumber", qty = 12 },
         },
-        recipeSource = {
-            type = "trainer",
-            npc = "Dolothos / Magistrix Eredania / Rhys Duskfrost",
-            zone = "Silvermoon City",
-            mapID = 2393,
-            cost = "~2g training fee",
-            skill = 70,
-        },
     },
     [1246905] = { -- Font of Gleaming Water
         name = "Font of Gleaming Water",
@@ -1912,14 +1791,6 @@ HDGR_DecorDB = {
             [245882] = { name = "Thalassian Songwater", qty = 10 },
             [256963] = { name = "Thalassian Lumber", qty = 6 },
         },
-        recipeSource = {
-            type = "trainer",
-            npc = "Dolothos / Magistrix Eredania / Rhys Duskfrost",
-            zone = "Silvermoon City",
-            mapID = 2393,
-            cost = "~2g training fee",
-            skill = 80,
-        },
     },
     [1246902] = { -- Animated Sin'dorei Pick
         name = "Animated Sin'dorei Pick",
@@ -1936,13 +1807,6 @@ HDGR_DecorDB = {
             [243602] = { name = "Radiant Shard", qty = 15 },
             [243605] = { name = "Dawn Crystal", qty = 5 },
             [256963] = { name = "Thalassian Lumber", qty = 6 },
-        },
-        recipeSource = {
-            type = "vendor",
-            skill = 50,
-            vendors = {
-                { npcID = 242723, cost = { {3379, 200}, {3258, 150} }, factionID = 0, minRep = 0 },
-            },
         },
     },
     [1246906] = { -- Animated Sin'dorei Hammer
@@ -1961,13 +1825,6 @@ HDGR_DecorDB = {
             [243605] = { name = "Dawn Crystal", qty = 5 },
             [256963] = { name = "Thalassian Lumber", qty = 6 },
         },
-        recipeSource = {
-            type = "vendor",
-            skill = 70,
-            vendors = {
-                { npcID = 242725, cost = { {3379, 200}, {3258, 150} }, factionID = 0, minRep = 0 },
-            },
-        },
     },
     [1246908] = { -- Rootflame Campfire
         name = "Rootflame Campfire",
@@ -1984,13 +1841,6 @@ HDGR_DecorDB = {
             [243602] = { name = "Radiant Shard", qty = 15 },
             [243605] = { name = "Dawn Crystal", qty = 5 },
             [256963] = { name = "Thalassian Lumber", qty = 16 },
-        },
-        recipeSource = {
-            type = "drop",
-            source = "Master Tailor's Surplus Reagents vendor bundle",
-            zone = "Silvermoon City",
-            skill = 50,
-            notes = "Formula reportedly drops from or is found inside a surplus reagents vendor bundle. Source uncertain.",
         },
     },
     [1246903] = { -- Ren'dorei Postage Repository
@@ -2010,12 +1860,6 @@ HDGR_DecorDB = {
             [245881] = { name = "Lexicologist's Vellum", qty = 20 },
             [256963] = { name = "Thalassian Lumber", qty = 8 },
         },
-        recipeSource = {
-            type = "drop",
-            source = "Voidstorm Treasures",
-            zone = "Voidstorm",
-            skill = 50,
-        },
     },
     [1246907] = { -- Spellbound Tome of Thalassian Magics
         name = "Spellbound Tome of Thalassian Magics",
@@ -2033,13 +1877,6 @@ HDGR_DecorDB = {
             [243605] = { name = "Dawn Crystal", qty = 3 },
             [245881] = { name = "Lexicologist's Vellum", qty = 20 },
             [256963] = { name = "Thalassian Lumber", qty = 10 },
-        },
-        recipeSource = {
-            type = "vendor",
-            skill = 70,
-            vendors = {
-                { npcID = 240838, cost = { {3258, 150}, {3316, 1500} }, factionID = 2710, minRep = 13 },
-            },
         },
     },
     [1281342] = { -- Endless Codex of Blooming Light
@@ -2060,13 +1897,6 @@ HDGR_DecorDB = {
             [245881] = { name = "Lexicologist's Vellum", qty = 50 },
             [256963] = { name = "Thalassian Lumber", qty = 30 },
         },
-        recipeSource = {
-            type = "vendor",
-            skill = 70,
-            vendors = {
-                { npcID = 240838, cost = { {3258, 150}, {3316, 1500} }, factionID = 2710, minRep = 13 },
-            },
-        },
     },
     [1281348] = { -- Endless Codex of Nature's Grace
         name = "Endless Codex of Nature's Grace",
@@ -2085,13 +1915,6 @@ HDGR_DecorDB = {
             [245805] = { name = "Sienna Ink", qty = 2 },
             [245881] = { name = "Lexicologist's Vellum", qty = 50 },
             [256963] = { name = "Thalassian Lumber", qty = 30 },
-        },
-        recipeSource = {
-            type = "vendor",
-            skill = 70,
-            vendors = {
-                { npcID = 240279, cost = { {3258, 150}, {3316, 1500} }, factionID = 0, minRep = 0 },
-            },
         },
     },
     [1281349] = { -- Endless Codex of the Voidtouched
@@ -2112,13 +1935,6 @@ HDGR_DecorDB = {
             [245881] = { name = "Lexicologist's Vellum", qty = 50 },
             [256963] = { name = "Thalassian Lumber", qty = 30 },
         },
-        recipeSource = {
-            type = "vendor",
-            skill = 50,
-            vendors = {
-                { npcID = 248328, cost = { {3258, 150}, {3316, 1500} }, factionID = 2699, minRep = 13 },
-            },
-        },
     },
     [1246909] = { -- Self-Pouring Thalassian Sunwine
         name = "Self-Pouring Thalassian Sunwine",
@@ -2134,13 +1950,6 @@ HDGR_DecorDB = {
             [243602] = { name = "Radiant Shard", qty = 10 },
             [243605] = { name = "Dawn Crystal", qty = 5 },
             [256963] = { name = "Thalassian Lumber", qty = 8 },
-        },
-        recipeSource = {
-            type = "vendor",
-            skill = 70,
-            vendors = {
-                { npcID = 242726, cost = { {3379, 200}, {3258, 150} }, factionID = 0, minRep = 0 },
-            },
         },
     },
     [1296499] = { -- Furious Tiki Mask
@@ -2478,12 +2287,6 @@ HDGR_DecorDB = {
             [151568] = { name = "Primal Sargerite", qty = 1 },
             [251767] = { name = "Fel-Touched Lumber", qty = 9 },
         },
-        recipeSource = {
-            type = "trainer",
-            npc = "Legion Engineering trainer",
-            cost = "50g training fee",
-            skill = 85,
-        },
     },
     -- EXPANSION: Kul Tiran Engineering / Zandalari Engineering
     [55950] = { -- Deactivated Atomic Recalibrator
@@ -2552,12 +2355,6 @@ HDGR_DecorDB = {
             [152579] = { name = "Storm Silver Ore", qty = 8 },
             [163569] = { name = "Insulated Wiring", qty = 10 },
             [251768] = { name = "Darkpine Lumber", qty = 5 },
-        },
-        recipeSource = {
-            type = "trainer",
-            npc = "Kul Tiran / Zandalari Engineering trainer",
-            cost = "40s training fee",
-            skill = 140,
         },
     },
     -- EXPANSION: Shadowlands Engineering
@@ -2686,12 +2483,6 @@ HDGR_DecorDB = {
             [243581] = { name = "Evercore", qty = 5 },
             [256963] = { name = "Thalassian Lumber", qty = 14 },
         },
-        recipeSource = {
-            type = "discovery",
-            method = "Recycling specialization",
-            skill = 85,
-            notes = "Requires 10+ points in Recycling spec, random discovery from crafting recycled materials",
-        },
     },
     [1248614] = { -- Small Telogrus Lamp
         name = "Small Telogrus Lamp",
@@ -2708,12 +2499,6 @@ HDGR_DecorDB = {
             [243578] = { name = "Aetherlume", qty = 5 },
             [243581] = { name = "Evercore", qty = 5 },
             [256963] = { name = "Thalassian Lumber", qty = 8 },
-        },
-        recipeSource = {
-            type = "discovery",
-            method = "Recycling specialization",
-            skill = 85,
-            notes = "Requires 10+ points in Recycling spec, random discovery from crafting recycled materials",
         },
     },
     [1248611] = { -- Ren'dorei Lightpost
@@ -2732,12 +2517,6 @@ HDGR_DecorDB = {
             [243581] = { name = "Evercore", qty = 5 },
             [256963] = { name = "Thalassian Lumber", qty = 12 },
         },
-        recipeSource = {
-            type = "discovery",
-            method = "Recycling specialization",
-            skill = 85,
-            notes = "Requires 10+ points in Recycling spec, random discovery from crafting recycled materials",
-        },
     },
     [1248613] = { -- Ren'dorei Stargazer
         name = "Ren'dorei Stargazer",
@@ -2754,12 +2533,6 @@ HDGR_DecorDB = {
             [243578] = { name = "Aetherlume", qty = 5 },
             [243581] = { name = "Evercore", qty = 5 },
             [256963] = { name = "Thalassian Lumber", qty = 16 },
-        },
-        recipeSource = {
-            type = "discovery",
-            method = "Recycling specialization",
-            skill = 85,
-            notes = "Requires 10+ points in Recycling spec, random discovery from crafting recycled materials",
         },
     },
     [1248612] = { -- Ambient Aethercharged Crystal
@@ -2778,12 +2551,6 @@ HDGR_DecorDB = {
             [243581] = { name = "Evercore", qty = 5 },
             [256963] = { name = "Thalassian Lumber", qty = 12 },
         },
-        recipeSource = {
-            type = "discovery",
-            method = "Recycling specialization",
-            skill = 85,
-            notes = "Requires 10+ points in Recycling spec, random discovery from crafting recycled materials",
-        },
     },
     [1248615] = { -- Ren'dorei Crafting Framework
         name = "Ren'dorei Crafting Framework",
@@ -2801,12 +2568,6 @@ HDGR_DecorDB = {
             [243581] = { name = "Evercore", qty = 5 },
             [256963] = { name = "Thalassian Lumber", qty = 12 },
         },
-        recipeSource = {
-            type = "discovery",
-            method = "Recycling specialization",
-            skill = 85,
-            notes = "Requires 10+ points in Recycling spec, random discovery from crafting recycled materials",
-        },
     },
     [1248610] = { -- Ren'dorei Void Projector
         name = "Ren'dorei Void Projector",
@@ -2823,12 +2584,6 @@ HDGR_DecorDB = {
             [243578] = { name = "Aetherlume", qty = 5 },
             [243581] = { name = "Evercore", qty = 5 },
             [256963] = { name = "Thalassian Lumber", qty = 10 },
-        },
-        recipeSource = {
-            type = "discovery",
-            method = "Recycling specialization",
-            skill = 85,
-            notes = "Requires 10+ points in Recycling spec, random discovery from crafting recycled materials",
         },
     },
     [1296503] = { -- Aetherlume Field Lamp
@@ -3477,14 +3232,6 @@ HDGR_DecorDB = {
             [151567] = { name = "Lightweave Cloth", qty = 5 },
             [251767] = { name = "Fel-Touched Lumber", qty = 20 },
         },
-        recipeSource = {
-            type = "trainer",
-            npc = "Professor Pallin",
-            zone = "Dalaran",
-            mapID = 627,
-            cost = "60g training fee",
-            skill = 85,
-        },
     },
     -- EXPANSION: Kul Tiran Inscription / Zandalari Inscription
     [56010] = { -- Boralus Barrel
@@ -3592,12 +3339,6 @@ HDGR_DecorDB = {
             [152576] = { name = "Tidespray Linen", qty = 3 },
             [158189] = { name = "Viridescent Ink", qty = 10 },
             [251768] = { name = "Darkpine Lumber", qty = 4 },
-        },
-        recipeSource = {
-            type = "trainer",
-            npc = "Kul Tiran / Zandalari Inscription trainer",
-            cost = "40s training fee",
-            skill = 140,
         },
     },
     -- EXPANSION: Shadowlands Inscription
@@ -3730,14 +3471,6 @@ HDGR_DecorDB = {
             [180732] = { name = "Rune Etched Vial", qty = 1 },
             [251772] = { name = "Arden Lumber", qty = 10 },
         },
-        recipeSource = {
-            type = "trainer",
-            npc = "Scribe Au'tehshi",
-            zone = "Oribos",
-            mapID = 1670,
-            cost = "5g training fee",
-            skill = 80,
-        },
     },
     [1315335] = { -- Fae Moonbough Scroll
         name = "Fae Moonbough Scroll",
@@ -3753,14 +3486,6 @@ HDGR_DecorDB = {
             [173204] = { name = "Lightless Silk", qty = 3 },
             [175886] = { name = "Dark Parchment", qty = 10 },
             [251772] = { name = "Arden Lumber", qty = 4 },
-        },
-        recipeSource = {
-            type = "trainer",
-            npc = "Scribe Au'tehshi",
-            zone = "Oribos",
-            mapID = 1670,
-            cost = "5g training fee",
-            skill = 80,
         },
     },
     -- EXPANSION: Dragon Isles Inscription
@@ -3986,12 +3711,6 @@ HDGR_DecorDB = {
             [245766] = { name = "Soul Cipher", qty = 2 },
             [256963] = { name = "Thalassian Lumber", qty = 10 },
         },
-        recipeSource = {
-            type = "drop",
-            source = "Victorious Stormarion Pinnacle Cache",
-            zone = "Stormarion Pinnacle",
-            skill = 85,
-        },
     },
     [1248622] = { -- Homely Sin'dorei Shelf
         name = "Homely Sin'dorei Shelf",
@@ -4006,14 +3725,6 @@ HDGR_DecorDB = {
             [245764] = { name = "Codified Azeroot", qty = 4 },
             [245766] = { name = "Soul Cipher", qty = 6 },
             [256963] = { name = "Thalassian Lumber", qty = 12 },
-        },
-        recipeSource = {
-            type = "vendor",
-            skill = 85,
-            vendors = {
-                { npcID = 243555, cost = { {3261, 150} }, factionID = 0, minRep = 0 },
-                { npcID = 243286, cost = { {3261, 150} }, factionID = 0, minRep = 0 },
-            },
         },
     },
     [1248627] = { -- Homely Wall Shelves
@@ -4030,13 +3741,6 @@ HDGR_DecorDB = {
             [245766] = { name = "Soul Cipher", qty = 2 },
             [256963] = { name = "Thalassian Lumber", qty = 8 },
         },
-        recipeSource = {
-            type = "drop",
-            source = "Fishing",
-            zone = "Eversong Woods",
-            skill = 85,
-            notes = "Caught while fishing in Eversong Woods, Silvermoon City, Harandar, Zul'Aman, and The Den",
-        },
     },
     [1248625] = { -- Gilded Eversong Book
         name = "Gilded Eversong Book",
@@ -4051,14 +3755,6 @@ HDGR_DecorDB = {
             [256963] = { name = "Thalassian Lumber", qty = 6 },
             [245764] = { name = "Codified Azeroot", qty = 1 },
             [245766] = { name = "Soul Cipher", qty = 2 },
-        },
-        recipeSource = {
-            type = "vendor",
-            skill = 85,
-            vendors = {
-                { npcID = 243555, cost = { {3261, 150} }, factionID = 0, minRep = 0 },
-                { npcID = 243286, cost = { {3261, 150} }, factionID = 0, minRep = 0 },
-            },
         },
     },
     [1248624] = { -- Opened Sin'dorei Scroll
@@ -4075,14 +3771,6 @@ HDGR_DecorDB = {
             [245766] = { name = "Soul Cipher", qty = 2 },
             [256963] = { name = "Thalassian Lumber", qty = 4 },
         },
-        recipeSource = {
-            type = "vendor",
-            skill = 85,
-            vendors = {
-                { npcID = 243555, cost = { {3261, 150} }, factionID = 0, minRep = 0 },
-                { npcID = 243286, cost = { {3261, 150} }, factionID = 0, minRep = 0 },
-            },
-        },
     },
     [1248628] = { -- Wild Hanging Scroll
         name = "Wild Hanging Scroll",
@@ -4097,13 +3785,6 @@ HDGR_DecorDB = {
             [245764] = { name = "Codified Azeroot", qty = 3 },
             [245766] = { name = "Soul Cipher", qty = 2 },
             [256963] = { name = "Thalassian Lumber", qty = 8 },
-        },
-        recipeSource = {
-            type = "vendor",
-            skill = 85,
-            vendors = {
-                { npcID = 252956, cost = { {3261, 150}, {3392, 500} }, factionID = 0, minRep = 0 },
-            },
         },
     },
     [1248621] = { -- Floating Void-Touched Tome
@@ -4120,13 +3801,6 @@ HDGR_DecorDB = {
             [245766] = { name = "Soul Cipher", qty = 4 },
             [256963] = { name = "Thalassian Lumber", qty = 10 },
         },
-        recipeSource = {
-            type = "vendor",
-            skill = 50,
-            vendors = {
-                { npcID = 248328, cost = { {3261, 150}, {3316, 1500} }, factionID = 2699, minRep = 13 },
-            },
-        },
     },
     [1248631] = { -- Magnificent Towering Bookcase
         name = "Magnificent Towering Bookcase",
@@ -4141,13 +3815,6 @@ HDGR_DecorDB = {
             [245764] = { name = "Codified Azeroot", qty = 10 },
             [245766] = { name = "Soul Cipher", qty = 8 },
             [256963] = { name = "Thalassian Lumber", qty = 24 },
-        },
-        recipeSource = {
-            type = "vendor",
-            skill = 85,
-            vendors = {
-                { npcID = 240407, cost = { {3261, 150}, {3316, 1500} }, factionID = 2704, minRep = 13 },
-            },
         },
     },
     [1248619] = { -- Sturdy Ren'dorei Cask
@@ -4164,13 +3831,6 @@ HDGR_DecorDB = {
             [245766] = { name = "Soul Cipher", qty = 4 },
             [256963] = { name = "Thalassian Lumber", qty = 12 },
         },
-        recipeSource = {
-            type = "vendor",
-            skill = 50,
-            vendors = {
-                { npcID = 252956, cost = { {3261, 150}, {3392, 500} }, factionID = 0, minRep = 0 },
-            },
-        },
     },
     [1248630] = { -- Harandar Signpost
         name = "Harandar Signpost",
@@ -4185,13 +3845,6 @@ HDGR_DecorDB = {
             [245764] = { name = "Codified Azeroot", qty = 2 },
             [245766] = { name = "Soul Cipher", qty = 4 },
             [256963] = { name = "Thalassian Lumber", qty = 8 },
-        },
-        recipeSource = {
-            type = "vendor",
-            skill = 85,
-            vendors = {
-                { npcID = 240407, cost = { {3261, 150}, {3316, 1500} }, factionID = 2704, minRep = 13 },
-            },
         },
     },
     [1248626] = { -- Sin'dorei Phoenix Quill
@@ -4208,13 +3861,6 @@ HDGR_DecorDB = {
             [245764] = { name = "Codified Azeroot", qty = 1 },
             [245766] = { name = "Soul Cipher", qty = 1 },
         },
-        recipeSource = {
-            type = "vendor",
-            skill = 85,
-            vendors = {
-                { npcID = 242724, cost = { {3379, 200}, {3261, 150} }, factionID = 2713, minRep = 13 },
-            },
-        },
     },
     [1248623] = { -- Lively Songwriter's Quill
         name = "Lively Songwriter's Quill",
@@ -4229,14 +3875,6 @@ HDGR_DecorDB = {
             [245764] = { name = "Codified Azeroot", qty = 3 },
             [245766] = { name = "Soul Cipher", qty = 1 },
             [256963] = { name = "Thalassian Lumber", qty = 4 },
-        },
-        recipeSource = {
-            type = "vendor",
-            skill = 50,
-            vendors = {
-                { npcID = 243555, cost = { {3261, 150} }, factionID = 0, minRep = 0 },
-                { npcID = 243286, cost = { {3261, 150} }, factionID = 0, minRep = 0 },
-            },
         },
     },
     [1296506] = { -- Chiseled Amani Tablet
@@ -4283,12 +3921,6 @@ HDGR_DecorDB = {
             [245882] = { name = "Thalassian Songwater", qty = 20 },
             [253043] = { name = "Duskwood Caramel", qty = 5 },
             [256963] = { name = "Thalassian Lumber", qty = 10 },
-        },
-        recipeSource = {
-            type = "event",
-            source = "Hallow's End vendors",
-            skill = 50,
-            notes = "The game lists \"World Vendors\". A Hallow's End recipe (it takes Tricky Treats and holiday candy); no seller recorded on Wowhead yet.",
         },
     },
 
@@ -4572,12 +4204,6 @@ HDGR_DecorDB = {
             [151719] = { name = "Lightsphene", qty = 2 },
             [251767] = { name = "Fel-Touched Lumber", qty = 6 },
         },
-        recipeSource = {
-            type = "trainer",
-            npc = "Legion Jewelcrafting trainer",
-            cost = "60g training fee",
-            skill = 85,
-        },
     },
     -- EXPANSION: Kul Tiran Jewelcrafting / Zandalari Jewelcrafting
     [56006] = { -- Small Mask of Bwonsamdi, Loa of Graves
@@ -4743,14 +4369,6 @@ HDGR_DecorDB = {
             [251665] = { name = "Silverleaf Thread", qty = 25 },
             [256963] = { name = "Thalassian Lumber", qty = 18 },
         },
-        recipeSource = {
-            type = "trainer",
-            npc = "Amin / Aleinia / Kalinda",
-            zone = "Silvermoon City",
-            mapID = 2393,
-            cost = "~2g training fee",
-            skill = 80,
-        },
     },
     [1246891] = { -- Bejeweled Sin'dorei Lyre
         name = "Bejeweled Sin'dorei Lyre",
@@ -4766,13 +4384,6 @@ HDGR_DecorDB = {
             [242620] = { name = "Glimmering Gemdust", qty = 15 },
             [251665] = { name = "Silverleaf Thread", qty = 25 },
             [256963] = { name = "Thalassian Lumber", qty = 12 },
-        },
-        recipeSource = {
-            type = "vendor",
-            skill = 70,
-            vendors = {
-                { npcID = 240838, cost = { {3262, 150} }, factionID = 0, minRep = 0 },
-            },
         },
     },
     [1246889] = { -- Tenebrous Ren'dorei Armillary
@@ -4790,14 +4401,6 @@ HDGR_DecorDB = {
             [242788] = { name = "Duskshrouded Stone", qty = 15 },
             [256963] = { name = "Thalassian Lumber", qty = 12 },
         },
-        recipeSource = {
-            type = "trainer",
-            npc = "Amin / Aleinia / Kalinda",
-            zone = "Silvermoon City",
-            mapID = 2393,
-            cost = "~2g training fee",
-            skill = 80,
-        },
     },
     [1246894] = { -- Shining Sin'dorei Hourglass
         name = "Shining Sin'dorei Hourglass",
@@ -4812,13 +4415,6 @@ HDGR_DecorDB = {
             [242620] = { name = "Glimmering Gemdust", qty = 8 },
             [242787] = { name = "Crystalline Glass", qty = 50 },
             [256963] = { name = "Thalassian Lumber", qty = 8 },
-        },
-        recipeSource = {
-            type = "drop",
-            source = "Master Enchanter's Surplus Reagents (Silvermoon City vendor bag, 600 Moxie)",
-            zone = "Silvermoon City",
-            skill = 50,
-            notes = "Wowhead confirms the Enchanter's Surplus bag as a source. Mythic+ Challenger's Cache is sometimes reported but unverified on Wowhead.",
         },
     },
     [1246893] = { -- Replica Haranir Mural
@@ -4836,12 +4432,6 @@ HDGR_DecorDB = {
             [242788] = { name = "Duskshrouded Stone", qty = 25 },
             [256963] = { name = "Thalassian Lumber", qty = 18 },
         },
-        recipeSource = {
-            type = "drop",
-            source = "Heavy Trunk in Delves",
-            zone = "Delves",
-            skill = 70,
-        },
     },
     [1246892] = { -- Resplendent Highborne Statue
         name = "Resplendent Highborne Statue",
@@ -4856,13 +4446,6 @@ HDGR_DecorDB = {
             [242620] = { name = "Glimmering Gemdust", qty = 15 },
             [242788] = { name = "Duskshrouded Stone", qty = 25 },
             [256963] = { name = "Thalassian Lumber", qty = 24 },
-        },
-        recipeSource = {
-            type = "drop",
-            source = "Eversong Treasures (Saltheril's Soiree event)",
-            zone = "Eversong Woods",
-            skill = 50,
-            notes = "Extremely rare drop from Soiree event. Requires participation in the Saltheril's Soiree world event.",
         },
     },
     [1297681] = { -- Roaring Amani Garnet
@@ -5295,14 +4878,6 @@ HDGR_DecorDB = {
             [193216] = { name = "Dense Hide", qty = 3 },
             [251773] = { name = "Dragonpine Lumber", qty = 8 },
         },
-        recipeSource = {
-            type = "vendor",
-            vendors = {
-                { npcID = 196016, cost = { {2003, 400} }, factionID = 2511, minRep = 11 },
-                { npcID = 193006, cost = { {2003, 400} }, factionID = 2511, minRep = 11 },
-                { npcID = 194059, cost = { {2003, 400} }, factionID = 2511, minRep = 11 },
-            },
-        },
     },
     [1315719] = { -- Beloved Ottuk Plushie
         name = "Beloved Ottuk Plushie",
@@ -5318,14 +4893,6 @@ HDGR_DecorDB = {
             [193208] = { name = "Resilient Leather", qty = 20 },
             [193216] = { name = "Dense Hide", qty = 2 },
             [251773] = { name = "Dragonpine Lumber", qty = 6 },
-        },
-        recipeSource = {
-            type = "vendor",
-            vendors = {
-                { npcID = 196016, cost = { {2003, 400} }, factionID = 2511, minRep = 11 },
-                { npcID = 193006, cost = { {2003, 400} }, factionID = 2511, minRep = 11 },
-                { npcID = 194059, cost = { {2003, 400} }, factionID = 2511, minRep = 11 },
-            },
         },
     },
     -- EXPANSION: Khaz Algar Leatherworking
@@ -5378,14 +4945,6 @@ HDGR_DecorDB = {
             [251665] = { name = "Silverleaf Thread", qty = 10 },
             [256963] = { name = "Thalassian Lumber", qty = 8 },
         },
-        recipeSource = {
-            type = "vendor",
-            skill = 70,
-            vendors = {
-                { npcID = 243531, cost = { {3263, 150} }, factionID = 0, minRep = 0 },
-                { npcID = 243286, cost = { {3263, 150} }, factionID = 0, minRep = 0 },
-            },
-        },
     },
     [1246937] = { -- Embossed Sin'dorei Fur Rug
         name = "Embossed Sin'dorei Fur Rug",
@@ -5402,14 +4961,6 @@ HDGR_DecorDB = {
             [251665] = { name = "Silverleaf Thread", qty = 20 },
             [256963] = { name = "Thalassian Lumber", qty = 8 },
         },
-        recipeSource = {
-            type = "trainer",
-            npc = "Jan'zel / Zavahi (Zul'Aman) / Talmar / Sathein (Silvermoon City)",
-            zone = "Silvermoon City / Zul'Aman",
-            mapID = 2393,
-            cost = "~2g training fee",
-            skill = 80,
-        },
     },
     [1246943] = { -- Plush Haranir Leather Pillow
         name = "Plush Haranir Leather Pillow",
@@ -5425,12 +4976,6 @@ HDGR_DecorDB = {
             [238525] = { name = "Fantastic Fur", qty = 5 },
             [251665] = { name = "Silverleaf Thread", qty = 10 },
             [256963] = { name = "Thalassian Lumber", qty = 4 },
-        },
-        recipeSource = {
-            type = "drop",
-            source = "Master Enchanter's Surplus Reagents or Heavy Trunks in Delves",
-            zone = "Delves",
-            skill = 50,
         },
     },
     [1246939] = { -- Haranir Canopy Bed
@@ -5450,13 +4995,6 @@ HDGR_DecorDB = {
             [251665] = { name = "Silverleaf Thread", qty = 20 },
             [256963] = { name = "Thalassian Lumber", qty = 22 },
         },
-        recipeSource = {
-            type = "drop",
-            source = "Master Tailor's Surplus Reagents or random small treasure chests",
-            zone = "Harandar",
-            skill = 70,
-            notes = "Low drop rate from Harandar zone treasures",
-        },
     },
     [1246942] = { -- Sturdy Haranir Chair
         name = "Sturdy Haranir Chair",
@@ -5472,14 +5010,6 @@ HDGR_DecorDB = {
             [238528] = { name = "Majestic Claw", qty = 1 },
             [251665] = { name = "Silverleaf Thread", qty = 2 },
             [256963] = { name = "Thalassian Lumber", qty = 6 },
-        },
-        recipeSource = {
-            type = "vendor",
-            skill = 70,
-            vendors = {
-                { npcID = 243531, cost = { {3263, 150} }, factionID = 0, minRep = 0 },
-                { npcID = 243286, cost = { {3263, 150} }, factionID = 0, minRep = 0 },
-            },
         },
     },
     [1246938] = { -- Leather-Bound Haranir Wall Shelf
@@ -5497,14 +5027,6 @@ HDGR_DecorDB = {
             [238528] = { name = "Majestic Claw", qty = 1 },
             [256963] = { name = "Thalassian Lumber", qty = 8 },
         },
-        recipeSource = {
-            type = "trainer",
-            npc = "Jan'zel / Zavahi (Zul'Aman) / Talmar / Sathein (Silvermoon City)",
-            zone = "Silvermoon City / Zul'Aman",
-            mapID = 2393,
-            cost = "~2g training fee",
-            skill = 80,
-        },
     },
     [1246940] = { -- Simple Haranir Table
         name = "Simple Haranir Table",
@@ -5521,13 +5043,6 @@ HDGR_DecorDB = {
             [238530] = { name = "Majestic Fin", qty = 1 },
             [244631] = { name = "Scalewoven Hide", qty = 2 },
             [256963] = { name = "Thalassian Lumber", qty = 8 },
-        },
-        recipeSource = {
-            type = "vendor",
-            skill = 70,
-            vendors = {
-                { npcID = 240407, cost = { {3263, 150}, {3316, 1500} }, factionID = 2704, minRep = 13 },
-            },
         },
     },
     [1296511] = { -- Mounted Moby
@@ -5631,12 +5146,6 @@ HDGR_DecorDB = {
             [14341] = { name = "Rune Thread", qty = 2 },
             [14342] = { name = "Mooncloth", qty = 1 },
             [245586] = { name = "Ironwood Lumber", qty = 4 },
-        },
-        recipeSource = {
-            type = "trainer",
-            npc = "Classic Tailoring trainer",
-            cost = "90s training fee",
-            skill = 150,
         },
     },
     -- EXPANSION: Outland Tailoring
@@ -5836,13 +5345,6 @@ HDGR_DecorDB = {
             [114931] = { name = "Cerulean Pigment", qty = 2 },
             [251766] = { name = "Shadowmoon Lumber", qty = 5 },
         },
-        recipeSource = {
-            type = "vendor",
-            vendors = {
-                { npcID = 79864, cost = {  }, factionID = 0, minRep = 0 },
-                { npcID = 87049, cost = {  }, factionID = 0, minRep = 0 },
-            },
-        },
     },
     -- EXPANSION: Legion Tailoring
     [56398] = { -- Beloved Raptor Plushie
@@ -5908,12 +5410,6 @@ HDGR_DecorDB = {
             [151567] = { name = "Lightweave Cloth", qty = 35 },
             [251767] = { name = "Fel-Touched Lumber", qty = 6 },
         },
-        recipeSource = {
-            type = "trainer",
-            npc = "Legion Tailoring trainer",
-            cost = "60g training fee",
-            skill = 85,
-        },
     },
     -- EXPANSION: Kul Tiran Tailoring / Zandalari Tailoring
     [55996] = { -- Red Dazar'alor Rug
@@ -5962,12 +5458,6 @@ HDGR_DecorDB = {
             [159959] = { name = "Nylon Thread", qty = 10 },
             [168663] = { name = "Maroon Ink", qty = 3 },
             [251768] = { name = "Darkpine Lumber", qty = 4 },
-        },
-        recipeSource = {
-            type = "trainer",
-            npc = "Kul Tiran / Zandalari Tailoring trainer",
-            cost = "40s training fee",
-            skill = 140,
         },
     },
     -- EXPANSION: Shadowlands Tailoring
@@ -6072,12 +5562,6 @@ HDGR_DecorDB = {
             [251773] = { name = "Dragonpine Lumber", qty = 5 },
             [284249] = { name = "Duck-Eye Glass Bead", qty = 2 },
         },
-        recipeSource = {
-            type = "vendor",
-            vendors = {
-                { npcID = 193955, cost = { {2003, 400} }, factionID = 0, minRep = 0 },
-            },
-        },
     },
     -- EXPANSION: Khaz Algar Tailoring
     [55922] = { -- Dornogal Framed Rug
@@ -6128,13 +5612,6 @@ HDGR_DecorDB = {
             [251665] = { name = "Silverleaf Thread", qty = 3 },
             [256963] = { name = "Thalassian Lumber", qty = 8 },
         },
-        recipeSource = {
-            type = "vendor",
-            skill = 50,
-            vendors = {
-                { npcID = 248328, cost = { {3266, 150}, {3316, 1500} }, factionID = 2699, minRep = 13 },
-            },
-        },
     },
     [1229002] = { -- Luxurious Silvermoon Lounge Cushion
         name = "Luxurious Silvermoon Lounge Cushion",
@@ -6149,12 +5626,6 @@ HDGR_DecorDB = {
             [239201] = { name = "Sunfire Silk Bolt", qty = 4 },
             [251665] = { name = "Silverleaf Thread", qty = 3 },
             [256963] = { name = "Thalassian Lumber", qty = 6 },
-        },
-        recipeSource = {
-            type = "drop",
-            source = "Eversong Treasures (Saltheril's Soiree event)",
-            zone = "Eversong Woods",
-            skill = 50,
         },
     },
     [1229003] = { -- Plush Silvermoon Bed
@@ -6172,14 +5643,6 @@ HDGR_DecorDB = {
             [251665] = { name = "Silverleaf Thread", qty = 3 },
             [256963] = { name = "Thalassian Lumber", qty = 22 },
         },
-        recipeSource = {
-            type = "vendor",
-            skill = 85,
-            vendors = {
-                { npcID = 243353, cost = { {3266, 150} }, factionID = 0, minRep = 0 },
-                { npcID = 243286, cost = { {3266, 150} }, factionID = 0, minRep = 0 },
-            },
-        },
     },
     [1246919] = { -- Chic Silvermoon Pillow
         name = "Chic Silvermoon Pillow",
@@ -6194,14 +5657,6 @@ HDGR_DecorDB = {
             [239198] = { name = "Arcanoweave Bolt", qty = 4 },
             [251665] = { name = "Silverleaf Thread", qty = 3 },
             [256963] = { name = "Thalassian Lumber", qty = 4 },
-        },
-        recipeSource = {
-            type = "vendor",
-            skill = 70,
-            vendors = {
-                { npcID = 243353, cost = { {3266, 150} }, factionID = 0, minRep = 0 },
-                { npcID = 243286, cost = { {3266, 150} }, factionID = 0, minRep = 0 },
-            },
         },
     },
     [1229000] = { -- Silvermoon Curtains
@@ -6218,13 +5673,6 @@ HDGR_DecorDB = {
             [251665] = { name = "Silverleaf Thread", qty = 3 },
             [256963] = { name = "Thalassian Lumber", qty = 6 },
         },
-        recipeSource = {
-            type = "quest",
-            quest = "Clothes Make the Man",
-            questID = 91389,
-            zone = "Eversong Woods",
-            skill = 50,
-        },
     },
     [1246929] = { -- Voidstrider Saddlebag
         name = "Voidstrider Saddlebag",
@@ -6239,12 +5687,6 @@ HDGR_DecorDB = {
             [239702] = { name = "Imbued Bright Linen Bolt", qty = 4 },
             [251665] = { name = "Silverleaf Thread", qty = 3 },
             [256963] = { name = "Thalassian Lumber", qty = 8 },
-        },
-        recipeSource = {
-            type = "drop",
-            source = "Victorious Stormarion Pinnacle Cache",
-            zone = "Stormarion Pinnacle",
-            skill = 50,
         },
     },
     [1296514] = { -- Tortollan Slingsack
@@ -6292,12 +5734,6 @@ HDGR_DecorDB = {
             [251665] = { name = "Silverleaf Thread", qty = 6 },
             [252990] = { name = "Drustvar Choc-O-Drops", qty = 5 },
             [256963] = { name = "Thalassian Lumber", qty = 6 },
-        },
-        recipeSource = {
-            type = "event",
-            source = "Hallow's End vendors",
-            skill = 50,
-            notes = "The game lists \"World Vendors\". A Hallow's End recipe (it takes Tricky Treats and holiday candy); no seller recorded on Wowhead yet.",
         },
     },
 }

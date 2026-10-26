@@ -385,6 +385,7 @@ LC.widgets["blueprintsLibraryPanel.headerSpacer"] = {
     width = "fill", height = 14, order = 8,
 }
 LC.widgets["blueprintsLibraryPanel.search"] = {
+    search = true,   -- magnifier + clear "x", as Recipe Sources (Vamoose, 2026-10-26)
     tooltip = false, kind = "editbox", ["in"] = "blueprintsLibraryPanel", slot = "header",
     font = "body", height = 22, width = 260, order = 9, multiline = false,
     placeholder = "locale:BP_LIBRARY_SEARCH",

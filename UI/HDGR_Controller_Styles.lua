@@ -323,7 +323,7 @@ end
 
 -- ===== _paintLandingCategory =================================================
 -- Category row (or the loose fold). Flat header band, no wood beam, 22px label
--- indent, text-glyph chevron (the Trainers idiom). Single writer of every
+-- indent, text-glyph chevron (the nav fold's idiom). Single writer of every
 -- category widget; hides the card cluster and the header button.
 local function _paintLandingCategory(row, ed)
     HDG.UI.applyFontRole(row._labelFs, "body")
@@ -1839,16 +1839,9 @@ function StylesController:Wire(rootFrame)
     end)
     -- Search editbox: dispatch SET_SEARCH on user input (userInput guard skips
     -- the binding's own SetText echo).
-    local exportSearch = HDG.UI.W(rootFrame, "stylesPanel.exportSearch")
-    if exportSearch and exportSearch.SetScript then
-        exportSearch:SetScript("OnTextChanged", function(self_, userInput)
-            if not userInput then return end
-            HDG.Store:Dispatch({
-                type    = HDG.Constants.ACTIONS.STYLES_EXPORT_SET_SEARCH,
-                payload = { text = (self_.GetText and self_:GetText()) or "" },
-            })
-        end)
-    end
+    HDG.UI.WireTextChanged(HDG.UI.W(rootFrame, "stylesPanel.exportSearch"), function(text)
+        HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.STYLES_EXPORT_SET_SEARCH, payload = { text = text } })
+    end)
     -- Code box: highlight-all on focus so Ctrl+C grabs everything.
     local exportCode = HDG.UI.W(rootFrame, "stylesPanel.exportCode")
     if exportCode and exportCode.EditBox then

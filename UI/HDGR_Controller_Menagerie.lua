@@ -274,12 +274,7 @@ local LAZY = {
             HDG.ControllerHelpers.Mechanics.SetUITransientView("menagerie", "search", text)
         end
         C._searchBox = w          -- a suggestion click writes the picked kind back into it
-        HDG.UI.WireTextChanged(w, set)
-        -- The clear "x" calls SetText(""), which fires OnTextChanged WITHOUT
-        -- userInput -- so the guarded handler above ignores it and the state
-        -- would keep the old needle while the box read empty. The x reports
-        -- itself instead.
-        w._hdgrOnClear = function() set("") end
+        HDG.UI.WireTextChanged(w, set)   -- also wires the clear "x" (UI.WireTextChanged)
     end },
 }
 

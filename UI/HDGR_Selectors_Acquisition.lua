@@ -120,10 +120,10 @@ Selectors:Register("acq.allVendors", {
         end
 
         -- Union recipe vendors. byVendor only knows DECOR sellers, so recipe-only
-        -- quartermasters (Lyrendal, Construct V'anore -- 0 decor) are invisible
-        -- above. Stamp recipeCount on catalog vendors that also sell recipes; add
-        -- the recipe-only ones from VendorAugment (which now covers them).
-        for npcID, count in pairs(HDG.StaticData.Recipes:RecipeVendorCounts()) do
+        -- vendors (Lyrendal, Construct V'anore, the Ashran profession vendors -- 0
+        -- decor) are invisible above. Stamp recipeCount on catalog vendors that also
+        -- sell recipes; add the recipe-only ones from VendorAugment (which covers them).
+        for npcID, count in pairs(HDG.StaticData.RecipeSources:VendorCounts()) do
             local idx = seen[npcID]
             if idx then
                 list[idx].recipeCount = count
@@ -142,7 +142,7 @@ Selectors:Register("acq.allVendors", {
                     }
                 end
                 -- Missing from VendorAugment: skipped. The gap is warned once by
-                -- HDG.StaticData's recipe-index cross-check (selectors stay pure).
+                -- RecipeSources:VendorAugmentGaps after the recipe scan (selectors stay pure).
             end
         end
         -- pairs() yields entries in undefined order -- sort by name then zone
@@ -743,22 +743,33 @@ Selectors:Register("acq.items", {
     end,
 })
 
+-- The first vendor source a recipe lists, or nil when no vendor sells it
+-- (trainer, drop, quest ... -- nothing to buy).
+local function _firstVendorSource(sources)
+    for _, src in ipairs(sources) do
+        if src.kind == "vendor" then return src end
+    end
+    return nil
+end
+
 -- Flat teaching-scroll list for the Find Decor "Recipes" preset. One row per
 -- recipe scroll -- the buyable item that adds a recipe to the profession book,
 -- NOT the craftable recipe itself (that lives in the Recipes tab). Mirrors the
 -- acq.selected.recipes envelope so acqVendorItemListRow paints it identically
--- (icon | "Recipe: <name>" | cost). Cost/rep/source come from the first vendor;
--- non-vendor-sourced recipes (drops/quests) are skipped -- nothing to buy.
+-- (icon | "Recipe: <name>" | cost). Cost/rep come from the recipe's FIRST vendor
+-- source (the detail's "Available from" lists every vendor); recipes no vendor
+-- sells are skipped. itemNames: an item-token price is written out by name.
 Selectors:Register("acq.allRecipes", {
     memoized = true,
-    reads = {"session.resolvers.staticData.tick", "account.recipes"},
+    reads = {"session.resolvers.staticData.tick", "session.itemNames.names"},
+    calls = {"recipes.knowledge"},
     fn = function(state)
         local out = {}
+        local knowledge = Selectors:Call("recipes.knowledge", state)
+        local Sources = HDG.StaticData.RecipeSources
         for _, entry in pairs(HDG.StaticData.Recipes:GetAll()) do
-            local rs = entry.recipeSource
-            local v  = rs and rs.vendors and rs.vendors[1]  -- exception(boundary): recipeSource optional / non-vendor source
-            if entry.itemID and v then
-                local rk = state.account.recipes[entry.itemID]
+            local v = _firstVendorSource(Sources:Get(entry.itemID).sources)
+            if v then  -- exception(nullable): most recipes are trained, dropped or quested, not sold
                 out[#out + 1] = {
                     kind            = "recipe",
                     itemID          = entry.itemID,
@@ -766,8 +777,8 @@ Selectors:Register("acq.allRecipes", {
                     teaches         = entry.name,        -- decor the scroll unlocks (detail "Teaches:")
                     profession      = entry.profession,
                     professionAtlas = HDG.Format.ProfessionAtlas(entry.profession),
-                    isKnown         = rk ~= nil and (rk.selfKnown or rk.altKnown) or false,
-                    costText        = HDG.Format.FormatVendorCost(v.cost),
+                    isKnown         = (knowledge.mine[entry.itemID] or knowledge.alts[entry.itemID]) == true,
+                    costText        = HDG.Format.FormatRecipeCost(v),
                     factionID       = v.factionID,
                     minRep          = v.minRep,
                 }
@@ -1321,28 +1332,24 @@ end
 
 -- True when the vendor sells at least one recipe the player doesn't know.
 -- Drives "Recipes + Missing" (missing = unknown recipe, not uncollected decor).
--- Reads account.recipes (declared on acq.vendors).
-local function _vendorHasUnknownRecipe(state, npcID)
-    local entries = HDG.StaticData.Recipes:GetBySourceNpcID(npcID)
-    if not entries then return false end
-    local known = state.account.recipes
-    for _, e in ipairs(entries) do
-        local rk = known[e.itemID]
-        if not (rk and (rk.selfKnown or rk.altKnown)) then return true end
+-- `knowledge` is recipes.knowledge (called by acq.vendors); known = by anyone on the account.
+local function _vendorHasUnknownRecipe(knowledge, npcID)
+    local offers = HDG.StaticData.RecipeSources:GetByNpcID(npcID)
+    if not offers then return false end  -- exception(nullable): most vendors sell no recipe
+    for _, offer in ipairs(offers) do
+        if not (knowledge.mine[offer.itemID] or knowledge.alts[offer.itemID]) then return true end
     end
     return false
 end
 
--- True when the vendor sells at least one rep-gated recipe (factionID > 0).
--- Lets the "Rep" preset surface recipe rep gates -- the catalog only knows
--- rep-gated decor; recipe rep gates live in recipeSource.vendors.
+-- True when the vendor sells at least one rep-gated recipe. Lets the "Rep" preset
+-- surface recipe rep gates -- the catalog only knows rep-gated decor; recipe rep
+-- gates sit on each vendor's source in the recipe source augment.
 local function _vendorHasRepGatedRecipe(npcID)
-    local entries = HDG.StaticData.Recipes:GetBySourceNpcID(npcID)
-    if not entries then return false end
-    for _, e in ipairs(entries) do
-        for _, v in ipairs(e.recipeSource.vendors) do
-            if v.npcID == npcID and (v.factionID or 0) > 0 then return true end
-        end
+    local offers = HDG.StaticData.RecipeSources:GetByNpcID(npcID)
+    if not offers then return false end  -- exception(nullable): most vendors sell no recipe
+    for _, offer in ipairs(offers) do
+        if offer.source.factionID then return true end  -- exception(optional): a source with no rep gate has no factionID
     end
     return false
 end
@@ -1356,8 +1363,8 @@ end
 
 Selectors:Register("acq.vendors", {
     memoized = true,  -- perf: filters the vendor walk; memo dedupes per flush
-    reads = {"session.resolvers.staticData.tick", "account.recipes"},
-    calls = {"acq.allVendors", "acq.filterQuery", "acq.factionFilter",
+    reads = {"session.resolvers.staticData.tick"},
+    calls = {"recipes.knowledge", "acq.allVendors", "acq.filterQuery", "acq.factionFilter",
              "acq.zoneFilter", "acq.repFilter", "acq.sourceFilter",
              "acq.expansionFilter", "acq.preset", "acq.missingOnly",
              "acq.currencyFilter", "acq.matchesItemFilters"},
@@ -1411,7 +1418,7 @@ Selectors:Register("acq.vendors", {
             -- Currency asks this vendor's own price, on an item the item filters pass too.
             local currencyOK = (not hasCurrency) or _vendorSellsFor(v, currencySet, itemPred)
             -- Rep preset also matches a vendor selling a rep-gated RECIPE (the
-            -- catalog only knows rep-gated decor; recipe gates live in recipeSource).
+            -- catalog only knows rep-gated decor; recipe gates live in RecipeSources).
             if not itemOK and preset == "reputation" and _vendorHasRepGatedRecipe(v.npcID) then
                 itemOK = true
             end
@@ -1421,7 +1428,7 @@ Selectors:Register("acq.vendors", {
             if not recipesPreset then
                 recipeOK = true
             elseif missingOnly then
-                recipeOK = _vendorHasUnknownRecipe(state, v.npcID)
+                recipeOK = _vendorHasUnknownRecipe(Selectors:Call("recipes.knowledge", state, ctx), v.npcID)
             else
                 recipeOK = v.recipeCount > 0
             end
@@ -1795,38 +1802,41 @@ Selectors:Register("acq.isItemsView_list", {
 -- "Available from" list shows the vendor(s) that sell the SCROLL -- reusing the
 -- decor-item vendor row (name/zone/cost + Wpt/Map) so where + waypoint come for
 -- free. Rows carry VendorAugment coords (zone-pct) the Wpt/Map buttons consume.
+-- One row per vendor source in the recipe source augment, each priced at THAT vendor.
+local function _recipeVendorRow(v)
+    local meta = HDG.StaticData.VendorAugment:Get(v.npcID)  -- exception(boundary): generated augment
+    return {
+        costLine   = HDG.Format.FormatRecipeCost(v),
+        npcID      = v.npcID,
+        name       = (meta and meta.name) or ("NPC " .. tostring(v.npcID)),  -- exception(boundary): augment gap
+        zone       = (meta and meta.zone) or "",
+        mapID      = meta and meta.mapID,
+        x          = meta and meta.x,
+        y          = meta and meta.y,
+        faction    = (meta and meta.faction) or "",
+        factionRaw = (meta and meta.faction) or "",
+        mappable   = meta ~= nil and HDG.VendorRank.HasLocation(meta.mapID, meta.x, meta.y),
+        expansion  = meta and meta.exp,
+        costText   = "",
+        goldCost   = 0,
+        factionID  = v.factionID or 0,
+        minRep     = v.minRep or 0,
+        repName    = "",
+    }
+end
+
 local function _recipeVendorRows(itemID)
-    local entry = HDG.StaticData.Recipes:Get(itemID)
-    local rs    = entry and entry.recipeSource
-    if not (rs and rs.vendors) then return {} end
     local out = {}
-    for _, v in ipairs(rs.vendors) do
-        local meta = HDG.StaticData.VendorAugment:Get(v.npcID)  -- exception(boundary): generated augment
-        out[#out + 1] = {
-            costLine   = HDG.Format.FormatVendorCost(v.cost),
-            npcID      = v.npcID,
-            name       = (meta and meta.name) or ("NPC " .. tostring(v.npcID)),  -- exception(boundary): augment gap
-            zone       = (meta and meta.zone) or "",
-            mapID      = meta and meta.mapID,
-            x          = meta and meta.x,
-            y          = meta and meta.y,
-            faction    = (meta and meta.faction) or "",
-            factionRaw = (meta and meta.faction) or "",
-            mappable   = meta ~= nil and HDG.VendorRank.HasLocation(meta.mapID, meta.x, meta.y),
-            expansion  = meta and meta.exp,
-            costText   = "",
-            goldCost   = 0,
-            factionID  = v.factionID or 0,
-            minRep     = v.minRep or 0,
-            repName    = "",
-        }
+    for _, v in ipairs(HDG.StaticData.RecipeSources:Get(itemID).sources) do
+        if v.kind == "vendor" then out[#out + 1] = _recipeVendorRow(v) end
     end
     table.sort(out, function(a, b) return (a.name or "") < (b.name or "") end)
     return out
 end
 
 Selectors:Register("acq.selectedItem.vendors", {
-    reads = {"session.resolvers.staticData.tick", "session.resolvers.catalog.tick"},
+    -- itemNames: a recipe vendor's item-token price is written out by name.
+    reads = {"session.resolvers.staticData.tick", "session.resolvers.catalog.tick", "session.itemNames.names"},
     calls = {"acq.selectedItemID", "acq.selectedRecipe"},
     fn = function(state, ctx)
         -- Recipe scroll selected -> its vendors (reuses the same row shape).
@@ -2162,50 +2172,41 @@ Selectors:Register("acq.selected.items", {
 })
 
 -- Recipes the SELECTED vendor sells (Acquire By-Vendor). The catalog can't
--- surface recipe purchases, so this reads the StaticData reverse index over
--- recipeSource.vendors + account.recipes for known-state. One row per recipe
--- sold by selectedNpcID; cost/rep come from THIS vendor's recipeSource.vendors[]
--- record (a recipe sold by 2 vendors thus appears under each -- the 41-vs-31 split).
+-- surface recipe purchases, so this reads RecipeSources' vendor index (the
+-- recipe source augment) + recipes.knowledge for known-state. One row per recipe
+-- sold by selectedNpcID; cost/rep come from THIS vendor's source record (a recipe
+-- sold by 2 vendors thus appears under each, priced at each). Name and profession
+-- come from DecorDB. itemNames: an item-token price is written out by name.
 Selectors:Register("acq.selected.recipes", {
     memoized = true,
     reads = {
         "session.resolvers.staticData.tick",  -- ADR-003c StaticData marker (sweep rule 4c)
         "session.ui.acquisition.selectedNpcID",
-        "account.recipes",
+        "session.itemNames.names",
     },
+    calls = { "recipes.knowledge" },
     fn = function(state)
         local npcID = state.session.ui.acquisition.selectedNpcID
         if not npcID then return {} end
-        local entries = HDG.StaticData.Recipes:GetBySourceNpcID(npcID)
-        if not entries then return {} end
+        local offers = HDG.StaticData.RecipeSources:GetByNpcID(npcID)
+        if not offers then return {} end  -- exception(nullable): most vendors sell no recipe
+        local knowledge = Selectors:Call("recipes.knowledge", state)
         local out = {}
-        for _, entry in ipairs(entries) do
-            -- This vendor's own record (cost/rep). Guaranteed present: the index
-            -- is built FROM vendors[].npcID, so the matching record always exists.
-            local vrec
-            for _, v in ipairs(entry.recipeSource.vendors) do
-                if v.npcID == npcID then vrec = v; break end
-            end
-            -- account.recipes is sparse until RecipeKnowledgeScanner runs
-            -- (DECOR_CATALOG_READY); absent entry => not-yet-known.
-            local rk = state.account.recipes[entry.itemID]
-            -- exception(nullable): impossible by construction (the byNpc index is
-            -- built FROM vendors[].npcID); the skip stays so a data-export gap can't
-            -- crash this memoized selector on FormatVendorCost. Selectors don't log.
-            if vrec then
-                out[#out + 1] = {
-                    kind       = "recipe",
-                    itemID     = entry.itemID,
-                    name       = "Recipe: " .. entry.name,
-                    profession = entry.profession,
-                    professionAtlas = HDG.Format.ProfessionAtlas(entry.profession),  -- resolved here, not at paint
+        for _, offer in ipairs(offers) do
+            local entry = HDG.StaticData.Recipes:Get(offer.itemID)
+            local src   = offer.source
+            out[#out + 1] = {
+                kind       = "recipe",
+                itemID     = offer.itemID,
+                name       = "Recipe: " .. entry.name,
+                profession = entry.profession,
+                professionAtlas = HDG.Format.ProfessionAtlas(entry.profession),  -- resolved here, not at paint
 
-                    isKnown    = rk ~= nil and (rk.selfKnown or rk.altKnown) or false,
-                    costText   = HDG.Format.FormatVendorCost(vrec.cost),
-                    factionID  = vrec.factionID,
-                    minRep     = vrec.minRep,
-                }
-            end
+                isKnown    = (knowledge.mine[offer.itemID] or knowledge.alts[offer.itemID]) == true,
+                costText   = HDG.Format.FormatRecipeCost(src),
+                factionID  = src.factionID,
+                minRep     = src.minRep,
+            }
         end
         table.sort(out, function(a, b) return a.name < b.name end)
         return out
@@ -2300,7 +2301,7 @@ Selectors:Register("acq.selectedRecipe", {
 -- Un-augmented vendors (12.0.7 additions the augment doesn't cover yet) have
 -- only the catalog's zone STRING -- resolve it to a uiMapID and draw the zone
 -- pinless rather than showing nothing. ZoneNameResolver is a deterministic
--- static facade (Recipes:RecipeVendorCounts precedent).
+-- static facade (RecipeSources:VendorCounts precedent).
 Selectors:Register("acq.selected.mapPoint", {
     calls = {"acq.selectedVendor"},
     fn = function(state, ctx)

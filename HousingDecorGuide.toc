@@ -2,7 +2,7 @@
 ## Title: Vamoose's Housing Decor Guide
 ## Notes: Track, craft, preview, and acquire housing decorations across all professions
 ## Author: Vamoose
-## Version: 3.39.2
+## Version: 3.40.0
 ## SavedVariables: HDG_DB
 ## SavedVariablesPerCharacter: HDG_DB_CURRENT_PROFILE
 ## IconTexture: Interface\AddOns\HousingDecorGuide\textures\Vamoose_HDG_400_trans
@@ -97,7 +97,7 @@ UI\LayoutConfig\HDGR_LayoutConfig_Warehouse.lua
 UI\LayoutConfig\HDGR_LayoutConfig_Alts.lua
 UI\LayoutConfig\HDGR_LayoutConfig_Mogul.lua
 UI\LayoutConfig\HDGR_LayoutConfig_Styles.lua
-UI\LayoutConfig\HDGR_LayoutConfig_Trainers.lua
+UI\LayoutConfig\HDGR_LayoutConfig_RecipeSources.lua
 UI\LayoutConfig\HDGR_LayoutConfig_HouseTab.lua
 UI\LayoutConfig\HDGR_LayoutConfig_Debug.lua
 UI\LayoutConfig\HDGR_LayoutConfig_Config.lua
@@ -128,7 +128,7 @@ UI\HDGR_Selectors_Acquisition.lua
 UI\HDGR_Selectors_Catalog.lua
 UI\HDGR_Selectors_Recipes.lua
 UI\HDGR_Selectors_Alts.lua
-UI\HDGR_Selectors_Trainers.lua
+UI\HDGR_Selectors_RecipeSources.lua
 UI\HDGR_Selectors_Companion.lua
 UI\HDGR_Selectors_House.lua
 UI\HDGR_Selectors_Mogul.lua
@@ -151,6 +151,7 @@ UI\HDGR_RowRegistry.lua
 # ===== Data (loaded only when a consumer needs it) =====
 data\HDGR_DecorDB.lua
 data\HDGR_VendorAugment.lua
+data\HDGR_RecipeSourceAugment.lua
 data\HDGR_FacetDB.lua
 data\HDGR_ReagentsDB.lua
 data\HDGR_ProfessionsDB.lua
@@ -191,7 +192,6 @@ Modules\HDGR_RepObserver.lua
 Modules\HDGR_AchievementObserver.lua
 # Owns C_PetJournal. Indexes the decor-attachable pets for the Pets browser.
 Modules\HDGR_PetObserver.lua
-Modules\HDGR_RecipeKnowledgeScanner.lua
 Modules\HDGR_Waypoints.lua
 # Shopping list codec (export/import). Pure module; no Blizzard API surface.
 Modules\HDGR_ShoppingCodec.lua
@@ -207,8 +207,8 @@ Modules\HDGR_NPCNameResolver.lua
 Modules\HDGR_ZoneNameResolver.lua
 Modules\HDGR_SessionIdentity.lua
 # SessionIdentity dispatches SESSION_IDENTITY_SET at onEnable; consumers
-# (Mogul, RecipeKnowledgeScanner, ProfessionScanner, StyleSerializer,
-#  Selectors_Alts, Selectors_Trainers) read state.session.identity.
+# (Mogul, ProfessionScanner, StyleSerializer,
+#  Selectors_Alts, Selectors_RecipeSources) read state.session.identity.
 Modules\HDGR_HouseAggregator.lua
 Modules\HDGR_HouseEditorCompanion.lua
 Modules\HDGR_PlacedDecorSearch.lua
@@ -258,7 +258,7 @@ UI\HDGR_QuantityPicker.lua
 UI\HDGR_Controller_Recipes.lua
 UI\HDGR_Controller_Warehouse.lua
 UI\HDGR_Controller_Alts.lua
-UI\HDGR_Controller_Trainers.lua
+UI\HDGR_Controller_RecipeSources.lua
 UI\HDGR_HT_LevelRing.xml
 UI\HDGR_Controller_HouseTab.lua
 UI\HDGR_Controller_Mogul.lua

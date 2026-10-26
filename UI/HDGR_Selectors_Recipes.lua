@@ -33,35 +33,42 @@ local function _overlayReagents(captured, seedReagents)
 end
 
 -- The single read seam for recipe REAGENTS: the shipped seed (StaticData.Recipes)
--- with runtime-captured reagents + profession overlaid per crafted-decor itemID
+-- with runtime-captured reagents overlaid per crafted-decor itemID
 -- (account.recipeCapture, filled by ProfessionScanner:CaptureRecipeData). This is
 -- how 12.1's reduced-lumber costs reach the UI without a seed reship -- the scan
 -- overrides whatever the seed shipped. Identity fields (name/spellID/decorID/
--- category) stay seed-owned; only reagents + profession are corrected, and only
--- on entries the seed already knows (new-recipe materialization is a later stage).
+-- category/profession) stay seed-owned; only reagents are corrected on entries the
+-- seed knows. A capture's profession is used only for a recipe the seed does not ship.
+-- Profession is seed-owned because a recipe never changes profession, and this merge is
+-- the one place that holds both the seed and the capture to judge them. Captures saved
+-- through 3.39.2 labelled every recipe with the open WINDOW's profession, and a guild scan
+-- saved all of Leatherworking's recipes as "Mining" (2026-10-25): with capture-wins, the
+-- Recipes list grew a Mining group of Leatherworking decor. Every capture that disagreed
+-- with the seed on two accounts was one of those. Judging here repairs those saves on
+-- read, with no migration, and a bad label cannot come back the same way.
 -- Memoized on account.recipeCapture: rebuilds only when a scan changes capture.
 -- Keyed by crafted-decor itemID to match StaticData.Recipes:Get -- consumers that
 -- did :Get(itemID) index this by the same key. (GetAll's raw table is keyed by the
 -- DecorDB synthetic build-ID instead, so we re-key here; iteration consumers read
 -- entry.itemID either way.)
--- The scanner captures C_TradeSkillUI.GetBaseProfessionInfo().professionName, which is
--- LOCALIZED ("Alchemie" on deDE). Stamping that over the seed's English value breaks
--- every join against the curated English data -- HDGR_Profession.lua's own header calls
--- this out and names captured recipes specifically. Map it back through the alias index
--- here rather than at capture, so SavedVariables already written by a non-enUS client are
--- repaired on read too. An unmapped name is kept as-is: that means PROFESSION_DATA is
--- missing an alias, which is a data gap to fix, not something to silently drop.
+-- The scanner captures the profession name LOCALIZED ("Alchemie" on deDE). Using that
+-- for a seed-absent recipe breaks every join against the curated English data --
+-- HDGR_Profession.lua's own header calls this out and names captured recipes
+-- specifically. Map it back through the alias index here rather than at capture, so
+-- SavedVariables already written by a non-enUS client are repaired on read too. An
+-- unmapped name is kept as-is: that means PROFESSION_DATA is missing an alias, which is
+-- a data gap to fix, not something to silently drop.
 local function _canonProfession(name)
     if not name then return nil end   -- exception(nullable): pre-walk captures have no profession yet
     local entry = HDG.Profession.GetByName(name)
     return entry and entry.name or name
 end
 
--- True when a capture says what the seed entry already says: the seed ships from
--- scans, so most captures match it (321 of 346 on one account, 2026-10-21), and a
--- copy of each was most of this selector's 749 KB a build.
+-- True when a capture's reagents are what the seed entry already ships: the seed
+-- ships from scans, so most captures match it (321 of 346 on one account,
+-- 2026-10-21), and a copy of each was most of this selector's 749 KB a build.
+-- Profession is not compared -- the seed owns it (see recipes.db's header).
 local function _captureMatchesSeed(ov, entry)
-    if _canonProfession(ov.profession) ~= entry.profession then return false end
     local seedReagents = entry.reagents
     if not seedReagents then return next(ov.reagents) == nil end  -- exception(optional): a seed entry may ship without reagents
     for rid, qty in pairs(ov.reagents) do
@@ -89,8 +96,7 @@ Selectors:Register("recipes.db", {
                 elseif ov then
                     local m = {}
                     for k, v in pairs(entry) do m[k] = v end
-                    m.profession = _canonProfession(ov.profession)
-                    m.reagents   = _overlayReagents(ov.reagents, entry.reagents)
+                    m.reagents = _overlayReagents(ov.reagents, entry.reagents)
                     merged[entry.itemID] = m
                 else
                     merged[entry.itemID] = entry   -- unchanged: share the seed ref
@@ -116,6 +122,77 @@ Selectors:Register("recipes.db", {
             end
         end
         return merged
+    end,
+})
+
+-- [spellID] = decor itemID over recipes.db (seed + capture): the decor recipe set the
+-- knowledge derivation and ProfessionScanner's spellbook pass both walk. Rebuilt only
+-- when recipes.db is.
+Selectors:Register("recipes.spellToItem", {
+    memoized = true,
+    calls    = { "recipes.db" },
+    fn = function(state, ctx)
+        local out = {}
+        for itemID, r in pairs(Selectors:Call("recipes.db", state, ctx)) do
+            if r.spellID then out[r.spellID] = itemID end  -- exception(nullable): a capture saved before spellIDs were stamped carries none
+        end
+        return out
+    end,
+})
+
+-- One character's decor recipes, from the lists, into a set of crafted itemIDs.
+local function _collectKnownDecor(char, spellToItem, into)
+    for _, prof in pairs(char.professions) do
+        for spellID in pairs(prof.knownRecipes) do
+            local itemID = spellToItem[spellID]  -- exception(nullable): most known recipes are not decor
+            if itemID then into[itemID] = true end
+        end
+    end
+end
+
+-- One alt's decor recipes into the alt set, and the alt ({ name, classFile }) onto each
+-- recipe's list (a recipe two of its records list still names it once).
+local function _collectAltDecor(charKey, char, spellToItem, alts, altChars)
+    local own = {}
+    _collectKnownDecor(char, spellToItem, own)
+    local who = { name = char.name or charKey, classFile = char.classFile }   -- exception(nullable): a record with no name goes by its key
+    for itemID in pairs(own) do
+        alts[itemID] = true
+        if not altChars[itemID] then altChars[itemID] = {} end   -- exception(nullable): the first alt found for this recipe
+        table.insert(altChars[itemID], who)
+    end
+end
+
+local function _byName(a, b) return a.name < b.name end
+
+-- Who knows each decor recipe -- the one place "known" is decided. `mine` = the
+-- logged-in character's lists (counted even when that character is hidden, as the
+-- spellbook was); `alts` = every other non-hidden character's. Both are sets of crafted
+-- itemIDs; `altChars` lists those alts per itemID ({ name, classFile }, by name) for
+-- showing who. The lists in account.characters are the only store; ProfessionScanner keeps
+-- the logged-in character's in line with the spellbook. It reads one field of each
+-- roster record through Paths' "*" segment, so a reagent or essence snapshot (every
+-- bag change) leaves the memo alone. Before SESSION_IDENTITY_SET the charKey is "" and
+-- everyone non-hidden reads as an alt; the memo drops when identity lands.
+Selectors:Register("recipes.knowledge", {
+    memoized = true,
+    reads    = { "account.characters.*.professions", "account.characters.*.hidden",
+                 "account.characters.*.name", "account.characters.*.classFile",
+                 "session.identity.charKey" },
+    calls    = { "recipes.spellToItem" },
+    fn = function(state, ctx)
+        local spellToItem = Selectors:Call("recipes.spellToItem", state, ctx)
+        local current = state.session.identity.charKey
+        local mine, alts, altChars = {}, {}, {}
+        for charKey, char in pairs(state.account.characters) do
+            if charKey == current then
+                _collectKnownDecor(char, spellToItem, mine)
+            elseif not char.hidden then
+                _collectAltDecor(charKey, char, spellToItem, alts, altChars)
+            end
+        end
+        for _, list in pairs(altChars) do table.sort(list, _byName) end
+        return { mine = mine, alts = alts, altChars = altChars }
     end,
 })
 
@@ -240,16 +317,14 @@ Selectors:Register("recipes.materialsDepthOptions", {
 local EMPTY_SET = {}
 Selectors:Register("recipes.professionFilter", {
     reads = { "account.ui.recipes.professionFilterByChar",
-              "session.identity.charKey", "account.characters" },
+              "session.identity.charKey", "account.characters.*.professions" },
     fn = function(state)
         local set = state.account.ui.recipes.professionFilterByChar[state.session.identity.charKey]
         if set then return set end   -- explicit choice (incl. empty = all)
         -- Pristine: default to this character's professions.
         local char = state.account.characters[state.session.identity.charKey]   -- exception(nullable): char record may not exist yet
-        if not (char and type(char.professions) == "table") then return EMPTY_SET end
-        local out = {}
-        for profName in pairs(char.professions) do out[profName] = true end
-        return out
+        if not char then return EMPTY_SET end
+        return HDG.Profession.NamesOf(char)
     end,
 })
 
@@ -618,10 +693,9 @@ end
 -- ProfessionsDB read per ADR-003a carve-out.
 Selectors:Register("recipes.allRecipes", {
     memoized = true,  -- perf: ~1050-row walk; called by professionRows/groupedRows/filteredRecipes
-    calls = { "recipes.db" },
+    calls = { "recipes.db", "recipes.knowledge" },
     reads = {
         "session.itemNames.names",  -- resolver-facade contract (sweep rule 4c)
-        "account.recipes",
         "account.collection.ownedDecorIDs",
         "session.resolvers.catalog.tick",
     },
@@ -632,14 +706,14 @@ Selectors:Register("recipes.allRecipes", {
         -- (nil for a not-yet-enriched captured recipe -> uncategorized); icon comes from the item.
         local db = Selectors:Call("recipes.db", state)
         if type(db) ~= "table" then return {} end
-        -- EnsureStateShape guarantees account.recipes + account.collection. Strict read.
-        local knownByItem = state.account.recipes
+        -- isKnown = known by anyone on the account (recipes.knowledge: mine or an alt's).
+        local knowledge   = Selectors:Call("recipes.knowledge", state)
+        local mine, alts  = knowledge.mine, knowledge.alts
         local owned       = state.account.collection.ownedDecorIDs
         local byItemID    = HDG.HousingCatalogObserver.byItemID
         local out = {}
         for _, r in pairs(db) do
             if r.itemID then
-                local known   = knownByItem[r.itemID]
                 local obsRow  = byItemID[r.itemID]
                 local decorID = obsRow and obsRow.decorID
                 local exp     = HDG.Expansion.FromSkillLine(r.expansion)
@@ -651,7 +725,7 @@ Selectors:Register("recipes.allRecipes", {
                     expansion        = exp,
                     expansionShort   = expansionShort(exp),
                     icon             = HDG.ItemNameResolver:ResolveIcon(r.itemID),
-                    isKnown          = (known and (known.selfKnown or known.altKnown)) and true or false,
+                    isKnown          = (mine[r.itemID] or alts[r.itemID]) == true,
                     -- True when the produced decor is owned. Drives green-name treatment.
                     isDecorCollected = (decorID ~= nil) and owned[decorID] and true or false,
                 }
@@ -813,10 +887,12 @@ Selectors:Register("recipes.professionRows", {
     end,
 })
 
--- professionMenuItems: static 9-row progress guide + "All Professions" master row.
--- Known/total from professionRows. Icon baked into label (Blizzard Menu can't CreateTexture).
+-- professionMenuItems: static 9-row progress guide + "All Professions" master row,
+-- then a divider and a Profession / Known header over the 9 rows. Known/total from
+-- professionRows rides in `right` (the dropdown's count column). Icon baked into label.
 Selectors:Register("recipes.professionMenuItems", {
-    reads = { "session.identity.charKey", "account.characters" },
+    -- One field of the roster: a reagent or essence snapshot leaves the menu alone.
+    reads = { "session.identity.charKey", "account.characters.*.professions" },
     calls = {"recipes.professionRows"},
     fn = function(state, ctx)
         local rows = Selectors:Call("recipes.professionRows", state, ctx)
@@ -832,9 +908,9 @@ Selectors:Register("recipes.professionMenuItems", {
         -- THIS character has scanned, as a one-click preset.
         local out  = {}
         local char = state.account.characters[state.session.identity.charKey]   -- exception(nullable): char record may not exist yet
-        if char and type(char.professions) == "table" then
+        if char then
             local mKnown, mTotal, n = 0, 0, 0
-            for profName in pairs(char.professions) do
+            for profName in pairs(HDG.Profession.NamesOf(char)) do
                 local r = byProf[profName]
                 if r then mKnown = mKnown + r.known; mTotal = mTotal + r.total end
                 n = n + 1
@@ -842,7 +918,7 @@ Selectors:Register("recipes.professionMenuItems", {
             if n > 0 then
                 out[#out + 1] = {
                     kind  = "checkbox", isMine = true, value = "mine",
-                    text  = "My Professions  " .. mKnown .. "/" .. mTotal,
+                    text  = "My Professions", right = mKnown .. "/" .. mTotal,
                     known = mKnown, total = mTotal,
                     pct   = mTotal > 0 and mKnown / mTotal or 0,
                 }
@@ -850,22 +926,25 @@ Selectors:Register("recipes.professionMenuItems", {
         end
         out[#out + 1] = {
             kind  = "checkbox", isAll = true, value = "all",
-            text  = "All Professions  " .. aKnown .. "/" .. aTotal,
+            text  = "All Professions", right = aKnown .. "/" .. aTotal,
             known = aKnown, total = aTotal,
             pct   = aTotal > 0 and aKnown / aTotal or 0,
         }
+        out[#out + 1] = { kind = "divider" }
+        out[#out + 1] = { kind = "title", text = HDG.Locale:Get("REC_HEAD_PROF"),
+                          right = HDG.Locale:Get("REC_HEAD_KNOWN") }
         for i = 1, 9 do
             local p = HDG.Constants.PROFESSION_DATA[i]
             if p and p.name then
                 local r     = byProf[p.name]
                 local known = r and r.known or 0
                 local total = r and r.total or 0
-                -- Plain multi-select checkbox: atlas + name + known/total baked into label.
+                -- Plain multi-select checkbox: atlas + name, known/total in the right column.
                 out[#out + 1] = {
                     kind    = "checkbox",
                     value   = p.name,
-                    text    = "|A:" .. (p.atlas or "") .. ":14:14|a " .. p.name
-                              .. "  " .. known .. "/" .. total,
+                    text    = "|A:" .. (p.atlas or "") .. ":14:14|a " .. p.name,
+                    right   = known .. "/" .. total,
                     atlas   = p.atlas,
                     known   = known,
                     total   = total,
@@ -957,12 +1036,11 @@ Selectors:Register("recipes.gridRows", {
 -- queueRows: one per queue entry. canCraft/maxCraftable from bag counts.
 -- selfKnown gates the craft button (alt-known recipes can't be crafted here).
 Selectors:Register("recipes.queueRows", {
-    reads = {"session.itemNames.names", "account.craft.queue", "session.resolvers.staticData.tick", "session.resolvers.bag.tick",
-             "account.recipes"},
-    calls = {"recipes.db", "recipes.craftGraph"},
+    reads = {"session.itemNames.names", "account.craft.queue", "session.resolvers.staticData.tick", "session.resolvers.bag.tick"},
+    calls = {"recipes.db", "recipes.craftGraph", "recipes.knowledge"},
     fn = function(state)
         local q        = state.account.craft.queue
-        local known    = state.account.recipes
+        local mine     = Selectors:Call("recipes.knowledge", state).mine
         local counts   = HDG.BagObserver:GetCounts()
         local rdb      = Selectors:Call("recipes.db", state)
         local graph    = Selectors:Call("recipes.craftGraph", state)
@@ -972,9 +1050,8 @@ Selectors:Register("recipes.queueRows", {
             -- recipeID == crafted-decor itemID -> resolver localises (catalog/live API); baked name fallback.
             local recipeName = _localName(row.recipeID, (recipe and recipe.name)
                 or ("recipe " .. tostring(row.recipeID)))
-            local knownRow   = recipe and known[recipe.itemID]
             local spellID    = recipe and recipe.spellID
-            local selfKnown  = (knownRow and knownRow.selfKnown) and true or false
+            local selfKnown  = mine[row.recipeID] == true   -- recipeID IS the crafted itemID
             -- pct: 0..1 ratio of materials covered.
             local pct        = (recipe and spellID)
                 and HDG.PowerCrafter:GetCraftReadiness(graph, row.recipeID, counts) or 0
@@ -1542,7 +1619,7 @@ Selectors:Register("recipes.materials.raw", {
     fn = function(state, ctx)
         local queue = effectiveQueue(state, ctx)
         if not queue then return {} end
-        -- Raw expansion is known-agnostic (no account.recipes dependency).
+        -- Raw expansion is known-agnostic (no recipes.knowledge dependency).
         local qtyMap = HDG.PowerCrafter:CalculateRawMaterials(
             Selectors:Call("recipes.craftGraph", state, ctx), queue)
         return stampBagCounts(qtyMap)

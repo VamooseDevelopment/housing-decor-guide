@@ -315,8 +315,6 @@ HDG.Locale:Register("frFR", {
     TIP_WARN_HARD_RESET_TITLE = "|cffff6060Réinitialisation totale des données|r",
     TIP_WOWHEAD_BODY = "Ouvrir la page Wowhead de cet objet dans votre navigateur",
     TIP_WOWHEAD_TITLE = "Wowhead",
-    TRN_SEARCH_PLACEHOLDER = "Rechercher formateur / zone...",
-    TRN_TITLE = "Formateurs",
     WARE_ALL_MATS_HDR = "Matériaux",
     WARE_AUTOSHOW_TOGGLE = "Afficher auto à la récolte",
     WARE_LUMBER_HDR_BAG = "Sac",

@@ -297,6 +297,42 @@ function HDG.Theme:StateLabel(state, text)
     return self:GetTextStateColorToken(state) .. text .. "|r"
 end
 
+-- A character name in its class color, legible on the current scheme. Class colors are
+-- tuned for dark grounds (Priest is pure white), so on a light scheme each one is
+-- darkened until it reads at 4.5:1 on the lightest surface text sits on (raised) --
+-- Aegis's rule (ThemeEngine LightClassColor, 2026-08-27). Memoised per scheme table.
+-- A GameTooltip stays dark whatever the scheme: tooltips use Format.ClassName as is.
+local LIGHT_CLASS_FLOOR = 4.5
+local _lightClassHex = setmetatable({}, { __mode = "k" })   -- [scheme] = { [classFile] = "ffRRGGBB" }
+
+local function _linear(c)
+    if c <= 0.03928 then return c / 12.92 end
+    return ((c + 0.055) / 1.055) ^ 2.4
+end
+local function _luminance(r, g, b) return 0.2126 * _linear(r) + 0.7152 * _linear(g) + 0.0722 * _linear(b) end
+
+-- "ffRRGGBB" darkened step by step until its contrast with ground reaches the floor.
+local function _darkenToFloor(hex, ground)
+    local r, g, b = tonumber(hex:sub(3, 4), 16) / 255, tonumber(hex:sub(5, 6), 16) / 255, tonumber(hex:sub(7, 8), 16) / 255
+    local floorLum = _luminance(ground.r, ground.g, ground.b)
+    for _ = 1, 60 do
+        local lum = _luminance(r, g, b)
+        if (math.max(lum, floorLum) + 0.05) / (math.min(lum, floorLum) + 0.05) >= LIGHT_CLASS_FLOOR then break end
+        r, g, b = r * 0.96, g * 0.96, b * 0.96
+    end
+    return ("ff%02x%02x%02x"):format(math.floor(r * 255 + 0.5), math.floor(g * 255 + 0.5), math.floor(b * 255 + 0.5))
+end
+
+function HDG.Theme:ClassName(name, classFile)
+    local scheme = self.currentScheme
+    local base = HDG.Constants.CLASS_COLORS[classFile]   -- exception(nullable): legacy roster records predate classFile capture
+    if not (scheme.isLight and base) then return HDG.Format.ClassName(name, classFile) end
+    _lightClassHex[scheme] = _lightClassHex[scheme] or {}   -- exception(nullable): first class name painted under this scheme
+    local perScheme = _lightClassHex[scheme]
+    perScheme[classFile] = perScheme[classFile] or _darkenToFloor(base, scheme.surface.raised)   -- exception(nullable): first paint of this class
+    return "|c" .. perScheme[classFile] .. name .. "|r"
+end
+
 -- Color an item name by collection state: uncollected = text.uncollected (accent),
 -- collected = text.collected (recedes). One place for this token flip.
 function HDG.Theme:CollectionLabel(isCollected, text)
@@ -749,14 +785,14 @@ HDG.Theme.Skinners = {
         setTextColor(text, HDG.Theme:GetColor("semantic.error"))
     end,
 
-    -- Faction tints: fixed Alliance-blue / Horde-red for full-house / exterior
-    -- blueprint rows. Scheme-independent -- faction is a game-wide semantic, not
-    -- a themed color -- so these hardcode readable values rather than GetColor.
+    -- Faction tints for full-house / exterior blueprint rows: the Palette's faction
+    -- brand colors, the same Alliance-blue / Horde-red Recipe Sources' A/H badges use.
+    -- Scheme-independent -- faction is a game-wide semantic, not a themed color.
     TextAlliance = function(text, _scheme)
-        setTextColor(text, { r = 0.30, g = 0.55, b = 1.00, a = 1 })
+        setTextColor(text, HDG.Palette:GetColor("faction.Alliance"))
     end,
     TextHorde = function(text, _scheme)
-        setTextColor(text, { r = 0.92, g = 0.26, b = 0.26, a = 1 })
+        setTextColor(text, HDG.Palette:GetColor("faction.Horde"))
     end,
 
     -- TextInfo: diag.info for low-key status lines.

@@ -179,6 +179,30 @@ local function topCategoryName(categoryID, CT)
     return top
 end
 
+-- The profession a recipe belongs to, asked of the RECIPE, never the open window.
+-- The capture used to stamp GetBaseProfessionInfo's name on every recipe of a walk, and
+-- during a guild scan the window and GetAllRecipeIDs' list were one profession apart:
+-- one account saved all of Leatherworking's recipes as "Mining" and Mining's smelting as
+-- "Skinning" (2026-10-25; the scan queue is alphabetical). GetProfessionInfoByRecipeID
+-- describes the recipe's own skill line whatever is open -- Blizzard's InspectRecipe
+-- calls it for chat-linked recipes with no profession window at all.
+-- Called for kept records only (decor + the sub-recipe closure, and the spellbook pass's
+-- newly learned spells), not every recipe in the book: each call builds a table.
+-- Returns the root profession's (professionID, localized name).
+local function recipeRootProfession(recipeID, CT)
+    local info = CT.GetProfessionInfoByRecipeID(recipeID)
+    -- A recipe sits on an expansion child line ("Dragon Isles Leatherworking"); the root
+    -- profession is its parent. Blizzard's own display name takes the parent, else the
+    -- line itself (Professions.GetProfessionInfo).
+    return info.parentProfessionID or info.professionID,     -- exception(boundary): parentProfessionID is nil on a root skill line
+           info.parentProfessionName or info.professionName  -- exception(boundary): parentProfessionName is nil on a root skill line
+end
+
+local function recipeProfessionName(recipeID, CT)
+    local _, name = recipeRootProfession(recipeID, CT)
+    return name
+end
+
 -- Diff a freshly-scanned record set against a store slot; returns only the records
 -- that are new or changed (shared by the decor + sub-recipe capture paths).
 local function diffAgainstStore(scanned, store)
@@ -219,6 +243,7 @@ local function subRecipeClosure(allByOutput, decorRecipes, CT)
                 local info = CT.GetRecipeInfo(producer.spellID)  -- exception(boundary): nil for stale recipeID
                 local cat  = info and info.categoryID and CT.GetCategoryInfo(info.categoryID)  -- exception(boundary): category tree can be stale
                 producer.categoryName = cat and cat.name
+                producer.profession   = recipeProfessionName(producer.spellID, CT)
                 kept[rid] = producer
                 for rrid in pairs(producer.reagents) do
                     if not wanted[rrid] then
@@ -235,13 +260,14 @@ local function subRecipeClosure(allByOutput, decorRecipes, CT)
 end
 
 -- Walk every recipe in the open profession book once: index ALL craft outputs
--- (closure source), collect decor recipes (catalog-classified, with name/expansion),
--- and record tiered slots' quality groups.
-local function _walkProfessionBook(profName, CT, catalog, ids)
+-- (closure source), collect decor recipes (catalog-classified, with name/expansion/
+-- profession), and record tiered slots' quality groups. Profession is stamped where a
+-- record is kept (here for decor, subRecipeClosure for intermediates).
+local function _walkProfessionBook(CT, catalog, ids)
     local BASIC = (_G.Enum and _G.Enum.CraftingReagentType and _G.Enum.CraftingReagentType.Basic) or 0  -- exception(boundary): enum absent headless; Basic = 0
     local SALVAGE = (_G.Enum and _G.Enum.TradeskillRecipeType and _G.Enum.TradeskillRecipeType.Salvage) or 2  -- exception(boundary): enum absent headless; Salvage = 2
     local recipes, n = {}, 0
-    local allByOutput = {}   -- [outItemID] = { reagents, spellID, profession } -- transient closure index
+    local allByOutput = {}   -- [outItemID] = { reagents, spellID } -- transient closure index (profession stamped on the kept ones)
     local variantGroups = {} -- [reagentID] = sorted sibling ids -- quality groups seen this walk
     for _, recipeID in ipairs(ids) do
         local schematic = CT.GetRecipeSchematic(recipeID, false)  -- exception(boundary): nil until recipe data caches
@@ -259,7 +285,7 @@ local function _walkProfessionBook(profName, CT, catalog, ids)
                 -- recipeID IS the recipe spell ID (GetRecipeSchematic(recipeSpellID, ...)); store it
                 -- so the resolver can materialize a full entry (spellID drives IsSpellKnown) for
                 -- recipes the seed DB doesn't ship. Capture is the source of truth; seed is fallback.
-                local rec = { reagents = reagents, profession = profName, spellID = recipeID }
+                local rec = { reagents = reagents, spellID = recipeID }
                 -- Per-craft yield for multi-output recipes (bolts make 2, Imbued Silkweave
                 -- 10): PowerCrafter divides demand by it. Salvage schematics report the
                 -- INPUT consumed in quantityMin (Reference gotcha), so they are skipped.
@@ -275,6 +301,7 @@ local function _walkProfessionBook(profName, CT, catalog, ids)
                     -- the Recipes tab's expansion filter for seed-absent 12.1 recipes).
                     local info = CT.GetRecipeInfo(recipeID)  -- exception(boundary): nil for stale recipeID
                     rec.expansion = info and topCategoryName(info.categoryID, CT)
+                    rec.profession = recipeProfessionName(recipeID, CT)
                     -- Catalog display name: instant text for materialized recipes + makes the
                     -- SV capture self-contained for offline diffs/reports.
                     rec.name = row.name
@@ -334,6 +361,9 @@ local function _dispatchCaptureDiffs(profName, n, recipes, subRecipes, variantGr
     end
 end
 
+-- profName is the open window's profession and labels the log line only: records take
+-- each recipe's own profession (recipeProfessionName), because the window can disagree
+-- with the list it hands back.
 function PS.CaptureRecipeData(profName)   -- no self; called as PS.CaptureRecipeData
     local CT = _G.C_TradeSkillUI
     local catalog = HDG.HousingCatalogObserver
@@ -347,7 +377,7 @@ function PS.CaptureRecipeData(profName)   -- no self; called as PS.CaptureRecipe
     end
     local ids = CT.GetAllRecipeIDs()
     if type(ids) ~= "table" then return end
-    local recipes, allByOutput, variantGroups, n = _walkProfessionBook(profName, CT, catalog, ids)
+    local recipes, allByOutput, variantGroups, n = _walkProfessionBook(CT, catalog, ids)
     -- Sub-recipe closure: the intermediates decor recipes need, walked to their roots
     -- (PowerCrafter's captured craft graph -- the path to dropping ProfessionsDB).
     local subRecipes = subRecipeClosure(allByOutput, recipes, CT)
@@ -384,7 +414,7 @@ function PS:Scan()
     -- Knowledge idempotency (same cure as the capture diff): the LIST_UPDATE +
     -- DATA_SOURCE_CHANGED debounce pair and every craft tick re-fire Scan with an
     -- identical book -- skip the full-payload re-dispatch (and the downstream
-    -- altKnown recompute + knowledge rescan) when nothing changed.
+    -- recipes.knowledge recompute downstream) when nothing changed.
     local skillLines   = readSkillLines()
     local knownRecipes = readKnownRecipes()
     local existingChar = HDG.Store:GetState().account.characters[ident.charKey]
@@ -411,6 +441,111 @@ function PS:Scan()
             knowsFindLumber = knowsFindLumber,
         },
     })
+end
+
+-- ===== Spellbook pass: the logged-in character's decor recipes ===============
+-- Brings the logged-in character's decor recipes in line with the spellbook. The window
+-- scan above writes a profession's whole list, but only when that window opens; a recipe
+-- learned with it shut reaches the list here. Decor spells only (recipes.spellToItem),
+-- both ways: adds what the spellbook knows and no list holds, removes what a list holds
+-- and the spellbook no longer knows (a dropped profession). The rest of each list, the
+-- record and its skillLines stay the window scan's. Every reader asks recipes.knowledge,
+-- which derives from these lists -- there is no second copy of "known" to drift.
+
+-- Whether any of the character's records lists spellID.
+local function _isListed(char, spellID)
+    for _, prof in pairs(char.professions) do
+        if prof.knownRecipes[spellID] then return true end
+    end
+    return false
+end
+
+-- File a newly learned spell under its root profession (asked of the recipe itself --
+-- stored profession labels have been wrong, see recipeProfessionName).
+local function _noteAdd(add, spellID, CT)
+    local professionID, name = recipeRootProfession(spellID, CT)
+    local entry = add[professionID]
+    if not entry then
+        entry = { name = name, spells = {} }
+        add[professionID] = entry
+    end
+    entry.spells[spellID] = true
+end
+
+-- Remove a spell from every record that lists it (keyed by record, so an id-less legacy
+-- record can be named too). Two records can list one spell -- an id-less legacy record
+-- beside its profession's stamped one -- and both lose it in the same pass.
+local function _noteRemove(remove, char, spellID)
+    for key, prof in pairs(char.professions) do
+        if prof.knownRecipes[spellID] then
+            remove[key] = remove[key] or {}   -- exception(nullable): the first spell removed from this record
+            remove[key][spellID] = true
+        end
+    end
+end
+
+-- The delta between the spellbook and the character's lists, over every decor spell,
+-- and how many of those spells the spellbook knows. char is nil before the character's
+-- first roster record.
+local function _spellbookDelta(char, spellToItem, CT)
+    local add, remove, moved, knownCount = {}, {}, false, 0
+    local bank = _G.Enum.SpellBookSpellBank.Player
+    for spellID in pairs(spellToItem) do
+        -- exception(boundary): Blizzard bool; the bank is passed because a Reference note says omitting it returns nil
+        local known = _G.C_SpellBook.IsSpellKnown(spellID, bank) == true
+        local listed = char and _isListed(char, spellID)  -- exception(nullable): no roster record yet
+        if known then knownCount = knownCount + 1 end
+        if known and not listed then
+            _noteAdd(add, spellID, CT)
+            moved = true
+        elseif listed and not known then
+            _noteRemove(remove, char, spellID)
+            moved = true
+        end
+    end
+    return add, remove, moved, knownCount
+end
+
+-- The session's first pass is announced on the rail; later ones (every recipe learned,
+-- decor or not, and every capture) go to the Debug tab only (review 2026-10-15). The
+-- first also runs the one-shot drift check: recipe vendors missing from VendorAugment
+-- (generated tables out of step). The facade computes; this logs, and the selectors
+-- that join the two skip such vendors silently.
+function PS:_AnnouncePass(knownCount)
+    local line = string.format("Recipe check complete -- %d decor recipes known on this character", knownCount)
+    if self._announced then
+        HDG.Log:Debug("recipes_rescanned", line)
+        return
+    end
+    self._announced = true
+    HDG.Log:Success("recipes_scanned", line)
+    local n, sample = HDG.StaticData.RecipeSources:VendorAugmentGaps()
+    if n > 0 then
+        HDG.Log:Warn("data_drift", ("%d recipe vendor(s) missing from VendorAugment: %s%s")
+            :format(n, table.concat(sample, ", "), n > 8 and ", ..." or ""))
+    end
+end
+
+-- One code path for every trigger (login catalog-ready, a recipe learned, a capture):
+-- read the spellbook, dispatch only when something moved. Returns whether it dispatched.
+function PS:SyncKnownDecorRecipes()
+    local state = HDG.Store:GetState()
+    local ident = HDG.SessionIdentity.GetIdentity(state)
+    if not ident then return false end  -- exception(nullable): boot window, identity not dispatched yet
+    local spellToItem = HDG.Selectors:Call("recipes.spellToItem", state)
+    local char = state.account.characters[ident.charKey]  -- exception(nullable): no roster record before the first snapshot
+    local add, remove, moved, knownCount = _spellbookDelta(char, spellToItem, _G.C_TradeSkillUI)
+    PS:_AnnouncePass(knownCount)
+    if not moved then return false end
+    HDG.Store:Dispatch({
+        type    = HDG.Constants.ACTIONS.CHARACTER_RECIPES_SYNCED,
+        payload = {
+            charKey = ident.charKey, name = ident.name, realm = ident.realm,
+            class = ident.class, classFile = ident.classFile,
+            add = add, remove = remove,
+        },
+    })
+    return true
 end
 
 -- ===== Guild recipe harvest ==================================================
@@ -768,13 +903,16 @@ end
 HDG.Modules:Declare({
     name = "ProfessionScanner",
     dependencies = { "HousingCatalogObserver" },
-    -- per ADR-011: sole owner of C_TradeSkillUI. C_SpellBook.IsSpellKnown
-    -- below is a stateless shared read; RecipeKnowledgeScanner owns it.
+    -- per ADR-011: sole owner of C_TradeSkillUI, and of C_SpellBook.IsSpellKnown --
+    -- the spellbook pass and the Find Lumber read; one module writes knownRecipes.
     -- Guild tradeskill globals (QueryGuildRecipes/ViewGuildRecipes/
     -- GetGuildTradeSkillInfo) are legacy non-C_ APIs -- no namespace claim.
-    ownsBlizzardNamespaces = { "C_TradeSkillUI" },
+    ownsBlizzardNamespaces = { "C_TradeSkillUI", "C_SpellBook.IsSpellKnown" },
     logTags = {
-        guild_harvest = { user = true, level = "success", duration = 4 },
+        guild_harvest     = { user = true, level = "success", duration = 4 },
+        recipes_scanned   = { user = true, level = "success", duration = 3 },
+        recipes_rescanned = { user = false, level = "debug" },
+        data_drift        = { user = false, level = "warn" },
     },
     blizzardEvents = {
         -- Initial list ready + recipe-learned updates.
@@ -787,10 +925,16 @@ HDG.Modules:Declare({
         -- is FORBIDDEN_MODULE_EVENTS (CombatMiddleware-owned).
         GUILD_TRADESKILL_UPDATE         = { handler = "OnGuildTradeSkill" },
         TRADE_SKILL_SHOW                = { handler = "OnTradeSkillShow" },
+        -- Trainer, recipe scroll and skill-up learns all fire it, window open or not.
+        -- Debounced: "learn all" bursts coalesce into one spellbook pass.
+        NEW_RECIPE_LEARNED              = { handler = "OnRecipeLearned", debounce = 0.5 },
     },
     OnListUpdate = function(self)
         PS:Scan()
         PS._HarvestOnListUpdate()
+    end,
+    OnRecipeLearned = function(self)
+        PS:SyncKnownDecorRecipes()
     end,
     onEnable = function(self)
         -- ProfessionsFrame OnShow is the RELIABLE hook. TRADE_SKILL_SHOW alone was not:
@@ -805,14 +949,20 @@ HDG.Modules:Declare({
         -- Covers the case where Blizzard_Professions loaded before onEnable ran.
         PS:_InstallProfessionsFrameHook()
 
-        -- Catalog warmed after a capture skipped cold (RequestLoad above): re-scan
-        -- while the profession window is still open so the capture actually lands.
+        -- DECOR_CATALOG_READY: the session's spellbook pass (the sweep that dispatches it
+        -- is lazy and runs after SESSION_IDENTITY_SET), and a re-scan while the profession
+        -- window is still open, so a capture that skipped a cold catalog lands.
+        -- RECIPE_DATA_CAPTURED: a capture can materialize a decor recipe this character
+        -- already knows; the pass is diffed, so an unchanged spellbook costs no dispatch.
         self._storeToken = HDG.Store:Subscribe(function(actionType)
             if actionType == HDG.Constants.ACTIONS.DECOR_CATALOG_READY then
                 local CT = _G.C_TradeSkillUI
                 if CT and CT.IsTradeSkillReady and CT.IsTradeSkillReady() then  -- exception(boundary): profession window not open
                     PS:Scan()
                 end
+                PS:SyncKnownDecorRecipes()
+            elseif actionType == HDG.Constants.ACTIONS.RECIPE_DATA_CAPTURED then
+                PS:SyncKnownDecorRecipes()
             end
         end)
     end,

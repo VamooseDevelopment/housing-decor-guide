@@ -740,6 +740,7 @@ LC.widgets["projectsPickerListPanel.sourceDropdown"] = {
     placeholder = "locale:PROJ_PICKER_SOURCE_PLACEHOLDER", width = 220, height = 22, order = 5,
 }
 LC.widgets["projectsPickerListPanel.search"] = {
+    search = true,   -- magnifier + clear "x", as Recipe Sources (Vamoose, 2026-10-26)
     tooltip = false, kind = "editbox", ["in"] = "projectsPickerListPanel", slot = "header",
     font = "body", width = "fill", height = 22, order = 10, multiline = false,
     placeholder = "locale:DECOR_SEARCH_PLACEHOLDER",

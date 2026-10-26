@@ -1,3 +1,66 @@
+## [3.40.0] - 2026-10-26 (October 2026)
+
+### Added
+- **Recipe Sources: where to learn every decor recipe.** A new tab under Crafting lists all 346
+  decor recipes by profession with where each is learned: trainer, vendor, drop, quest, discovery
+  and more, with the price, any rep requirement and your standing. Pick a recipe for its reagents
+  (what you have and what you're short), every trainer and vendor with Waypoint and Map buttons,
+  and its map. Switch to By Teacher to see each trainer and vendor with what they teach and which
+  of your alts need training. Filter by profession, expansion, source, zone (or Here), reputation
+  and currency, and Map every place in the list in one click.
+- **See which alts know a recipe, by name.** Recipe Sources names the alts who know each recipe in
+  their class colors: "Ann +1" in the list, "Known by Ann, Bob" in a recipe's details. Your top
+  decor crafter and the alts needing training show in class colors too.
+- **Where to look inside a building.** Trainer and vendor cards say where to find an NPC who isn't
+  in plain sight, such as "Basement of Brokenspear Tavern", "Inside the Great Seal" and "Up the ramp
+  inside the tower".
+- **Midnight trainers.** Recipe Sources lists the Midnight trainers of every profession that makes
+  decor, each with a waypoint.
+- **Every vendor that sells a decor recipe.** Shop by Vendor now lists 44 recipe vendors, up from
+  20: the Warlords of Draenor profession vendors in Stormshield, Warspear and the garrisons, the
+  Coiled Isle vendors, Construct E'nui and more. Find Decor's Recipes list grows from 35 recipes to
+  69, and a recipe sold by several vendors lists each of them, with a waypoint. HDG takes this from
+  the game's own recipe text.
+- **Recipes bought with an item show the item.** The Warlords of Draenor recipes cost "1 Secret of
+  Draenor Tailoring" and the like.
+- **More recipes show their rep requirement, by name.** Recipes that need Iskaara Tuskarr, Council
+  of Dornogal, Amani Tribe, Zul'jarra's Forces, Preyhunter's Journey or Captain Tokka standing say
+  so in the recipe's details.
+- **Search boxes have a magnifier and a clear button.** Every search box in HDG shows a magnifier,
+  and an "x" appears once you type: click it to clear the search.
+
+### Changed
+- **Recipe Sources replaces the Trainers tab.** It sits directly under Recipes in the Crafting
+  menu. Its By Teacher list shows every trainer of a skill line decor recipes need, even one who
+  teaches no decor recipe (the Warlords of Draenor recipes are sold by vendors, so the Draenor
+  Tailoring trainer's row reads "teaches Draenor Tailoring"). Each trainer shows which of your alts
+  need training, and a trainer's details show your top decor crafter; hidden alts count for
+  neither, and the character you're playing always counts. Trainer, vendor and zone names show in
+  your game's language. If HDG was last left on the Trainers tab, it opens on Recipe Sources.
+- **The other faction's vendors and trainers are greyed out.** A recipe lists your faction's
+  vendors first; the other faction's come after, greyed out, and are left off the map and the
+  By Teacher list.
+- **Alliance and Horde read in faction colors.** "A" shows in Alliance blue and "H" in Horde red,
+  "A/H" in both, and blueprint rows use the same colors.
+- **Recipe Sources uses less memory.** Learning a recipe or a name loading in your game's language
+  no longer rebuilds the whole list, and typing in the search box reuses the list's rows.
+
+### Fixed
+- **Trainer names and locations are right.** 32 trainers pointed at the wrong NPC and several stood
+  in the wrong place: Smith Argus is in Goldshire, and the Boralus trainers are in Tradewinds
+  Market. Every trainer and recipe vendor was checked against the game.
+- **On a non-English game client, the Recipes tab no longer opens empty.** Its My Professions filter
+  matched professions by their English names, so it found none of yours.
+- **A recipe you learn counts as known straight away**, everywhere in HDG, even with the profession
+  window closed.
+- **Crafted decor is listed under the profession that makes it.** A guild scan could file one
+  profession's recipes under another, so Leatherworking's decor showed up in the Recipes list under
+  Mining, the profession filter read Leatherworking 0/0, and My Professions counted those recipes
+  for a Miner. HDG now takes each recipe's profession from the recipe itself, and recipes already
+  filed under the wrong profession move back on their own, with no rescan needed.
+- **The Beloved Ottuk Plushie patterns ask for the right renown.** Both showed Iskaara Tuskarr
+  Renown 3; the vendors want Renown 11.
+
 ## [3.39.2] - 2026-10-24 (October 2026)
 
 ### Fixed

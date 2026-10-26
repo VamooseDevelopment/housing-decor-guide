@@ -16,7 +16,7 @@
 --   * ahQty           -- units currently listed (Direct scan; "#AH")
 --
 -- Pure function: same DB state -> same output. Invalidation at the selector
--- layer (session.resolvers.prices.tick, account.recipes, etc.). No caching: O(n=305)
+-- layer (session.resolvers.prices.tick, recipes.knowledge, etc.). No caching: O(n=305)
 -- with ~5 PriceSource calls each; profile <8ms fresh boot.
 
 HDG = HDG or {}

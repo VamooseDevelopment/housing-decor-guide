@@ -313,6 +313,16 @@ local function NewItemNamesSession()
     }
 end
 
+-- NPC name cache, the same species as item names: NPCNameResolver:Drain dispatches
+-- NPC_NAMES_RESOLVED with the client-language names it got, the reducer writes them
+-- here, and ResolveName reads this first. Consumers declare session.npcNames.names
+-- (the RegisterFacadeReads contract at the end of this file).
+local function NewNpcNamesSession()
+    return {
+        names = {},  -- [npcID] = name in the client's language
+    }
+end
+
 -- Price-source session state. PriceSource is a stateful module (external
 -- TSM/Auctionator facades + scan progress); its A-side re-pull signal is
 -- session.resolvers.prices.tick (Resolver:Register("prices") at this file's
@@ -455,13 +465,26 @@ local function _seededSmartsetName(account)
     return charName .. " Style " .. ((account.collectionSeq or 0) + 1)  -- exception(boundary): pre-counter saved accounts lack collectionSeq
 end
 
--- Trainers tab session UI.
-local function NewTrainersSessionUI()
+-- Recipe Sources tab session UI. The six filter axes are flat multi-select SETs
+-- (empty = all), flat so UI_SET_TRANSIENT can write one whole (the Here button's
+-- zone set, a tag's clear) without an action; RS_TOGGLE_FILTER flips one member.
+-- The tab opens with no filter on: preset All, every set empty (Vamoose, 2026-10-26) --
+-- what Reset puts back. profFilter's "mine" member,
+-- set from the menu, means this character's scanned professions, read at filter time.
+local function NewRecipeSourcesSessionUI()
     return {
-        searchQuery         = "",
-        expandedProfessions = {},     -- [profName] = true (open) / nil (closed); default = all collapsed
-        midnightExpanded    = false,  -- separate boolean for Midnight Recipe Sources section
-        selectedNpcID       = nil,    -- highlighted trainer (for TreeList row selection)
+        viewMode           = "recipe",      -- "recipe" (By Recipe) | "teacher" (By Teacher)
+        preset             = "all",         -- RS_PRESETS value; opens with no filters (Vamoose, 2026-10-26)
+        searchQuery        = "",
+        profFilter         = {},
+        expFilter          = {},
+        srcFilter          = {},
+        zoneFilter         = {},
+        repFilter          = {},
+        curFilter          = {},
+        collapsed          = {},            -- [groupKey] = true (RS_TOGGLE_GROUP)
+        selectedItemID     = nil,           -- By Recipe selection (crafted itemID)
+        selectedTeacherKey = nil,           -- By Teacher selection (rs teacher key)
     }
 end
 
@@ -690,7 +713,7 @@ local function NewSessionUI()
         alts         = NewAltsSessionUI(),
         mogul        = NewMogulSessionUI(),
         styles       = NewStylesSessionUI(),
-        trainers     = NewTrainersSessionUI(),
+        recipeSources = NewRecipeSourcesSessionUI(),
         companion    = NewCompanionSessionUI(),
         houseTab     = NewHouseTabSessionUI(),
         shoppingList = NewShoppingSessionUI(),
@@ -813,6 +836,7 @@ local function NewDefaultSession()
         -- section at the end of this file).
         resolvers      = HDG.Resolver:MintSlots(),
         itemNames      = NewItemNamesSession(),
+        npcNames       = NewNpcNamesSession(),
         prices         = NewPricesSession(),
         styles         = NewStylesSession(),
         zone           = NewZoneState(),
@@ -894,11 +918,6 @@ end
 -- Vendor notes. Keyed by npcID; LRU-pruned at 100 in VENDOR_NOTE_SET reducer.
 local function NewVendorNotes()
     return {}   -- [npcID] = { text = string, ts = number }
-end
-
--- Recipe knowledge: keyed by itemID for O(1) lookup. selfKnown populated by RecipeKnowledgeScanner.
-local function NewRecipes()
-    return {}   -- [itemID] = { spellID, selfKnown, altKnown }
 end
 
 -- Crafting queue + history. Queue rows persist via SavedVariables; history is a ring buffer
@@ -1151,7 +1170,6 @@ local function NewDefaultState()
             favorites            = NewFavorites(),   -- G2
             userNotes            = NewUserNotes(),    -- G3
             vendorNotes          = NewVendorNotes(),
-            recipes              = NewRecipes(),      -- partial; alt scanner fills altKnown on character scan
             craft                = NewCraft(),        -- queue + history
             characters           = NewCharacters(),   -- alts roster
             prices               = NewPrices(),       -- price cache
@@ -1197,6 +1215,9 @@ local function EnsureUI(account)
     for key, value in pairs(defaults) do
         if account.ui[key] == nil then account.ui[key] = DeepCopy(value) end
     end
+    -- Recipe Sources replaced the Trainers tab (By Teacher carries its trainers), so
+    -- a save left on Trainers reopens there rather than on the default tab.
+    if account.ui.view == "trainers" then account.ui.view = "recipeSources" end   -- exception(boundary): SV migration -- a tab saved before Trainers was retired
 end
 
 local function EnsureCollection(account)
@@ -1285,6 +1306,7 @@ local function EnsureSession(state)
     -- slots registered since (see Resolver:EnsureSlots).
     state.session.resolvers = HDG.Resolver:EnsureSlots(state.session.resolvers or {})
     state.session.itemNames  = state.session.itemNames  or NewItemNamesSession()
+    state.session.npcNames   = state.session.npcNames   or NewNpcNamesSession()
     state.session.identity = state.session.identity or NewIdentitySession()
     state.session.prices     = state.session.prices     or NewPricesSession()
     state.session.styles    = state.session.styles    or NewStylesSession()
@@ -1352,6 +1374,33 @@ local function MigrateProjectsToVersions(state)
     p.schemaVersion = 2
 end
 
+-- schemaVersion 8 -> 9 (2026-10-26): learned state has one store, each character's
+-- professions[*].knownRecipes; recipes.knowledge derives "you / an alt / nobody" from it.
+-- The old derived table goes, transformed away in place: its selfKnown was one
+-- character's spellbook snapshot (ProfessionScanner's pass rewrites that character's
+-- list at its next login) and its altKnown was derived from the lists already. Gated on
+-- the data shape, like RetireOldRootKeys -- clearing an absent key costs nothing -- so it
+-- runs at every hydrate; the stamp records the format.
+local function MigrateLearnedStateToV9(state)
+    state.account.recipes = nil   -- exception(boundary): SV migration -- the retired derived table
+    if state.account.schemaVersion < 9 then state.account.schemaVersion = 9 end
+end
+
+-- Recipes profession filters saved on a non-enUS client before the filter joined by
+-- professionID hold localized names ("Schneiderei"), and recipe rows carry English ones,
+-- so the saved choice matched nothing. Each is re-keyed to its English name, in place.
+-- GetByName knows the localized forms (PROFESSION_DATA aliases).
+local function CanonProfessionFilterKeys(byChar)
+    for _, set in pairs(byChar) do
+        local renamed = {}
+        for name in pairs(set) do
+            local entry = HDG.Profession.GetByName(name)   -- exception(boundary): SV migration -- a name missing from the aliases stays as saved
+            if entry and entry.name ~= name then renamed[name] = entry.name end
+        end
+        for from, to in pairs(renamed) do set[from], set[to] = nil, true end
+    end
+end
+
 local function EnsureStateShape(state)
     state.account = state.account or {}
     state.account.schemaVersion = state.account.schemaVersion or HDG.Constants.SCHEMA_VERSION
@@ -1362,7 +1411,6 @@ local function EnsureStateShape(state)
     state.account.favorites   = state.account.favorites   or NewFavorites()
     state.account.userNotes   = state.account.userNotes   or NewUserNotes()
     state.account.vendorNotes = state.account.vendorNotes or NewVendorNotes()
-    state.account.recipes     = state.account.recipes     or NewRecipes()
     EnsureCraft(state.account)
     EnsureShopping(state.account)
     state.account.characters  = state.account.characters  or NewCharacters()
@@ -1472,6 +1520,8 @@ local function EnsureStateShape(state)
     state.account.ui.recipes = state.account.ui.recipes or {}
     state.account.ui.recipes.expansionFilter        = state.account.ui.recipes.expansionFilter        or {}
     state.account.ui.recipes.professionFilterByChar  = state.account.ui.recipes.professionFilterByChar or {}
+    CanonProfessionFilterKeys(state.account.ui.recipes.professionFilterByChar)
+    MigrateLearnedStateToV9(state)   -- after the furnishings step, whose failure path stamps 8
     EnsureSession(state)
 end
 
@@ -2498,16 +2548,6 @@ HDG.Actions:Register{ name = "VENDOR_NOTE_CLEAR",
             state.account.vendorNotes[payload.npcID] = nil
         end
 
-    -- ===== Recipe knowledge ==================================================
-    end }
-
-HDG.Actions:Register{ name = "RECIPE_KNOWLEDGE_UPDATED",
-    persists = true, combatUnsafe = false,
-            invalidates = { "account.recipes" },
-    reduce = function(state, payload)
-        -- Bulk replace: RecipeKnowledgeScanner emits the full per-itemID map.
-        state.account.recipes = payload.entries
-
     -- ===== Crafting queue + history ==============================
     end }
 
@@ -2695,6 +2735,44 @@ local function _upsertCharacter(state, payload)
     return c
 end
 
+-- invalidates for the per-character stock snapshots (essence, reagent bags, reagent
+-- bank). They fire on every reagent or essence count change, so on an existing record
+-- they declare only what they change -- the stock field, lastSeen, and an identity field
+-- _upsertCharacter refreshes only when the payload differs from the record (a rename, a
+-- faction-change class swap) -- and a reader of another per-character field
+-- (account.characters.*.professions / .hidden / .name, Paths' "*" segment) keeps its memo.
+-- The first sighting of a character creates the whole record, so that dispatch
+-- declares the record. _RawDispatch resolves invalidates BEFORE the reducer runs, so
+-- the record's absence and its old identity are still visible here.
+local UPSERT_FIELDS = { "name", "realm", "class", "classFile" }
+local function _stockInvalidates(stockField)
+    return function(action)
+        local p      = action.payload
+        local record = HDG.Paths.Join("account.characters", p.charKey)
+        local rec    = HDG.Store:GetState().account.characters[p.charKey]  -- exception(nullable): first sighting -- the reducer creates the record
+        if rec == nil then return { record } end
+        local paths = { record .. "." .. stockField, record .. ".lastSeen" }
+        for _, field in ipairs(UPSERT_FIELDS) do
+            -- exception(optional): the upsert keeps the record's value when the payload leaves a field out
+            if p[field] ~= nil and p[field] ~= rec[field] then paths[#paths + 1] = record .. "." .. field end
+        end
+        return paths
+    end
+end
+
+-- One record per profession. Records are keyed by the LOCALIZED name, so the spellbook
+-- pass (CHARACTER_RECIPES_SYNCED) can create one under a spelling the window scan later
+-- writes differently; the window scan's record wins and the other key goes. Readers
+-- join by professionID and take the first match (HDG.Profession.RecordOf), so two
+-- records for one profession would make their counts depend on hash order.
+local function _dropOtherRecordsOf(c, professionID, keepKey)
+    for key, prof in pairs(c.professions) do
+        if key ~= keepKey and prof.professionID == professionID then
+            c.professions[key] = nil
+        end
+    end
+end
+
 HDG.Actions:Register{ name = "CHARACTER_PROFESSION_UPDATED",
     persists = true, combatUnsafe = false,
             invalidates = function(action) return { HDG.Paths.Join("account.characters", action.payload and action.payload.charKey) } end,
@@ -2713,6 +2791,10 @@ HDG.Actions:Register{ name = "CHARACTER_PROFESSION_UPDATED",
                 c.knowsFindLumber = payload.knowsFindLumber and true or false
             end
             if payload.profName then
+                -- exception(nullable): an id-less payload (test probes; PS:Scan always sends one) must not match id-less records
+                if payload.professionID ~= nil then
+                    _dropOtherRecordsOf(c, payload.professionID, payload.profName)
+                end
                 c.professions[payload.profName] = {
                     professionID = payload.professionID,   -- stable TradeSkillLineID; locale-invariant join key (name key stays for back-compat)
                     skillLines   = payload.skillLines,
@@ -2722,13 +2804,51 @@ HDG.Actions:Register{ name = "CHARACTER_PROFESSION_UPDATED",
         end
     end }
 
+-- The record a newly learned recipe files under: the one carrying its professionID;
+-- else a legacy record under the same localized key that the professionID backfill
+-- could not stamp (non-enUS, never rescanned) -- adopted and stamped, never replaced;
+-- else a new record. A created record has every field a reader touches, with empty
+-- skillLines, so Alts keeps the character in its unscanned population until the
+-- window scan fills them.
+local function _recordForAdd(c, professionID, key)
+    for _, prof in pairs(c.professions) do
+        if prof.professionID == professionID then return prof end
+    end
+    local legacy = c.professions[key]  -- exception(nullable): only an id-less record under the same localized key
+    if legacy then
+        legacy.professionID = professionID
+        return legacy
+    end
+    local rec = { professionID = professionID, skillLines = {}, knownRecipes = {} }
+    c.professions[key] = rec
+    return rec
+end
+
+-- The spellbook pass's delta for the logged-in character (see the constant). Decor
+-- spells only; the window scan owns the rest of each list, the record and skillLines.
+-- Removes name the record the pass found the spell in, so an id-less record works too.
+HDG.Actions:Register{ name = "CHARACTER_RECIPES_SYNCED",
+    persists = true, combatUnsafe = false,
+    invalidates = function(action) return { HDG.Paths.Join("account.characters", action.payload.charKey) } end,
+    reduce = function(state, payload)
+        local c = _upsertCharacter(state, payload)
+        for professionID, add in pairs(payload.add) do
+            local known = _recordForAdd(c, professionID, add.name).knownRecipes
+            for spellID in pairs(add.spells) do known[spellID] = true end
+        end
+        for key, spells in pairs(payload.remove) do
+            local known = c.professions[key].knownRecipes
+            for spellID in pairs(spells) do known[spellID] = nil end
+        end
+    end }
+
 -- Essence of Lumber per-character snapshot. Upserts the char record (creating
 -- identity if this alt was never scanned) and replaces the essenceStock split.
 -- Only ever the currently-logged-in char is live; alts stay at their last-login
 -- snapshot (WoW can't read another character's bags). Soulbound -> no warband.
 HDG.Actions:Register{ name = "CHARACTER_ESSENCE_UPDATED",
     persists = true, combatUnsafe = false,
-            invalidates = function(action) return { HDG.Paths.Join("account.characters", action.payload and action.payload.charKey) } end,
+    invalidates = _stockInvalidates("essenceStock"),
     reduce = function(state, payload)
         if payload.charKey then
             _upsertCharacter(state, payload).essenceStock =
@@ -2753,7 +2873,7 @@ end
 
 HDG.Actions:Register{ name = "CHARACTER_REAGENT_BAGS_UPDATED",
     persists = true, combatUnsafe = false,
-            invalidates = function(action) return { HDG.Paths.Join("account.characters", action.payload and action.payload.charKey) } end,
+    invalidates = _stockInvalidates("reagentStock"),
     reduce = function(state, payload)
         _reduceReagentStock(state, payload, "bag", "bagAt")
     end }
@@ -2764,7 +2884,7 @@ HDG.Actions:Register{ name = "CHARACTER_REAGENT_BAGS_UPDATED",
 -- good bank map with zeros every time an alt logged in without visiting a bank.
 HDG.Actions:Register{ name = "CHARACTER_REAGENT_BANK_UPDATED",
     persists = true, combatUnsafe = false,
-            invalidates = function(action) return { HDG.Paths.Join("account.characters", action.payload and action.payload.charKey) } end,
+    invalidates = _stockInvalidates("reagentStock"),
     reduce = function(state, payload)
         _reduceReagentStock(state, payload, "bank", "bankAt")
     end }
@@ -3107,30 +3227,32 @@ HDG.Actions:Register{ name = "SESSION_IDENTITY_SET",
         id.charKey      = id.name .. "-" .. id.realm
     end }
 
-HDG.Actions:Register{ name = "TRAINERS_TOGGLE_PROFESSION",
-    persists = false, combatUnsafe = false, retainsScroll = true,
-    invalidates = function(action) return { HDG.Paths.Join("session.ui.trainers.expandedProfessions", action.payload and action.payload.profession) } end,
+-- Recipe Sources filter axis -> its session.ui.recipeSources set.
+local RS_FILTER_SETS = { prof = "profFilter", exp = "expFilter", src = "srcFilter",
+                         zone = "zoneFilter", rep = "repFilter", cur = "curFilter" }
+
+HDG.Actions:Register{ name = "RS_TOGGLE_FILTER",
+    persists = false, combatUnsafe = false,
+    invalidates = function(action)
+        local out = {}
+        for axis in pairs(action.payload) do
+            out[#out + 1] = HDG.Paths.Join("session.ui.recipeSources", RS_FILTER_SETS[axis])
+        end
+        return out
+    end,
     reduce = function(state, payload)
-        local p = payload.profession
-        if p then
-            local expanded = state.session.ui.trainers.expandedProfessions
-            _toggleSetMember(expanded, p)
+        -- The payload's key is the axis; an unknown axis has no set and errors here.
+        local ui = state.session.ui.recipeSources
+        for axis, value in pairs(payload) do
+            _acqToggleFilter(ui[RS_FILTER_SETS[axis]], value)
         end
     end }
 
-HDG.Actions:Register{ name = "TRAINERS_TOGGLE_MIDNIGHT_SECTION",
-    persists = false, combatUnsafe = false, retainsScroll = true,
-    invalidates = { "session.ui.trainers.midnightExpanded" },
+HDG.Actions:Register{ name = "RS_TOGGLE_GROUP",
+    persists = false, combatUnsafe = false, retainsScroll = true,   -- a fold is clicked mid-list
+    invalidates = { "session.ui.recipeSources.collapsed" },
     reduce = function(state, payload)
-        state.session.ui.trainers.midnightExpanded =
-            not state.session.ui.trainers.midnightExpanded
-    end }
-
-HDG.Actions:Register{ name = "TRAINERS_SELECT_TRAINER",
-    persists = false, combatUnsafe = false, 
-    invalidates = { "session.ui.trainers.selectedNpcID" },
-    reduce = function(state, payload)
-        state.session.ui.trainers.selectedNpcID = payload.npcID
+        _toggleSetMember(state.session.ui.recipeSources.collapsed, payload.key)
     end }
 
 HDG.Actions:Register{ name = "ALTS_SET_CHARS_POPULATION",
@@ -3397,8 +3519,8 @@ HDG.Actions:Register{ name = "RECIPES_TOGGLE_PROFESSION",
             -- (this char's professions) so a single-profession toggle builds on what
             -- was actually shown -- UNLESS the click is "all" (which wants empty).
             set = {}
-            if payload.profession ~= "all" and char and type(char.professions) == "table" then
-                for profName in pairs(char.professions) do set[profName] = true end
+            if payload.profession ~= "all" and char then
+                for profName in pairs(HDG.Profession.NamesOf(char)) do set[profName] = true end
             end
             byChar[charKey] = set
         end
@@ -3406,8 +3528,8 @@ HDG.Actions:Register{ name = "RECIPES_TOGGLE_PROFESSION",
             wipe(set)
         elseif payload.profession == "mine" then
             wipe(set)
-            if char and type(char.professions) == "table" then
-                for profName in pairs(char.professions) do set[profName] = true end
+            if char then
+                for profName in pairs(HDG.Profession.NamesOf(char)) do set[profName] = true end
             end
         else
             _toggleSetMember(set, payload.profession)
@@ -3461,6 +3583,14 @@ HDG.Actions:Register{ name = "ITEM_INFO_RESOLVED",
                 if e.itemID and e.name then names[e.itemID] = e.name end
             end
         end
+    end }
+
+HDG.Actions:Register{ name = "NPC_NAMES_RESOLVED",
+    persists = false, combatUnsafe = false,
+    invalidates = { "session.npcNames.names" },
+    reduce = function(state, payload)
+        local names = state.session.npcNames.names
+        for _, e in ipairs(payload.entries) do names[e.npcID] = e.name end
     end }
 
 HDG.Actions:Register{ name = "QUEST_COMPLETION_RECORDED",
@@ -5547,6 +5677,14 @@ HDG.Actions:Register{ name = "UI_FILTER_RESET",
             -- professions are per-character: drop this char's entry so it reverts to
             -- the pristine default (= this character's professions).
             state.account.ui.recipes.professionFilterByChar[state.session.identity.charKey] = nil
+        elseif tab == "recipeSources" then
+            -- Clears the six filter sets, as the mockup's Reset does: the profession
+            -- set empties to All Professions. The preset goes back to All too, since it
+            -- shows as an active-filter tag. Search and view are kept.
+            local rs = state.session.ui.recipeSources
+            rs.preset = "all"
+            rs.profFilter, rs.expFilter, rs.srcFilter = {}, {}, {}
+            rs.zoneFilter, rs.repFilter, rs.curFilter = {}, {}, {}
         end
     end }
 
@@ -5981,3 +6119,8 @@ HDG.Resolver:Register{ name = "prices",
 -- caller (ResolveName Peeks the cache before re-querying Blizzard).
 HDG.Resolver:RegisterFacadeReads{ facade = "ItemNameResolver",
     requires = { "session.itemNames.names" } }
+
+-- NPC names: the same shape -- NPC_NAMES_RESOLVED writes session.npcNames.names and
+-- every NPCNameResolver caller reads it.
+HDG.Resolver:RegisterFacadeReads{ facade = "NPCNameResolver",
+    requires = { "session.npcNames.names" } }

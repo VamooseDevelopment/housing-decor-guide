@@ -11,8 +11,10 @@ HDG.Constants = {
     -- (the landing + Detail route by id prefix, not def.type);
     -- v6 = drop library-type collections (empty curated templates + player saves);
     -- v7 = Furnishings model: crates -> sets, version.rooms -> account.rooms +
-    --      layout placements (docs/crate-redesign/10-FINAL-MODEL.md).
-    SCHEMA_VERSION = 8,
+    --      layout placements (docs/crate-redesign/10-FINAL-MODEL.md);
+    -- v9 = account.recipes retired: learned state is each character's knownRecipes
+    --      (docs/LEARNED_STATE_SSOT_PLAN_2026-10-25.md).
+    SCHEMA_VERSION = 9,
     -- Standard icon crop (trims the baked border off square item icons).
     -- Consumed via SetTexCoord(unpack(HDG.Constants.ICON_CROP)) (hygiene A6).
     ICON_CROP = { 0.08, 0.92, 0.08, 0.92 },
@@ -641,6 +643,30 @@ HDG.Constants = {
         { value = "ungated",      label = "Gold, no unlocks", row = 2 },
     },
 
+    -- Recipe Sources preset chips: single-select (UI_SET_TRANSIENT preset). The tab
+    -- opens on "all", no filter on (Vamoose, 2026-10-26; the mockup opened on Not
+    -- learned). `key` names the label's Locale string.
+    RS_PRESETS = {
+        { value = "all",       key = "RS_PRESET_ALL"       },
+        { value = "unlearned", key = "RS_PRESET_UNLEARNED" },
+        { value = "trainer",   key = "RS_PRESET_TRAINER"   },
+        { value = "vendor",    key = "RS_PRESET_VENDOR"    },
+        { value = "other",     key = "RS_PRESET_OTHER"     },
+        { value = "rep",       key = "RS_PRESET_REP"       },
+    },
+    -- Recipe Sources filter axes, in tag order: the session.ui.recipeSources set each
+    -- reads, its tag's Locale format, and (dropdown axes) the "All X" menu entry.
+    -- Profession's menu is the Recipes tab's own (recipes.professionMenuItems).
+    -- Selectors, LayoutConfig and the controller all generate from this list.
+    RS_FILTER_AXES = {
+        { axis = "prof", set = "profFilter", tag = "RS_TAG_PROF" },
+        { axis = "exp",  set = "expFilter",  tag = "RS_TAG_EXP",  all = "RS_ALL_EXPANSIONS", head = "RS_HEAD_EXP" },
+        { axis = "src",  set = "srcFilter",  tag = "RS_TAG_SRC",  all = "RS_ALL_SOURCES",    head = "RS_HEAD_SRC" },
+        { axis = "zone", set = "zoneFilter", tag = "RS_TAG_ZONE", all = "RS_ALL_ZONES",      head = "RS_HEAD_ZONE" },
+        { axis = "rep",  set = "repFilter",  tag = "RS_TAG_REP",  all = "RS_ALL_REPS",       head = "RS_HEAD_REP" },
+        { axis = "cur",  set = "curFilter",  tag = "RS_TAG_CUR",  all = "RS_ALL_CURRENCIES", head = "RS_HEAD_CUR" },
+    },
+
     -- ACQ_SOURCES (Advanced Filters > Source dropdown) is DERIVED from SOURCE_KINDS.
     -- See "Acquisition source-filter options" near the bottom of this file.
 
@@ -665,7 +691,7 @@ HDG.Constants = {
         -- Audit 2026-09-19: every other tab bound to a selector that reads decor
         -- ownership (quantity / numPlaced / isOwned / ownedDecorIDs, directly or
         -- through `calls`). Each held a pending refresh the same way Blueprints
-        -- did. Tabs left off read no ownership (Pets, Trainers, Alts, Architect,
+        -- did. Tabs left off read no ownership (Pets, Alts, Architect,
         -- Layouts, Landing, Move Planner, Data, Debug, Config); the floating
         -- lumber window is not a tab and is not covered by this gate.
         styles         = true,
@@ -697,7 +723,7 @@ HDG.Constants = {
         { view = "zoneScanner",  label = "Zone" },
         { view = "recipes",      label = "Recipes" },
         { view = "warehouse",    label = "Warehouse" },
-        { view = "trainers",     label = "Trainers" },
+        { view = "recipeSources", label = "Recipe Sources" },
         { view = "alts",         label = "Alts" },
         { view = "mogul",        label = "Mogul" },
         { view = "styles",       label = "Styles" },
@@ -735,8 +761,8 @@ HDG.Constants = {
         }},
         { kind = "parent", view = "recipes", label = "Crafting", icon = "Professions-Crafting-Orders-Icon", children = {
             { label = "Recipes",   view = "recipes" },
+            { label = "Recipe Sources", view = "recipeSources" },
             { label = "Warehouse", view = "warehouse" },
-            { label = "Trainers",  view = "trainers" },
             { label = "Alts",      view = "alts" },
         }},
         { kind = "parent", view = "mogul", label = "Mogul", icon = "housing-map-deed", children = {
@@ -872,14 +898,17 @@ HDG.Constants = {
         NOTE_CLEAR                    = "HDGR_NOTE_CLEAR",              -- payload: { itemID }
         VENDOR_NOTE_SET               = "HDGR_VENDOR_NOTE_SET",         -- payload: { npcID, text, ts? }
         VENDOR_NOTE_CLEAR             = "HDGR_VENDOR_NOTE_CLEAR",       -- payload: { npcID }
-        -- payload: { entries = { [itemID] = { spellID, selfKnown, altKnown } } }
-        RECIPE_KNOWLEDGE_UPDATED   = "HDGR_RECIPE_KNOWLEDGE_UPDATED",
 
         -- ===== Per-character roster (alts data layer) ===============
         -- account.characters[charKey] holds per-char professions + known recipes.
         -- CHARACTER_PROFESSION_UPDATED payload: { charKey, name, realm, class, classFile, profName,
         --   skillLines = { [expName] = { current, max } }, knownRecipes = { [recipeID] = true } }
         CHARACTER_PROFESSION_UPDATED = "HDGR_CHARACTER_PROFESSION_UPDATED",
+        -- CHARACTER_RECIPES_SYNCED payload: { charKey, name, realm, class, classFile,
+        --   add = { [professionID] = { name = <localized root name>, spells = { [spellID] = true } } },
+        --   remove = { [recordKey] = { [spellID] = true } } }. The spellbook pass's decor-recipe
+        --   delta for the logged-in character (ProfessionScanner:SyncKnownDecorRecipes).
+        CHARACTER_RECIPES_SYNCED     = "HDGR_CHARACTER_RECIPES_SYNCED",
         -- RECIPE_DATA_CAPTURED payload: { recipes = { [itemID] = { reagents = {[id]=qty},
         --   profession, spellID } }, subRecipes? = same shape + categoryName }. Ungated capture
         -- of decor-recipe data (+ the sub-recipe craft-graph closure) from ANY opened profession
@@ -944,10 +973,13 @@ HDG.Constants = {
         -- Once per session; lets all consumers read strictly instead of calling UnitName/GetRealmName/UnitClass independently.
         SESSION_IDENTITY_SET         = "HDGR_SESSION_IDENTITY_SET",         -- payload: { name, realm, class, classFile }; reducer computes charKey
 
-        -- ===== Trainers tab =====
-        TRAINERS_TOGGLE_PROFESSION       = "HDGR_TRAINERS_TOGGLE_PROFESSION",       -- payload: { profession = string }
-        TRAINERS_TOGGLE_MIDNIGHT_SECTION = "HDGR_TRAINERS_TOGGLE_MIDNIGHT_SECTION",
-        TRAINERS_SELECT_TRAINER          = "HDGR_TRAINERS_SELECT_TRAINER",          -- payload: { npcID = number }
+
+        -- ===== Recipe Sources tab =====
+        -- One multi-select toggle for all six filter axes: the payload's one key names
+        -- the axis (prof / exp / src / zone / rep / cur), its value the member; "all"
+        -- clears the set. A filter dropdown dispatches { [payloadKey] = value }.
+        RS_TOGGLE_FILTER                 = "HDGR_RS_TOGGLE_FILTER",                 -- payload: { <axis> = value|"all" }
+        RS_TOGGLE_GROUP                  = "HDGR_RS_TOGGLE_GROUP",                  -- payload: { key = "P:<profession>"|"T:<group>" }
 
         -- Mogul tab UI state (mode = "profit"|"collection"; viewMode = "char"|"account"; optimizeBy).
         MOGUL_SET_MODE               = "HDGR_MOGUL_SET_MODE",
@@ -1004,6 +1036,7 @@ HDG.Constants = {
         -- ===== Cross-feature observer dispatches =====
         -- Bulk payload avoids per-item dispatch spam in debug mode.
         ITEM_INFO_RESOLVED         = "HDGR_ITEM_INFO_RESOLVED",         -- payload: { itemIDs = { [n] = itemID }, count = n }
+        NPC_NAMES_RESOLVED         = "HDGR_NPC_NAMES_RESOLVED",         -- payload: { entries = { { npcID, name } } }
         QUEST_STATUS_RESOLVED      = "HDGR_QUEST_STATUS_RESOLVED",      -- payload: { questID = N }
         -- First character to record a completion wins; stored account-wide.
         QUEST_COMPLETION_RECORDED  = "HDGR_QUEST_COMPLETION_RECORDED",  -- payload: { completions = { [questID]={name,class} } }
@@ -1357,6 +1390,11 @@ end
 
 -- Gold has no Blizzard currency ID; CURRENCY_GOLD sentinel lets cost-entry tables iterate uniformly.
 HDG.Constants.COIN_ATLAS    = "|A:auctionhouse-icon-coin-gold:14:14|a"
+-- Silver and copper coins for sub-gold prices (a recipe trainer's 40 silver fee).
+-- Blizzard's own money display uses these atlas names (Blizzard_MoneyFrame
+-- Shared/MoneyFrame.lua, the AuctionHouseSilver / AuctionHouseCopper display types).
+HDG.Constants.COIN_SILVER_ATLAS = "|A:coin-silver:14:14|a"
+HDG.Constants.COIN_COPPER_ATLAS = "|A:coin-copper:14:14|a"
 HDG.Constants.CURRENCY_GOLD = -1   -- sentinel; real currency IDs are positive
 HDG.Constants.GOLD_NAME     = "Gold"  -- the sentinel has no C_CurrencyInfo record to take a name from
 
@@ -1441,7 +1479,7 @@ HDG.Constants.DISCORD_TEXTURE = "Interface\\AddOns\\HousingDecorGuide\\textures\
 -- Wowhead logo: shopping-list row icon + detail URL-box icon for wowhead-sourced lists.
 HDG.Constants.WOWHEAD_TEXTURE = "Interface\\AddOns\\HousingDecorGuide\\textures\\wowhead_logo"
 
--- REP_FACTIONS: every reputation faction referenced by a row.factionGate.
+-- REP_FACTIONS: every reputation faction referenced by a row.factionGate or a recipe source's rep gate.
 -- .faction = player faction restriction ("A"/"H"/"N") -- lets _bakeGates skip wrong-side gates.
 -- Static map avoids C_Reputation.GetFactionDataByIndex (skips collapsed/legacy factions, taint risk).
 HDG.Constants.REP_FACTIONS = {
@@ -1493,6 +1531,15 @@ HDG.Constants.REP_FACTIONS = {
     [2712] = { name = "Blood Knights",              faction = "N", friendship = true },
     [2713] = { name = "Farstriders",                faction = "N", friendship = true },
     [2714] = { name = "Shades of the Row",          faction = "N", friendship = true },
+
+    -- Recipe rep gates (HDGR_RecipeSourceAugment's vendor sources; names and kinds
+    -- verified Faction.db2 2026-10-25). The recipe detail names the faction from here.
+    [2511] = { name = "Iskaara Tuskarr",            faction = "N" },
+    [2590] = { name = "Council of Dornogal",        faction = "N" },
+    [2696] = { name = "Amani Tribe",                faction = "N" },
+    [2772] = { name = "Zul'jarra's Forces",         faction = "N" },
+    [2808] = { name = "Preyhunter's Journey",       faction = "N" },  -- renown-type track; Wowhead calls its levels ranks
+    [2773] = { name = "Captain Tokka",              faction = "N", friendship = true },
 }
 
 -- Reverse index: name -> factionID. Lowercase aliases absorb catalog casing drift ("the Honorbound").

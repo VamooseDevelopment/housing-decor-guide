@@ -142,8 +142,7 @@ R.EssenceBadge = function()
     end
     local extraLines = { { text = ("%d total across your characters"):format(sel.total) } }
     for _, e in ipairs(sel.perChar) do
-        local hex  = HDG.Constants.CLASS_COLORS[e.classFile] or "ffffffff"  -- exception(nullable): classFile absent on a legacy record
-        local name = "|c" .. hex .. e.name .. "|r"
+        local name = HDG.Format.ClassName(e.name, e.classFile)
         if e.bank > 0     then name = name .. dim .. ("  (%d in bank)|r"):format(e.bank) end
         if not e.isCurrent then name = name .. dim .. "  - last login|r" end
         extraLines[#extraLines + 1] = { text = name, right = tostring(e.count) }
@@ -379,6 +378,11 @@ R.RecipesGroupingToggle = { title = "locale:TIP_REC_GROUPING_TITLE", body = "loc
 R.RecipesDepth          = { title = "locale:TIP_REC_DEPTH_TITLE",    body = "locale:TIP_REC_DEPTH_BODY",    anchor = "ANCHOR_BOTTOMRIGHT" }
 R.RecipesAddAllToAH     = { title = "locale:TIP_REC_ADD_ALL_TITLE",  body = "locale:TIP_REC_ADD_ALL_BODY",  anchor = "ANCHOR_BOTTOMRIGHT" }
 
+-- ===== Recipe Sources =========================================================
+R.RsMapAll         = { title = "locale:TIP_RS_MAP_ALL_TITLE",   body = "locale:TIP_RS_MAP_ALL_BODY",   anchor = "ANCHOR_BOTTOM" }
+R.RsHere           = { title = "locale:TIP_RS_HERE_TITLE",      body = "locale:TIP_RS_HERE_BODY",      anchor = "ANCHOR_BOTTOM" }
+R.RsOpenInRecipes  = { title = "locale:TIP_RS_OPEN_RECIPES_TITLE", body = "locale:TIP_RS_OPEN_RECIPES_BODY", anchor = "ANCHOR_LEFT" }
+
 -- ===== Config: collection cache reset (NOT WarnResetConfig -- that copy is
 -- about display options; this button forces a rescan, not a wipe) ============
 R.ConfigCollectionReset = { title = "locale:TIP_CONFIG_COLL_RESET_TITLE", body = "locale:TIP_CONFIG_COLL_RESET_BODY", anchor = "ANCHOR_BOTTOM" }
@@ -541,18 +545,19 @@ local function _appendRecipeDecorStatus(extras, itemID)
     end
 end
 
--- Recipe knowledge status. For alt-known recipes, NAME the alt: Mogul resolves
--- the char from per-char knownRecipes (keyed by spellID, NOT the recipe key).
--- Falls back to the generic line if no scanner data has landed for the alt.
+-- Recipe knowledge status, from recipes.knowledge. For alt-known recipes, NAME the alt:
+-- Mogul resolves the chars from per-char knownRecipes (keyed by spellID, NOT the recipe
+-- key) with the same predicate recipes.knowledge uses (not you, not hidden), so a
+-- recipe in `alts` always has at least one name.
 local function _appendRecipeKnowledge(extras, itemID)
-    local known = HDG.Store:GetState().account.recipes[itemID]
-    if known and known.selfKnown then
+    local state     = HDG.Store:GetState()  -- top-level only: hover-time read
+    local knowledge = HDG.Selectors:Call("recipes.knowledge", state)
+    if knowledge.mine[itemID] then
         extras[#extras + 1] = { text = "Recipe: Known", r = 0.45, g = 0.82, b = 0.45 }
-    elseif known and known.altKnown then
-        local knowers = known.spellID and HDG.Mogul:AltsKnowingSpellID(known.spellID)
-        local who     = knowers and #knowers > 0 and table.concat(knowers, ", ")
+    elseif knowledge.alts[itemID] then
+        local spellID = HDG.Selectors:Call("recipes.db", state)[itemID].spellID
         extras[#extras + 1] = {
-            text = who and ("Recipe: Known by " .. who) or "Recipe: Known by an alt",
+            text = "Recipe: Known by " .. table.concat(HDG.Mogul:AltsKnowingSpellID(spellID), ", "),
             r = 0.85, g = 0.72, b = 0.35,
         }
     else
@@ -754,12 +759,8 @@ function R.CharacterRoster(itemID)
 end
 
 -- One character line: class-coloured name, "(you)" on the logged-in character.
--- CLASS_COLORS is pure data keyed by classFile, so this works headless too.
--- Format.ClassColorName is not reused here: it parenthesises its result for the
--- Acquisition source lines.
 local function _rosterLine(lines, row)
-    local hex = HDG.Constants.CLASS_COLORS[row.classFile] or "ffffffff"  -- exception(nullable): legacy roster records predate classFile capture
-    local label = "|c" .. hex .. row.name .. "|r"
+    local label = HDG.Format.ClassName(row.name, row.classFile)
     if row.isCurrent then label = label .. " |cff808080(you)|r" end
     lines[#lines + 1] = { text = "  " .. label, right = tostring(row.count),
                           r = 0.85, g = 0.85, b = 0.85 }   -- inline: GameTooltip is outside the theme registry

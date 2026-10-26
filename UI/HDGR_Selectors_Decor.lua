@@ -802,18 +802,19 @@ Selectors:Register("decor.isFavorite", {
     end,
 })
 
--- craftableState: 4-state recipe knowledge enum (HDG.Constants.RECIPE_STATE).
--- known_alt requires account.recipes[itemID].altKnown (populated by alt scanner).
+-- craftableState: 4-state recipe knowledge enum (HDG.Constants.RECIPE_STATE). A recipe
+-- is any recipes.db entry (seed + capture); who knows it is recipes.knowledge.
 Selectors:Register("decor.craftableState", {
-    reads = {"account.recipes"},
+    calls = {"recipes.db", "recipes.knowledge"},
     fn = function(state, ctx)
-        local recipes = state.account.recipes
+        local db        = Selectors:Call("recipes.db", state, ctx)
+        local knowledge = Selectors:Call("recipes.knowledge", state, ctx)
+        local mine, alts = knowledge.mine, knowledge.alts
         local S = HDG.Constants.RECIPE_STATE
         return function(itemID)
-            local r = recipes[itemID]
-            if not r then return S.NotARecipe end
-            if r.selfKnown then return S.KnownByCharacter end
-            if r.altKnown  then return S.KnownByAlt       end
+            if db[itemID] == nil then return S.NotARecipe end
+            if mine[itemID] then return S.KnownByCharacter end
+            if alts[itemID] then return S.KnownByAlt end
             return S.UnknownOnAccount
         end
     end,
@@ -1179,8 +1180,8 @@ Selectors:Register("decor.matchesTopFilter", {
 -- Curried (itemID) -> bool for "matches the active tag at the current top filter".
 -- nil or "All Decor" activeTag matches everything.
 Selectors:Register("decor.matchesTag", {
-    reads = {"account.recipes", "account.favorites", "session.resolvers.catalog.tick"},
-    calls = {"decor.topFilter", "decor.activeTag",
+    reads = {"account.favorites", "session.resolvers.catalog.tick"},
+    calls = {"recipes.db", "decor.topFilter", "decor.activeTag",
              "decor.isFavorite", "decor.isCollected",
              "decor.isDyed", "decor.isDyeable", "decor.isNew"},
     fn = function(state, ctx)
@@ -1199,8 +1200,8 @@ Selectors:Register("decor.matchesTag", {
                 return function(itemID) return isFav and isFav(itemID) or false end
             end
             if tag == "Crafted" then
-                local recipes = state.account.recipes
-                return function(itemID) return recipes[itemID] ~= nil end
+                local db = Selectors:Call("recipes.db", state, ctx)
+                return function(itemID) return db[itemID] ~= nil end
             end
             if tag == "House XP" then
                 -- Items eligible for first-acquisition House XP AND not yet owned.

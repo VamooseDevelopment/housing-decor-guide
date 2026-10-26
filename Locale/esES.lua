@@ -317,8 +317,6 @@ HDG.Locale:Register("esES", {
     TIP_WARN_HARD_RESET_TITLE = "|cffff6060Restablecimiento completo de todos los datos|r",
     TIP_WOWHEAD_BODY = "Abre la página de Wowhead de este objeto en el navegador",
     TIP_WOWHEAD_TITLE = "Wowhead",
-    TRN_SEARCH_PLACEHOLDER = "Buscar instructor / zona...",
-    TRN_TITLE = "Instructores",
     WARE_ALL_MATS_HDR = "Materiales",
     WARE_AUTOSHOW_TOGGLE = "Mostrar automáticamente al cosechar",
     WARE_LUMBER_HDR_BAG = "Bolsa",

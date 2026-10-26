@@ -16,7 +16,6 @@
 --   UI\LayoutConfig\HDGR_LayoutConfig_Alts.lua
 --   UI\LayoutConfig\HDGR_LayoutConfig_Mogul.lua
 --   UI\LayoutConfig\HDGR_LayoutConfig_Styles.lua
---   UI\LayoutConfig\HDGR_LayoutConfig_Trainers.lua
 --   UI\LayoutConfig\HDGR_LayoutConfig_HouseTab.lua
 --   UI\LayoutConfig\HDGR_LayoutConfig_Debug.lua
 --   UI\LayoutConfig\HDGR_LayoutConfig_Config.lua
@@ -93,7 +92,6 @@ HDG.LayoutConfig = {
         --   altsPanel                                       -> HDGR_LayoutConfig_Alts.lua
         --   mogulPanel                                      -> HDGR_LayoutConfig_Mogul.lua
         --   stylesPanel                                     -> HDGR_LayoutConfig_Styles.lua
-        --   trainersPanel                                   -> HDGR_LayoutConfig_Trainers.lua
         --   houseTabPanel, houseTabPickerPanel              -> HDGR_LayoutConfig_HouseTab.lua
         --   debugPanel                                      -> HDGR_LayoutConfig_Debug.lua
         --   configPanel                                     -> HDGR_LayoutConfig_Config.lua

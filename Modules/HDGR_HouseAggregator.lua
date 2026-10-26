@@ -865,8 +865,10 @@ local SNAPSHOT_TRIGGERING_ACTIONS = {
     HOUSE_LEVEL_UPDATED                   = true,
     HOUSE_REWARDS_RECEIVED                = true,
     HOUSE_LIST_UPDATED                    = true,
-    -- Recipe knowledge changes the craftableNow + goblinTopLumber sets.
-    RECIPE_KNOWLEDGE_UPDATED              = true,
+    -- The logged-in character's known recipes (recipes.knowledge `mine`) change the
+    -- craftableNow set: the spellbook pass and a profession window scan write them.
+    CHARACTER_RECIPES_SYNCED              = true,
+    CHARACTER_PROFESSION_UPDATED          = true,
     -- Catalog sweep completion: re-derive bySource/byExp from the updated
     -- HousingCatalogObserver (new expansion tags, updated source flags).
     CATALOG_LOAD_COMPLETED                = true,

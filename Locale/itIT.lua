@@ -317,8 +317,6 @@ HDG.Locale:Register("itIT", {
     TIP_WARN_HARD_RESET_TITLE = "|cffff6060Reset completo di tutti i dati|r",
     TIP_WOWHEAD_BODY = "Apri la pagina Wowhead di questo oggetto nel browser",
     TIP_WOWHEAD_TITLE = "Wowhead",
-    TRN_SEARCH_PLACEHOLDER = "Cerca istruttore / zona...",
-    TRN_TITLE = "Istruttori",
     WARE_ALL_MATS_HDR = "Materiali",
     WARE_AUTOSHOW_TOGGLE = "Mostra automaticamente al raccolto",
     WARE_LUMBER_HDR_BAG = "Zaino",

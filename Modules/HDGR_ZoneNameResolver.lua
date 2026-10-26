@@ -1,18 +1,17 @@
 -- HDG.ZoneNameResolver
 -- ============================================================================
--- Maps English zone names (as stored in HDGR_TrainersDB) to the client
--- locale via C_Map.GetMapInfo. Trainers tab uses this for non-enUS clients.
+-- Zone name -> uiMapID: a curated table of English zone names (HDGR_TrainersDB and
+-- the recipe source augment name their places in English), then a one-time
+-- C_Map.GetMapInfo scan for client-locale names (catalog zone strings). Localize
+-- turns a curated English name into the client's language for display.
 -- Silvermoon: mapID 2393 (retail Midnight Silvermoon; avoids the old 110/2393
 -- ambiguity where HDG's behavior depended on dict iteration order).
--- Selectors declare calls = {"ZoneNameResolver:Localize"}.
 
 HDG = HDG or {}
 HDG.ZoneNameResolver = HDG.ZoneNameResolver or {}
 local R = HDG.ZoneNameResolver
 
--- Log tag for C_Map.GetMapInfo boundary failures (invalid mapID etc).
-
-R._cache = R._cache or {}   -- [enUSName] = localizedName
+R._cache = R._cache or {}   -- [enUSName] = name in the client's language
 
 R.ZONE_MAP_IDS = {
     -- Classic capitals
@@ -51,6 +50,9 @@ R.ZONE_MAP_IDS = {
     ["Dornogal"]                    = 2339,
     -- Midnight (12.0.7 vendor zones)
     ["Naigtal"]                     = 2600,  -- verified in-game 2026-07-12; NOT 2623 (System=2 variant) or 924 (Legion "Invasion Point: Naigtal")
+    -- Midnight trainer locations (TrainersDB). Both names have an older map the scan would find first.
+    ["Eversong Woods"]              = 2395,
+    ["Zul'Aman"]                    = 2437,
 }
 
 -- Zone NAME -> uiMapID. Curated table first (disambiguates duals like
@@ -86,31 +88,23 @@ function R:MapIDForName(zoneName)
     return self._nameIndex[zoneName]  -- exception(nullable): sub-zone strings have no uiMap
 end
 
--- Localize enUS zone name. Falls back to enUS when mapID unknown or GetMapInfo nil.
+-- An English zone name in the client's language, for display; filters keep the English
+-- name. A zone the curated table lacks, or a map the client can't name, stays English.
+-- GetMapInfo is synchronous DBC data, so a name never arrives later.
 function R:Localize(enUSName)
-    if not enUSName then return "" end
     local cached = self._cache[enUSName]
     if cached then return cached end
-
     local mapID = self.ZONE_MAP_IDS[enUSName]
-    if not mapID then
-        self._cache[enUSName] = enUSName  -- cache passthrough to avoid repeated lookups
-        return enUSName
-    end
-
-    local info = C_Map.GetMapInfo(mapID)
-    if info and info.name and info.name ~= "" then
-        self._cache[enUSName] = info.name
-        return info.name
-    end
-
-    return enUSName
+    local info = mapID and C_Map.GetMapInfo(mapID)   -- exception(nullable): a zone the curated table lacks has no map
+    local name = (info and info.name ~= nil and info.name ~= "") and info.name or enUSName   -- exception(boundary): GetMapInfo nil or nameless for a retired map
+    self._cache[enUSName] = name
+    return name
 end
 
 HDG.Modules:Declare({
     name = "ZoneNameResolver",
     dependencies = {},
-    -- per ADR-011: sole owner of C_Map.GetMapInfo (trainers-tab localization).
+    -- per ADR-011: sole owner of C_Map.GetMapInfo (MapIDForName's scan, Localize).
     -- C_Map partitioned at sub-API; see ZoneObserver / LumberObserver for the rest.
     ownsBlizzardNamespaces = { "C_Map.GetMapInfo" },
 })

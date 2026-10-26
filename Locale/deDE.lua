@@ -317,8 +317,6 @@ HDG.Locale:Register("deDE", {
     TIP_WARN_HARD_RESET_TITLE = "|cffff6060Alle Daten vollständig zurücksetzen|r",
     TIP_WOWHEAD_BODY = "Wowhead-Seite dieses Gegenstands im Browser öffnen",
     TIP_WOWHEAD_TITLE = "Wowhead",
-    TRN_SEARCH_PLACEHOLDER = "Lehrer / Zone suchen...",
-    TRN_TITLE = "Lehrer",
     WARE_ALL_MATS_HDR = "Materialien",
     WARE_AUTOSHOW_TOGGLE = "Bei Ernte automatisch anzeigen",
     WARE_LUMBER_HDR_BAG = "Tasche",

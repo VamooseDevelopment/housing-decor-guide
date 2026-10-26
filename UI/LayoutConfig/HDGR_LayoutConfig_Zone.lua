@@ -120,6 +120,7 @@ LC.widgets["zoneHeaderPanel.close"] = {
 -- ===== Widgets -- filter bar ================================================
 
 LC.widgets["zonePanel.searchBox"] = {
+    search = true,   -- magnifier + clear "x", as Recipe Sources (Vamoose, 2026-10-26)
     tooltip = false,
     kind = "editbox", ["in"] = "zone.filterBar",
     font = "body", width = "fill", height = 22, order = 10,

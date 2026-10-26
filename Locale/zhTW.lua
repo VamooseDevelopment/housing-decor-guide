@@ -317,8 +317,6 @@ HDG.Locale:Register("zhTW", {
     TIP_WARN_HARD_RESET_TITLE = "|cffff6060硬重設所有資料|r",
     TIP_WOWHEAD_BODY = "在瀏覽器中開啟此物品的 Wowhead 頁面",
     TIP_WOWHEAD_TITLE = "Wowhead",
-    TRN_SEARCH_PLACEHOLDER = "搜尋訓練師／區域...",
-    TRN_TITLE = "訓練師",
     WARE_ALL_MATS_HDR = "材料",
     WARE_AUTOSHOW_TOGGLE = "採集時自動顯示",
     WARE_LUMBER_HDR_BAG = "背包",

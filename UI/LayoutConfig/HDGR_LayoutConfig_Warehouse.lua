@@ -115,6 +115,7 @@ LC.sections["warehouse.matsList"] = {
     ["in"] = "warehouse.materialsBody", layout = "fill", order = 20, chrome = "inset",
 }
 LC.widgets["warehouseMaterialsPanel.search"] = {
+    search = true,   -- magnifier + clear "x", as Recipe Sources (Vamoose, 2026-10-26)
     tooltip = false,
     kind = "editbox", ["in"] = "warehouse.matsSearch", font = "body",
     height = 22, width = "fill", order = 10,

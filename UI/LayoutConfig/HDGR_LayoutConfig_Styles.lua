@@ -565,6 +565,7 @@ LC.widgets["stylesPanel.sectionsList"] = {
 }
 -- Search box (right of count label); filters by displayName substring.
 LC.widgets["stylesPanel.landingSearch"] = {
+    search = true,   -- magnifier + clear "x", as Recipe Sources (Vamoose, 2026-10-26)
     tooltip = false,
     kind = "editbox", ["in"] = "styles.landing.searchRow", font = "small",
     height = 22, width = 200, order = 20,
@@ -592,6 +593,7 @@ LC.widgets["stylesPanel.detailSourceLink"] = {
 }
 -- Detail item search in the panel header (detail view only).
 LC.widgets["stylesPanel.detailSearch"] = {
+    search = true,   -- magnifier + clear "x", as Recipe Sources (Vamoose, 2026-10-26)
     tooltip = false,
     kind = "editbox", ["in"] = "stylesPanel", slot = "header", font = "small",
     height = 20, width = 200, order = 12,
@@ -695,6 +697,7 @@ LC.widgets["stylesPanel.curatorUndoBtn"] = {
 -- Card-grid name filter. Dedicated action (nested curator.searchQuery slot);
 -- wired in Controller_Styles, mirroring the detail-search box.
 LC.widgets["stylesPanel.curatorSearch"] = {
+    search = true,   -- magnifier + clear "x", as Recipe Sources (Vamoose, 2026-10-26)
     tooltip = false,
     kind = "editbox", ["in"] = "styles.curator.searchRow", font = "small",
     height = 22, width = "fill", order = 10,
@@ -904,6 +907,7 @@ LC.widgets["stylesPanel.exportToolsSpacer"] = {
     kind = "spacer", ["in"] = "styles.export.toolsRow", width = "fill", height = 20, order = 5,
 }
 LC.widgets["stylesPanel.exportSearch"] = {
+    search = true,   -- magnifier + clear "x", as Recipe Sources (Vamoose, 2026-10-26)
     tooltip = false,
     kind = "editbox", ["in"] = "styles.export.toolsRow", font = "small",
     height = 22, width = 200, order = 20,

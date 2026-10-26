@@ -178,13 +178,13 @@ Selectors:Register("mogul.plan", {
         "session.ui.mogul.supplyImpact.smoothPct",
         "session.ui.mogul.supplyImpact.capN",
         "session.ui.mogul.frugal",
-        "account.recipes",                       -- decor-known authority
         "account.characters",                    -- alt-hint derivation
         "account.collection.ownedDecorIDs",
         "session.resolvers.bag.tick",
         "session.resolvers.prices.tick",
         "session.itemNames.names",
     },
+    calls = { "recipes.knowledge" },   -- Mogul:Candidates: the known-recipe set
     fn = function(state)
         local m = state.session.ui.mogul
         return HDG.Mogul:BuildPlan({
@@ -199,10 +199,11 @@ Selectors:Register("mogul.plan", {
 -- Plan rows -> scrollbox element list.
 local function expansionShort(display) return HDG.Expansion.GetShort(display) end
 
-local function buildPlanRowElement(planRow, viewMode, isRunnerUp)
+-- craftableState is decor.craftableState's curried (itemID) -> RECIPE_STATE.
+local function buildPlanRowElement(planRow, viewMode, isRunnerUp, craftableState)
     local r = planRow.recipe
     local s = planRow.score
-    local knownState = HDG.Mogul:KnownStateForItemID(r.itemID)
+    local knownState = craftableState(r.itemID)
     local bestAlt
     if viewMode == "account"
        and knownState == HDG.Constants.RECIPE_STATE.KnownByAlt then
@@ -235,10 +236,11 @@ end
 -- Heterogeneous row stream: mogulSection headers + mogulRow entries.
 Selectors:Register("mogul.planRows", {
     reads = { "session.ui.mogul.viewMode" },   -- read directly in fn (also in mogul.plan's closure)
-    calls = {"mogul.plan"},
+    calls = {"mogul.plan", "decor.craftableState"},
     fn = function(state, ctx)
         local plan = Selectors:Call("mogul.plan", state, ctx)
         if not plan then return {} end
+        local craftableState = Selectors:Call("decor.craftableState", state, ctx)
         local viewMode = state.session.ui.mogul.viewMode
         local totals = plan.totals or {}
         local hasPlanRows = plan.rows and #plan.rows > 0
@@ -255,7 +257,7 @@ Selectors:Register("mogul.planRows", {
         out[#out + 1] = { kind = "mogulSection", title = planSection }
         if hasPlanRows then
             for _, row in ipairs(plan.rows) do
-                out[#out + 1] = buildPlanRowElement(row, viewMode, false)
+                out[#out + 1] = buildPlanRowElement(row, viewMode, false, craftableState)
             end
         end
 
@@ -280,7 +282,7 @@ Selectors:Register("mogul.planRows", {
                 -- crafts=0 (didn't make budget); row factory uses per-craft figures.
                 out[#out + 1] = buildPlanRowElement(
                     { recipe = score.recipe, crafts = 0, score = score },
-                    viewMode, true)
+                    viewMode, true, craftableState)
             end
         end
 
@@ -462,12 +464,11 @@ Selectors:Register("goblin.profitData", {
 
 Selectors:Register("goblin.rows", {
     memoized = true,
-    calls = { "goblin.isTSMActive", "recipes.db", "goblin.profitData" },
+    calls = { "goblin.isTSMActive", "recipes.db", "goblin.profitData", "recipes.knowledge" },
     reads = {
         "account.prices",  -- resolver-facade contract (sweep rule 4c)
         "session.itemNames.names",  -- row.name localised via _localName -> re-fire when names resolve
         "account.config.scheme",   -- lumber column bakes Theme color codes -> re-emit on scheme swap to repaint
-        "account.recipes",
         "account.collection.ownedDecorIDs",
         "account.craft.queue",
         "account.prices.ownedAuctions",
@@ -497,7 +498,7 @@ Selectors:Register("goblin.rows", {
         local sortDir      = g.sortDir
         local isTSMActive  = Selectors:Call("goblin.isTSMActive", state, ctx)
 
-        local recipesByItem = state.account.recipes
+        local known = Selectors:Call("recipes.knowledge", state, ctx)
         -- Pre-build queue/auction sets for O(1) lookup per row.
         local queueSet = {}
         for _, q in ipairs(state.account.craft.queue) do
@@ -546,11 +547,10 @@ Selectors:Register("goblin.rows", {
             end
             -- Knowledge filter.
             if keep and knowledge ~= "all" then
-                local rec = recipesByItem[row.itemID]
                 if knowledge == "known" then
-                    keep = rec and rec.selfKnown == true
+                    keep = known.mine[row.itemID] == true
                 elseif knowledge == "alt" then
-                    keep = rec and (rec.selfKnown == true or rec.altKnown == true)
+                    keep = (known.mine[row.itemID] or known.alts[row.itemID]) == true
                 end
             end
             -- Queue filter.
@@ -694,15 +694,13 @@ local CSV_HEADER = table.concat({
 -- Exports exactly what the table is showing -- filtered and sorted -- because
 -- "send this list to someone" is the whole point of the feature.
 Selectors:Register("goblin.csv", {
-    calls = { "goblin.rows" },
-    reads = { "account.recipes" },   -- KnownByPlayer / KnownByAlts
+    calls = { "goblin.rows", "recipes.knowledge" },   -- recipes.knowledge: KnownByPlayer / KnownByAlts
     fn = function(state, ctx)
         local rows    = Selectors:Call("goblin.rows", state, ctx)
-        local recipes = state.account.recipes
+        local known   = Selectors:Call("recipes.knowledge", state, ctx)
         local out     = { CSV_HEADER }
         for i = 1, #rows do
             local r   = rows[i]
-            local rec = recipes[r.itemID]  -- exception(nullable): unscanned recipe has no knowledge row
             local lumberTotal = ""
             if r.lumberValue and r.lumberQty then
                 lumberTotal = _csvGold(r.lumberValue * r.lumberQty)
@@ -726,8 +724,8 @@ Selectors:Register("goblin.csv", {
                 _csvPct(r.margin),
                 _csvGold(r.tsmRegion),
                 _csvPct(r.tsmPct),
-                (rec and rec.selfKnown) and "Yes" or "No",
-                (rec and rec.altKnown) and "Yes" or "No",
+                known.mine[r.itemID] and "Yes" or "No",
+                known.alts[r.itemID] and "Yes" or "No",   -- an alt knows it, whether or not you do
                 _csvText(r.priceSource or ""),  -- exception(nullable): no price -> no source
                 _csvGold(r.tsmMin),
                 _csvGold(r.tsmMarket),

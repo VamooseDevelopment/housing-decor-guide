@@ -346,6 +346,7 @@ LC.widgets["acquisitionListPanel.count"] = {
     binding = "acq.countLabel",
 }
 LC.widgets["acquisitionListPanel.search"] = {
+    search = true,   -- magnifier + clear "x", as Recipe Sources (Vamoose, 2026-10-26)
     tooltip = false,
     kind = "editbox", ["in"] = "acq.filterBar", font = "body",
     height = 22, width = "fill", order = 10,
