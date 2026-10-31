@@ -26,6 +26,11 @@
 --   HDG.Expansion.NormalizeAlias(rawName)     canonical display or nil --
 --                                              accepts display/api/short/alias
 --                                              forms (localized strings too).
+--   HDG.Expansion.Join(names)                 an item's expansions as one value,
+--                                              oldest first ("Classic, Midnight")
+--   HDG.Expansion.Members(value)              that value's names, oldest first
+--   HDG.Expansion.Has(value, set)             any of them a key of set
+--   HDG.Expansion.Colored(value)              each in its brand colour
 -- Every GetX accepts ANY of those name forms; the helper normalizes via
 -- the alias map before resolving. The mixed-case `abbr` field (MoP/TWW)
 -- is intentionally not exposed -- consumers should use GetShort (MOP/TWW)
@@ -154,6 +159,60 @@ function E.NormalizeAlias(rawName) return E.GetFull(rawName) end
 function E.FromSkillLine(raw)
     if not raw or raw == "" then return nil end
     return E.GetFull(raw) or E.GetFull(raw:match("^(%S+)"))
+end
+
+-- ===== An item's expansions =================================================
+-- The catalog can tag one decor with two expansions: Pillar Cobweb is Classic and
+-- Midnight (5 of 1,788 recorded rows). Owner ruling 2026-10-31: such a piece belongs
+-- to both. The catalog row stores them as ONE value, every tag name oldest first,
+-- joined by ", " ("Classic, Midnight"), so whatever shows it shows both. These four
+-- are the only code that builds that value or takes it apart.
+local SEP = ", "
+local _members = {}   -- [value] = its names; one shared list per distinct value
+
+local function _byRelease(a, b)
+    local ia = E.GetIndex(a) or math.huge   -- exception(nullable): a tag name EXPANSION_DATA does not know sorts last
+    local ib = E.GetIndex(b) or math.huge   -- exception(nullable): a tag name EXPANSION_DATA does not know sorts last
+    if ia ~= ib then return ia < ib end
+    return a < b
+end
+
+-- Join(names): the stored value for a list of tag names. Sorts the list in place.
+function E.Join(names)
+    if #names == 1 then return names[1] end
+    table.sort(names, _byRelease)
+    return table.concat(names, SEP)
+end
+
+-- Members(value): its names, oldest first. The list is shared: read it, never write it.
+function E.Members(value)
+    local list = _members[value]
+    if list then return list end
+    list = {}
+    for name in (value .. SEP):gmatch("(.-)" .. SEP) do list[#list + 1] = name end
+    _members[value] = list
+    return list
+end
+
+-- Has(value, set): true when any of the value's expansions is a key of `set`. Sets
+-- are keyed by display name ("The Burning Crusade"), and the catalog's tag name can
+-- be another form of it ("Burning Crusade"), so each name resolves through the
+-- alias map first.
+function E.Has(value, set)
+    for _, name in ipairs(E.Members(value)) do
+        if set[E.GetFull(name) or name] then return true end   -- exception(nullable): a tag name EXPANSION_DATA does not know matches as written
+    end
+    return false
+end
+
+-- Colored(value): each expansion in its brand colour, joined as stored.
+function E.Colored(value)
+    local out = {}
+    for i, name in ipairs(E.Members(value)) do
+        local hex = E.GetColorHex(name)
+        out[i] = hex and (hex .. name .. "|r") or name   -- exception(nullable): a tag name EXPANSION_DATA does not know has no brand colour
+    end
+    return table.concat(out, SEP)
 end
 
 -- IsExpansionTagGroup: identify the catalog's Expansion filter-tag group locale-independently,

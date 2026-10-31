@@ -427,12 +427,14 @@ LC.sections["styles.import.previewList"] = {
     order    = 50,
     chrome   = "inset",
 }
+-- Hidden for a Smart Set code: it always lands in Filtered Sets.
 LC.sections["styles.import.destRow"] = {
     ["in"]  = "styles.import",
     layout  = "horizontal",
     height  = 24,
     gap     = "md",
     order   = 55,
+    visible = "styles.import.choosesDestination",
 }
 LC.sections["styles.import.footer"] = {
     ["in"]   = "styles.import",

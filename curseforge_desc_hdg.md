@@ -12,20 +12,23 @@
 
 ---
 
-## What's New in v3.40.0
+## What's New in v3.41.0
 
-- **Recipe Sources: where to learn every decor recipe.** A new Crafting tab lists all 346 decor recipes with every trainer, vendor, drop and quest that teaches them -- prices, rep requirements, waypoints and a map -- plus a By Teacher view showing what each trainer and vendor teaches and which of your alts need training. It replaces the Trainers tab.
-- **See which alts know a recipe**, by name in their class colors.
-- **Where to look inside a building.** Cards say "Basement of Brokenspear Tavern", "Up the ramp inside the tower" and the like.
-- **Every vendor that sells a decor recipe.** Shop by Vendor lists 44 recipe vendors, up from 20.
-- **Trainer names and locations fixed.** 32 trainers pointed at the wrong NPC; every trainer and recipe vendor was checked against the game.
-- **Search boxes** have a magnifier and a clear button.
+- **Decor Quests: the quests that lead to decor.** A new tab under Acquire lists every decor a quest rewards and the chain of quests before it, with this character's progress on each step. Each step names who starts it and who takes it back, with a Map button. A decor reads Done once anyone in your warband has done its quest. By Chain lists the chains instead, with the Garrison Campaign as one row.
+- **Quest Tracker.** Track a decor, a chain or a campaign and a small window shows the step to do next and where it starts, with a Map button, or Blizzard's quest arrow once the quest is in your log. A Compact style shows just the next step. Open it from Tools > Quest Tracker, or with the Quest steps button on a decor in the Decor tab or Find Decor.
+- **A Map button beside every Waypoint** on the Zone tab's vendors, Shopping's zones and Decor Quests.
+- **Hide PvP decor.** A new setting under Interface > Lists takes the decor you buy with Honor or Marks of Honor out of the Decor, Acquire and Zone Scanner lists.
+- **Mogul counts what reagents cost** and uses the reagents you already hold. A loss shows as a negative amount in red, and a cost Mogul can't price shows "?".
+- **Sharing styles.** Every card's Export gives a code that Styles Import reads back. A Filtered Set shares its tags, and a style code from HDG 3.x imports as a Filtered Set.
+- **The status bar shows its messages**, such as "<decor> added to shopping list".
+- **Decor data checked against the game.** More decor show the quest that rewards them, faction-only decor follow their own side's quest, and decor sold at more than one price lists each price.
 
 ## The Decor Catalog
 
 - **Every piece from the in-game Housing Catalog** in one searchable list -- favorites, a collected check, a craftable-recipe star, and dye-variant color dots at a glance.
 - **Compose filters** across Crafted (by profession), Size (footprint tags plus placement-cost chips), Styles, Expansions, Sources (vendor / quest / achievement / reputation / crafted / ...), and more -- with a live "collected / shown" status readout and one-click Reset.
 - **"New in <patch>"** -- when a patch or hotfix adds decor to the catalog, a New chip appears in the filter row so you can browse exactly what was added (and what you're still missing, via the Uncollected toggle).
+- **Hide PvP decor** -- a setting that takes the decor bought with Honor or Marks of Honor out of the lists.
 - **Uncollected** toggle to focus on what you're missing; **Destroy Decor** toggle to manage stored duplicates, with a confirmed destroy dialog that counts each copy as the game takes it, or Ctrl-Shift-click a row to destroy one copy.
 - **3D model preview** of any piece -- rotate, zoom, swap the backdrop, and preview specific dye variants.
 - **Rich detail card**: category breadcrumb, size, source, owned/stored/placed counts, first-acquisition House XP bonus, and style/faction tags.
@@ -38,6 +41,10 @@
 **Shop by Vendor:** browse every decor vendor (searchable; filter by faction, expansion, zone, reputation, source, or the currency they take, and one click narrows it to the zone you're in). Each vendor shows what they sell -- items *and* recipe scrolls -- with gold/currency costs, multiple payment options, and live **[QUEST] / [ACH] / [REP]** gate chips that brighten as you meet them. A map thumbnail plus **Waypoint** and **Map** buttons get you there; **Map N Vendors** pins a whole filtered list at once.
 
 **Find Decor:** search any piece and see exactly how to get it -- a typed source line with the reputation faction *and your live progress*, a clickable achievement link, the **alt who completed the quest** (account-wide), craft/drop tags, and an "Available from" list of every vendor that sells it. **+ Cart**, copy Wowhead links, or jump straight to a vendor.
+
+**Decor Quests:** every decor a quest rewards, with the chain of quests before it and how far this character has got. Each step names who starts it and who takes it back, with a Map button, and the step to do next comes first. Filter by To do, In progress or Done, by expansion and kind, or search by the name of any step. By Chain lists the chains instead, with the Garrison Campaign as one row. A decor reads Done once anyone in your warband has done its quest, and its details show how far each of your characters has got.
+
+**Quest Tracker:** track a decor, a chain or a campaign and a small window follows it: the step to do next with a Map button, or Blizzard's quest arrow once the quest is in your log, and a strip showing how far along you are. A Compact style shows just the next step. Once the decor is collected, it lists other decor quests that start in the same zone.
 
 ## Crafting
 
@@ -53,13 +60,14 @@ Housing crafting runs on lumber, so there's a dedicated **Lumber Tracker** -- a 
 ## Mogul -- make gold (or finish your collection) from decor
 
 - **Goblin** -- a profit table for every craftable: material cost, sell price, profit, margin %, and gold-per-lumber, sortable and filterable, with a per-reagent cost breakdown on each row. Prices from TSM, Auctionator, a live AH scan, or vendor fallback. The #AH count highlights green when your own listings are among them, and a "Your Auctions" filter shows just the items you have listed.
-- **Optimizer** -- ranks your recipes by **profit** *or* by **new appearances** for collection. Choose owned-mats vs buy-from-AH, scope to one character or the whole account, then **Queue All** or push the shopping list straight to Auctionator.
+- **Optimizer** -- ranks your recipes by **profit** *or* by **new appearances** for collection, counting what reagents cost and using the ones you already hold. Choose owned-mats vs buy-from-AH, scope to one character or the whole account, then **Queue All** or push the shopping list straight to Auctionator.
 
 ## Styles -- organize and design
 
-- **Browse** -- all your sets in one place: My Styles (grouped under categories you create, each folding with a click), Smart Sets, Shopping Lists, Snapshots, plus pre-authored Room Concepts and Useful Collections, each with a preview strip and collection count.
+- **Browse** -- all your sets in one place: My Styles (grouped under categories you create, each folding with a click), Filtered Sets, Shopping Lists, Snapshots, plus pre-authored Room Concepts and Useful Collections, each with a preview strip and collection count.
 - **Style Curator** -- a workspace to file your decor into named styles: pick a source, multi-select from a category-browsable grid, move into a target style, with single-step undo and a coverage bar showing how much of your collection is organized.
-- **Smart Sets** -- build filter-based sets from a deep tag taxonomy (room, mood, material, color, culture, motif, season, and more). Mark tags **Signature / Accent / Clashing** and watch a live, scored preview update against the whole catalog.
+- **Filtered Sets** -- build filter-based sets from a deep tag taxonomy (room, mood, material, color, culture, motif, season, and more). Mark tags **Signature / Accent / Clashing** and watch a live, scored preview update against the whole catalog.
+- **Share** any set as a code that Styles Import reads back; a Filtered Set's code carries its tags.
 - **Snapshots** -- capture everything you've placed in a house as a saved set.
 - **Import a Build** -- paste a friend's string, a wowhead.com URL, or a housing.wowdb.com build, preview it, and file it into My Styles, a Project Set, or a Shopping List.
 
@@ -110,7 +118,7 @@ A companion window injects into Blizzard's House Editor so you can **place decor
 ---
 
 **Author:** Vamoose
-**Version:** 3.40.0
-**Game Version:** 12.1.0 (Midnight)
+**Version:** 3.41.0
+**Game Version:** 12.1.5 (Midnight)
 **Source / Issues:** https://github.com/VamooseDevelopment/housing-decor-guide
 **Discord:** https://discord.gg/RWZaxJaHFP

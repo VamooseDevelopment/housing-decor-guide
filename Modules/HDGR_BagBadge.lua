@@ -27,32 +27,20 @@ local BADGE_TEX  = "Interface\\AddOns\\HousingDecorGuide\\textures\\Vamoose_HDG_
 local BADGE_SIZE = 16
 
 -- ===== Reagent membership (cached) ==========================================
-local _reagentCache = {}
-
+-- recipes.reagentUsers is memoized over recipes.db (shipped recipes plus the player's
+-- scans), the same source as the tooltip line, so a bag slot's lookup is a table read.
 local function isDecorReagent(itemID)
     if not itemID then return false end
-    local cached = _reagentCache[itemID]
-    if cached ~= nil then return cached end
-    -- Strict read: the providers only install at module-enable (post-load), so
-    -- StaticData.Recipes is always present by the time a bag slot paints.
-    local R = HDG.StaticData.Recipes
-    local result = false
-    local users = R:RecipesUsingReagent(itemID)
-    if users and #users > 0 then
-        result = true
-    else
-        -- Tiered reagents: recipes list one quality tier, the player may hold
-        -- another -- union across the quality group (same as the tooltip line).
-        local variants = HDG.StaticData.Professions:GetQualityVariants(itemID)
-        if variants then
-            for _, v in ipairs(variants) do
-                local vu = R:RecipesUsingReagent(v)
-                if vu and #vu > 0 then result = true; break end
-            end
-        end
+    local byReagent = HDG.Selectors:Call("recipes.reagentUsers", HDG.Store:GetState(), {})
+    if byReagent[itemID] then return true end
+    -- Tiered reagents: recipes list one quality tier, the player may hold
+    -- another -- union across the quality group (same as the tooltip line).
+    local variants = HDG.StaticData.Professions:GetQualityVariants(itemID)
+    if not variants then return false end  -- exception(nullable): an untiered item
+    for _, v in ipairs(variants) do
+        if byReagent[v] then return true end
     end
-    _reagentCache[itemID] = result
-    return result
+    return false
 end
 
 local function enabled()

@@ -552,6 +552,16 @@ LC.widgets["decorDetailPanel.waypointBtn"] = {
     visible = "decor.selectedItemHasVendor",
     binding = { enabled = "decor.selectedItemHasVendorWaypoint" },
 }
+-- Quest steps (R4, pick D, owner 10-30): Decor Quests on this decor, its steps on screen. A
+-- full-width row of its own under the action row (its three buttons fill the column); only
+-- for a decor a quest gives.
+LC.widgets["decorDetailPanel.questStepsBtn"] = {
+    tooltip = { recipe = "DecorQuestSteps" },
+    kind = "button", ["in"] = "decor.noteCard", font = "small",
+    text = "locale:DQ_QUEST_STEPS_BTN", width = "fill", height = 22,
+    order = 6, variant = "tertiary",
+    visible = "decorQuests.decorTabHasSteps",
+}
 -- Note editbox column (right, 220px; height fills parent).
 LC.widgets["decorDetailPanel.note"] = {
     tooltip = false,

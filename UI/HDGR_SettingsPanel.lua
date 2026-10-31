@@ -8,6 +8,8 @@
 --     Open / Reset buttons (Special Thanks moved to the Config tab)
 --   Housing Decor Guide / Interface (subcategory)
 --     General: minimap, compartment, profession buttons
+--     Lists: Hide PvP decor
+--     Quest Tracker: Full / Compact
 --     Zone Scanner: master toggle + popup/chat/sound sub-flags
 --   Housing Decor Guide / Helpers: decor sourcing tooltip + reagent-use tooltip
 --   Housing Decor Guide / Advanced: debug, mockTSM, scale, waypoint, locale, font
@@ -70,6 +72,7 @@ local RESETTABLE_KEYS = {
     "showMinimapButton", "showCompartment", "showProfessionButtons", "tooltipDecorTag",
     "catalogTooltip", "bagBadge", "materialTooltipItemData",
     "merchantDecorOverlay", "merchantQtyPicker", "merchantQtyPickerAutoClose", "catalogDecorOverlay", "autoDepositLumber", "hideInCombat", "waypointProvider", "scale",
+    "hidePvpDecor", "decorQuestTrackerStyle",
     "debug", "mockTSM", "locale", "fontFamily",
     "zoneScannerEnabled", "zoneScannerPopup", "zoneScannerPopupShopping",
     "zoneScannerChat", "zoneScannerSound", "zoneScannerTrackShopping",
@@ -89,6 +92,8 @@ local SEARCH_TAGS = {
     catalogDecorOverlay    = { "catalog", "decor", "uncollected", "marker", "plus", "helper" },
     autoDepositLumber      = { "lumber", "warband", "bank", "deposit", "auto", "helper" },
     hideInCombat           = { "combat", "hide", "auto", "fight", "lockdown" },
+    hidePvpDecor           = { "pvp", "honor", "battleground", "arena", "hide", "filter" },
+    decorQuestTrackerStyle = { "quest", "tracker", "compact", "full", "decor quests" },
     waypointProvider       = { "waypoint", "map", "pin", "tomtom" },
     scale                  = { "scale", "size", "zoom", "ui" },
     debug                  = { "debug", "log", "verbose" },
@@ -109,75 +114,42 @@ local function ApplyTags(initializer, key)
 end
 
 -- ===== BindSetting helper ====================================================
--- Registers an addon setting bound to HDG_DB.account.config[configKey].
--- User change -> CONFIG_SET dispatch. Store change -> pushes into Settings widget
--- so external changes (slash commands, window buttons) reflect in the panel.
-
+-- Proxy setting over account.config[configKey]: the panel reads the Store and a
+-- change goes through CONFIG_SET, so the reducer is the only writer. Blizzard's
+-- ProxySettingMixin calls the setter only when the value differs from the getter,
+-- so mirroring a Store change back with SetValue cannot re-dispatch.
 local function BindSetting(cat, configKey, settingName, varType)
-    local default = HDG.Store:GetConfig(configKey)
-
-    -- Binds to HDG_DB.account.config so Blizzard's serialize path sees the value.
-    -- Store is SSoT; both surfaces kept in sync.
-    local setting = Settings.RegisterAddOnSetting(
+    local setting = Settings.RegisterProxySetting(
         cat,
-        "HDGR_" .. configKey,     -- unique variable identifier
-        configKey,                 -- variableKey inside variableTbl
-        HDG_DB.account.config,   -- variableTbl: the persisted table
+        "HDGR_" .. configKey,
         varType,
         settingName,
-        default
+        HDG.Store:GetDefaultConfig()[configKey],   -- what Blizzard's "Defaults" resets to
+        function() return HDG.Store:GetConfig(configKey) end,
+        function(value)
+            HDG.Store:Dispatch({
+                type    = HDG.Constants.ACTIONS.CONFIG_SET,
+                payload = { key = configKey, value = value },
+            })
+        end
     )
-
-    -- User changed value via Settings panel -> dispatch into Store.
-    setting:SetValueChangedCallback(function(_, value)
-        HDG.Store:Dispatch({
-            type    = HDG.Constants.ACTIONS.CONFIG_SET,
-            payload = { key = configKey, value = value },
-        })
-    end)
-
-    -- Equality short-circuit: Blizzard's SetValue fires SetValueChangedCallback even
-    -- when the value hasn't changed, which would cascade into a CONFIG_SET storm on
-    -- "*" invalidation (HARD_RESET / PROFILE_SWITCH). Guard with GetValue() != newValue.
+    -- Mirror Store changes (slash command, window buttons, Reset-all) into an open panel.
     local watchPaths = { "account.config." .. configKey }
     HDG.Store:Subscribe(function(_, invalidation)
         if HDG.Paths.MatchesAny(watchPaths, invalidation) then
-            local newValue = HDG.Store:GetConfig(configKey)
-            if setting:GetValue() ~= newValue then
-                setting:SetValue(newValue)
-            end
+            setting:SetValue(HDG.Store:GetConfig(configKey))
         end
     end)
-
     return setting
 end
 
 -- ===== BindProxyBool helper ==================================================
--- Proxy-backed boolean with checkbox-left template. No backing table; getValue reads
--- Store live, setValue dispatches CONFIG_SET. SettingMixin:ApplyValue only calls setValue
--- when the value actually differs -> no re-dispatch loop; no short-circuit needed.
+-- A BindSetting boolean shown with the checkbox-left template.
 local function BindProxyBool(sub, layout, configKey, settingName, tooltip)
-    local A = HDG.Constants.ACTIONS
-    local setting = Settings.RegisterProxySetting(
-        sub,
-        "HDGR_" .. configKey,
-        Settings.VarType.Boolean,
-        settingName,
-        HDG.Store:GetDefaultConfig()[configKey],   -- true default (Blizzard "Defaults" resets to this)
-        function() return HDG.Store:GetConfig(configKey) end,
-        function(value)
-            HDG.Store:Dispatch({ type = A.CONFIG_SET, payload = { key = configKey, value = value } })
-        end
-    )
+    local setting = BindSetting(sub, configKey, settingName, Settings.VarType.Boolean)
     local init = Settings.CreateControlInitializer("HDGR_SettingsCheckRowTemplate", setting, nil, tooltip)
     layout:AddInitializer(init)
     ApplyTags(init, configKey)
-    -- Mirror Store changes (slash command, Reset-all) into an open panel.
-    HDG.Store:Subscribe(function(_, invalidation)
-        if HDG.Paths.MatchesAny({ "account.config." .. configKey }, invalidation) then
-            setting:SetValue(HDG.Store:GetConfig(configKey))
-        end
-    end)
     return setting, init
 end
 
@@ -288,6 +260,33 @@ local function _buildMainPage(layout)
     -- Special Thanks moved to the Config tab's credits scrollbox (see HDGR_LayoutConfig_Config.lua).
 end
 
+-- Quest Tracker: Full, or Compact -- the step to head for and its place only (the Bold
+-- mockup, owner 10-30). Its arrow opens Full whichever is picked here.
+local function _addTrackerStyle(sub, layout)
+    layout:AddInitializer(CreateSettingsListSectionHeaderInitializer("Quest Tracker"))
+    local styleSetting = BindSetting(sub, "decorQuestTrackerStyle", "Quest Tracker", Settings.VarType.String)
+    local function buildStyleOptions()
+        local container = Settings.CreateControlTextContainer()
+        container:Add("full",    "Full")
+        container:Add("compact", "Compact")
+        return container:GetData()
+    end
+    local styleInit = Settings.CreateDropdown(
+        sub, styleSetting, buildStyleOptions,
+        "Full: the step to head for, how far along you are and the Details and Stop tracking "
+        .. "buttons. Compact: the name and count, the step to head for and where to go. "
+        .. "Compact's arrow opens Full."
+    )
+    ApplyTags(styleInit, "decorQuestTrackerStyle")
+    -- Compact shows while the tracker is folded (its saved expanded, the arrow's): picking it
+    -- folds an open one, or the pick would show no change.
+    styleSetting:SetValueChangedCallback(function(_, value)
+        if value == "compact" then
+            HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.DQ_TRACKER_EXPAND, payload = { expanded = false } })
+        end
+    end)
+end
+
 -- Interface: minimap, compartment, profession buttons, tooltip, scale, waypoint.
 local function _buildInterfaceSubcategory(category)
     local sub, layout = Settings.RegisterVerticalLayoutSubcategory(category, "Interface")
@@ -311,6 +310,15 @@ local function _buildInterfaceSubcategory(category)
     end
 
     -- (HDG window scale + Waypoint provider moved to the Advanced subcategory.)
+
+    -- Lists: what the Decor, Acquire and Zone Scanner lists leave out (Arduanne, 2026-10-28).
+    layout:AddInitializer(CreateSettingsListSectionHeaderInitializer("Lists"))
+    BindProxyBool(sub, layout, "hidePvpDecor", "Hide PvP decor",
+        "Leave decor bought with Honor or Marks of Honor (the battleground and arena rewards) "
+        .. "out of the Decor, Acquire and Zone Scanner lists. The Destroy list and your "
+        .. "shopping lists still show it.")
+
+    _addTrackerStyle(sub, layout)
 
     -- Zone Scanner: master toggle + sub-flags greyed out when master is off
     -- (SetParentInitializer, matching ZoneAlertEngine's short-circuit).
@@ -564,10 +572,5 @@ end
 
 function HDG.InitSettingsPanel()
     if HDG.SettingsPanel then return end  -- exception(false-positive): self-init idempotency guard, not a missing singleton cascade
-    -- exception(boundary): RegisterAddOnSetting binds to HDG_DB.account.config. On first-ever
-    -- load HDG_DB.account may not exist yet; link it to the live Store account here
-    -- (Config has already hydrated state.account.config by this point).
-    HDG_DB = HDG_DB or {}
-    HDG_DB.account = HDG_DB.account or HDG.Store:GetState().account
     BuildSettingsPanel()
 end

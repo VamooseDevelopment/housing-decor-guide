@@ -79,15 +79,15 @@ local function _layoutDecorRow(row)
     end
 end
 
--- Favourite heart (left edge) + owned-count (right column) -- now independent. The count
--- shows for any owned copies in EVERY mode, so browsing shows "how many" too, not just
--- Destroy mode. A blank count means 0 in storage, not "unowned" (the check covers ownership).
+-- Favourite heart (left edge) + count (right column) -- now independent. The count is
+-- ed.shownCount: every copy owned, placed or stored, while browsing; copies in storage in
+-- the Stored view, where Destroy acts, and on a dyed stack's row. Blank = none of those.
 local function _paintFavAndCount(row, ed)
     if row._favStar then
         if ed.isFavorite then row._favStar:Show() else row._favStar:Hide() end
     end
     if row._storedCountFs then
-        local c = ed.destroyableCount or 0  -- exception(boundary): sparse decor struct field
+        local c = ed.shownCount
         if c > 0 then
             row._storedCountFs:SetText(tostring(c))
             row._storedCountFs:Show()
@@ -657,6 +657,7 @@ function DecorController:Wire(rootFrame)
 
     self:_wireCart(rootFrame)
     self:_wireVendorNav(rootFrame)
+    self:_wireQuestSteps(rootFrame)
     self:_wireVendorHyperlink(rootFrame)
 end
 
@@ -670,30 +671,27 @@ local function _parseVendorLink(link)
     return tonumber(payload)
 end
 
+-- One code path with the zone scanner + shopping list jumps: filter reset, vendor
+-- mode, the full SelectVendor stamp (this used to set only selectedNpcID, so the
+-- previous vendor's item selection survived the jump).
+local function _onVendorLinkClick(_, link)
+    local npcID = _parseVendorLink(link)
+    if not npcID then return end
+    CH.Mechanics.JumpToVendor(npcID, nil, nil)
+end
+
+-- The click hint the way every HDG tooltip draws one (TooltipEngine.AppendClickHints).
+local VENDOR_LINK_HINTS = { leftText = "View this vendor in Acquire" }
+
+local function _onVendorLinkEnter(self, link)
+    if not _parseVendorLink(link) then return end
+    local lines = {}
+    HDG.TooltipEngine.AppendClickHints(lines, VENDOR_LINK_HINTS)
+    HDG.TooltipEngine:Show(self, { anchor = "ANCHOR_CURSOR", extraLines = lines })
+end
+
 function DecorController:_wireVendorHyperlink(rootFrame)
-    local sourceLabel = HDG.UI.W(rootFrame, "decorDetailPanel.itemSource")
-    local hyperHost   = sourceLabel and sourceLabel.GetParent and sourceLabel:GetParent()
-    if not (hyperHost and hyperHost.SetHyperlinksEnabled) then return end  -- exception(false-positive): mock-fidelity guard (mirrors acq hdgrach wiring)
-    hyperHost:EnableMouse(true)
-    hyperHost:SetHyperlinksEnabled(true)
-    hyperHost:SetScript("OnHyperlinkClick", function(_, link)
-        local npcID = _parseVendorLink(link)
-        if not npcID then return end
-        -- One code path with the zone scanner + shopping list jumps: filter
-        -- reset, vendor mode, the full SelectVendor stamp (this used to set only
-        -- selectedNpcID, so the previous vendor's item selection survived the jump).
-        CH.Mechanics.JumpToVendor(npcID, nil, nil)
-    end)
-    hyperHost:SetScript("OnHyperlinkEnter", function(self, link)
-        if not _parseVendorLink(link) then return end
-        HDG.TooltipEngine:Show(self, {
-            anchor     = "ANCHOR_CURSOR",
-            extraLines = {
-                { text = "Click to view this vendor in Acquire", r = 0.7, g = 0.7, b = 0.7 },
-            },
-        })
-    end)
-    hyperHost:SetScript("OnHyperlinkLeave", function() HDG.TooltipEngine:Hide() end)
+    HDG.UI.WireHyperlinkHost(rootFrame, "decorDetailPanel.itemSource", _onVendorLinkClick, _onVendorLinkEnter)
 end
 
 -- List box: arrow-key navigation + SelectionBehaviorMixin store-sync.
@@ -775,40 +773,30 @@ function DecorController:_wireNoteBox(rootFrame)
         "itemID", "NOTE_CLEAR", "NOTE_SET")
 end
 
--- + Cart: adds selected item (npcID nil) to shopping list (surfaces in Wishlist section).
+-- + Cart: the selected item onto the shopping list with no vendor (its "(any vendor)" group).
 function DecorController:_wireCart(rootFrame)
     HDG.UI.OnClick(rootFrame, "decorDetailPanel.cartBtn", function()
-        local state = HDG.Store:GetState()  -- exception(false-positive): top-level controller method (not a row factory)
-        local item  = HDG.Selectors:Call("decor.selectedItem", state, {})
-        if not item then return end
-        if state.account.activeShoppingListId == "" then
-            HDG.Log:Warn("shopping",
-                "No active shopping list -- open the Shopping tab to create one (decor cart)")
-            return
-        end
-        HDG.Store:Dispatch({
-            type    = HDG.Constants.ACTIONS.SHOPPING_ITEM_ADD,
-            payload = { itemID = item.itemID, qty = 1 },   -- npcID nil = wishlist
-        })
-        HDG.Log:Success("shopping",
-            (item.name or "Item") .. " added to shopping list")
+        local item = HDG.Selectors:Call("decor.selectedItem", HDG.Store:GetState(), {})  -- exception(false-positive): top-level controller click, not a row factory
+        if not item then return end  -- exception(nullable): no item selected, or its catalog row not loaded
+        CH.Mechanics.AddToShoppingList(item.itemID, nil, "decor cart")
     end)
 end
 
--- Show on Map / Waypoint: reuse the shared Waypoints module against the decor's map
--- vendor -- identical actions to Shop by Vendor. Buttons are ENABLED only with a mapped
--- vendor (decor.selectedItemHasVendorWaypoint), so vendorOf() is non-nil at click time.
+-- The decor's map vendor -- the same Waypoint and Show on Map as Shop by Vendor. Both
+-- are enabled only with a mapped vendor (decor.selectedItemHasVendorWaypoint).
+local function _mapVendor()
+    return HDG.Selectors:Call("decor.selectedItem", HDG.Store:GetState(), {}).vendor  -- exception(false-positive): top-level controller click, not a row factory
+end
+
 function DecorController:_wireVendorNav(rootFrame)
-    local function vendorOf()
-        return HDG.Selectors:Call("decor.selectedItem", HDG.Store:GetState(), {}).vendor  -- exception(false-positive): top-level controller method (not a row factory)
-    end
-    HDG.UI.OnClick(rootFrame, "decorDetailPanel.showOnMapBtn", function()
-        local v = vendorOf()
-        HDG.Waypoints:ShowOnMap(v.mapID, v.x, v.y, v.name)
-    end)
-    HDG.UI.OnClick(rootFrame, "decorDetailPanel.waypointBtn", function()
-        local v = vendorOf()
-        HDG.Waypoints:Set(v.mapID, v.x, v.y, v.name, v.side)
+    HDG.UI.WireVendorNav(rootFrame, "decorDetailPanel.waypointBtn", "decorDetailPanel.showOnMapBtn", _mapVendor)
+end
+
+-- Quest steps: Decor Quests on the selected decor (decorQuests.decorTabShow), its steps on
+-- screen. Shown only for a decor a quest gives (decorQuests.decorTabHasSteps).
+function DecorController:_wireQuestSteps(rootFrame)
+    HDG.UI.OnClick(rootFrame, "decorDetailPanel.questStepsBtn", function()
+        CH.Mechanics.JumpToDecorQuests(HDG.Selectors:Call("decorQuests.decorTabShow", HDG.Store:GetState(), {}))  -- exception(false-positive): top-level controller click, not a row factory
     end)
 end
 

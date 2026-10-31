@@ -2,7 +2,7 @@
 ## Title: Vamoose's Housing Decor Guide
 ## Notes: Track, craft, preview, and acquire housing decorations across all professions
 ## Author: Vamoose
-## Version: 3.40.0
+## Version: 3.41.0
 ## SavedVariables: HDG_DB
 ## SavedVariablesPerCharacter: HDG_DB_CURRENT_PROFILE
 ## IconTexture: Interface\AddOns\HousingDecorGuide\textures\Vamoose_HDG_400_trans
@@ -98,6 +98,7 @@ UI\LayoutConfig\HDGR_LayoutConfig_Alts.lua
 UI\LayoutConfig\HDGR_LayoutConfig_Mogul.lua
 UI\LayoutConfig\HDGR_LayoutConfig_Styles.lua
 UI\LayoutConfig\HDGR_LayoutConfig_RecipeSources.lua
+UI\LayoutConfig\HDGR_LayoutConfig_DecorQuests.lua
 UI\LayoutConfig\HDGR_LayoutConfig_HouseTab.lua
 UI\LayoutConfig\HDGR_LayoutConfig_Debug.lua
 UI\LayoutConfig\HDGR_LayoutConfig_Config.lua
@@ -106,6 +107,7 @@ UI\LayoutConfig\HDGR_LayoutConfig_Shopping.lua
 UI\LayoutConfig\HDGR_LayoutConfig_Companion.lua
 UI\LayoutConfig\HDGR_LayoutConfig_Zone.lua
 UI\LayoutConfig\HDGR_LayoutConfig_Lumber.lua
+UI\LayoutConfig\HDGR_LayoutConfig_DecorQuestTracker.lua
 UI\LayoutConfig\HDGR_LayoutConfig_Removalist.lua
 UI\LayoutConfig\HDGR_LayoutConfig_Projects.lua
 UI\LayoutConfig\HDGR_LayoutConfig_Blueprints.lua
@@ -129,6 +131,7 @@ UI\HDGR_Selectors_Catalog.lua
 UI\HDGR_Selectors_Recipes.lua
 UI\HDGR_Selectors_Alts.lua
 UI\HDGR_Selectors_RecipeSources.lua
+UI\HDGR_Selectors_DecorQuests.lua
 UI\HDGR_Selectors_Companion.lua
 UI\HDGR_Selectors_House.lua
 UI\HDGR_Selectors_Mogul.lua
@@ -152,10 +155,10 @@ UI\HDGR_RowRegistry.lua
 data\HDGR_DecorDB.lua
 data\HDGR_VendorAugment.lua
 data\HDGR_RecipeSourceAugment.lua
+data\HDGR_DecorQuestIndex.lua
 data\HDGR_FacetDB.lua
 data\HDGR_ReagentsDB.lua
 data\HDGR_ProfessionsDB.lua
-data\HDGR_ProfessionThresholds.lua
 data\HDGR_TrainersDB.lua
 data\HDGR_NeighborhoodDB.lua
 data\HDGR_HouseTab_TitleTiers.lua
@@ -205,9 +208,10 @@ Modules\HDGR_DecorDumpCodec.lua
 Modules\HDGR_ExportAdapter.lua
 Modules\HDGR_NPCNameResolver.lua
 Modules\HDGR_ZoneNameResolver.lua
+Modules\HDGR_TextMeasure.lua
 Modules\HDGR_SessionIdentity.lua
 # SessionIdentity dispatches SESSION_IDENTITY_SET at onEnable; consumers
-# (Mogul, ProfessionScanner, StyleSerializer,
+# (Mogul, ProfessionScanner,
 #  Selectors_Alts, Selectors_RecipeSources) read state.session.identity.
 Modules\HDGR_HouseAggregator.lua
 Modules\HDGR_HouseEditorCompanion.lua
@@ -221,6 +225,7 @@ Modules\HDGR_ZoneObserver.lua
 Modules\HDGR_ZoneAlertEngine.lua
 Modules\HDGR_ItemNameResolver.lua
 Modules\HDGR_QuestNameResolver.lua
+Modules\HDGR_DecorQuestWatcher.lua
 Modules\HDGR_PowerCrafter.lua
 Modules\HDGR_CraftEventCollector.lua
 Modules\HDGR_TooltipDecorator.lua
@@ -238,7 +243,6 @@ Modules\HDGR_PriceSource.lua
 Modules\HDGR_Mogul.lua
 Modules\HDGR_Goblin.lua
 Modules\HDGR_StyleEngine.lua
-Modules\HDGR_StyleSerializer.lua
 Modules\HDGR_Parsers.lua
 Modules\HDGR_CaptureTap.lua
 Modules\HDGR_HousingObserver.lua
@@ -259,6 +263,7 @@ UI\HDGR_Controller_Recipes.lua
 UI\HDGR_Controller_Warehouse.lua
 UI\HDGR_Controller_Alts.lua
 UI\HDGR_Controller_RecipeSources.lua
+UI\HDGR_Controller_DecorQuests.lua
 UI\HDGR_HT_LevelRing.xml
 UI\HDGR_Controller_HouseTab.lua
 UI\HDGR_Controller_Mogul.lua
@@ -270,6 +275,7 @@ UI\HDGR_Controller_Shopping.lua
 UI\HDGR_Controller_Companion.lua
 UI\HDGR_Controller_Zone.lua
 UI\HDGR_Controller_Lumber.lua
+UI\HDGR_Controller_DecorQuestTracker.lua
 UI\HDGR_Controller_Removalist.lua
 UI\HDGR_Controller_ProjectsCanvas.lua
 UI\HDGR_Controller_ProjectsSection.lua

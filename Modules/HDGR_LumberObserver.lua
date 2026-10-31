@@ -138,7 +138,6 @@ end
 
 function L:Scan()
     local Bag = HDG.BagObserver
-    if not Bag then return end
     -- Source gate. Note this does NOT return: the loop below keeps the baseline
     -- moving while a transfer UI is open, so the purchase or withdrawal is
     -- absorbed as it happens. An early return would leave a stale baseline, and
@@ -188,18 +187,12 @@ function L:_HandleHarvest(lumberID, qty, currentTotal)
     local x, y, mapID = _getPlayerCoords()
 
     -- Session-start: no active session, different lumber type, or idle > IDLE_SECONDS.
-    local needSessionStart = false
-    if active ~= lumberID then
-        needSessionStart = true
-    else
-        local charKey = state.session.identity.charKey
-        local session = state.account.lumber.sessions[charKey]
-                        and state.account.lumber.sessions[charKey][lumberID]
-        if not session then
-            needSessionStart = true
-        elseif session.lastHarvestAt and (now - session.lastHarvestAt) > IDLE_SECONDS then
-            needSessionStart = true
-        end
+    -- An active lumberID always has its record: LUMBER_SESSION_START writes it in
+    -- the reduce that sets activeFarmingID, and nothing deletes one.
+    local needSessionStart = active ~= lumberID
+    if not needSessionStart then
+        local session = state.account.lumber.sessions[state.session.identity.charKey][lumberID]
+        needSessionStart = (now - session.lastHarvestAt) > IDLE_SECONDS
     end
 
     if needSessionStart then
@@ -250,7 +243,6 @@ end
 -- blip list is empty (no idle dispatch, no C_Timer churn). Re-armed by next harvest.
 function L:_StartGCTicker()
     if self._gcTicker then return end  -- already running
-    if not (_G.C_Timer and _G.C_Timer.NewTicker) then return end
     self._gcTicker = _G.C_Timer.NewTicker(GC_INTERVAL, function()
         if #HDG.Store:GetState().session.lumber.blips == 0 then
             self._gcTicker:Cancel()
@@ -269,7 +261,6 @@ end
 -- cancels when activeFarmingID clears. No idle churn (same shape as GC ticker).
 function L:_StartLiveTicker()
     if self._liveTicker then return end  -- already running
-    if not (_G.C_Timer and _G.C_Timer.NewTicker) then return end
     self._liveTicker = _G.C_Timer.NewTicker(1.0, function()
         local state = HDG.Store:GetState()
         local activeID = state.session.lumber.activeFarmingID
@@ -279,16 +270,14 @@ function L:_StartLiveTicker()
             return  -- session ended; re-armed by the next SESSION_START
         end
         -- Idle auto-finalize: walk-away session logged + ended before next SESSION_START supersedes.
-        local charKey      = state.session.identity.charKey
-        local charSessions = state.account.lumber.sessions[charKey]
-        local session      = charSessions and charSessions[activeID]
-        local last         = session and session.lastHarvestAt
-        if last and (_now() - last) > IDLE_SECONDS then
+        local session = state.account.lumber.sessions[state.session.identity.charKey][activeID]
+        if (_now() - session.lastHarvestAt) > IDLE_SECONDS then
             L:FinalizeSession()
             return
         end
         HDG.Store:Dispatch({
             type = HDG.Constants.ACTIONS.LUMBER_TICK,
+            payload = { now = _now() },   -- the clock the duration and blip ages read
         })
     end)
 end
@@ -301,12 +290,10 @@ function L:FinalizeSession()
     local activeID = state.session.lumber.activeFarmingID
     if not activeID then return end  -- exception(boundary): no active session
 
-    local now          = _G.GetTime and _G.GetTime() or 0  -- exception(boundary): GetTime/time absent in headless harness
-    local charKey      = state.session.identity.charKey
-    local charSessions = state.account.lumber.sessions[charKey]
-    local session      = charSessions and charSessions[activeID]
-    local startedAt    = session and session.startedAt  or 0
-    local startCount   = session and session.startCount or 0
+    local now        = _now()
+    local session    = state.account.lumber.sessions[state.session.identity.charKey][activeID]
+    local startedAt  = session.startedAt
+    local startCount = session.startCount
 
     -- History needs wall-clock (date() expects Unix epoch); session uses GetTime (client uptime).
     -- Derive: end-wall = time(); start-wall = end - elapsed. Duration preserved.
@@ -315,9 +302,7 @@ function L:FinalizeSession()
 
     -- sessionTotal = current bag count minus startCount. Bag-only to match the
     -- bag-only startCount (harvest detection); bank/warband stock is excluded.
-    local Bag   = HDG.BagObserver
-    local cur   = Bag and Bag:GetBagCount(activeID) or 0
-    local total = math.max(0, cur - startCount)
+    local total = math.max(0, HDG.BagObserver:GetBagCount(activeID) - startCount)
 
     -- Zone is best-effort; nil on loading screens.
     local zone = _G.GetRealZoneText and _G.GetRealZoneText() or nil  -- exception(boundary): GetRealZoneText nil between zones

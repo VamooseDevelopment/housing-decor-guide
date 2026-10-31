@@ -121,12 +121,12 @@ Selectors:Register("lumber.counterRows", {
 
         local out = {}
         for i, row in ipairs(LUMBER) do
-            local held = Bag and Bag:GetTotal(row.id) or 0
+            local held = Bag:GetTotal(row.id)
             -- Icon stamped into envelope (not resolved at paint) so the async
             -- ResolveIcon -> ITEM_INFO_RESOLVED -> tick bump cycle re-runs selector.
-            local icon = (Resolver and Resolver:ResolveIcon(row.id)) or HDG.Constants.PLACEHOLDER_ICON
+            local icon = Resolver:ResolveIcon(row.id) or HDG.Constants.PLACEHOLDER_ICON  -- exception(boundary): item-icon resolver cold cache
             local isActive    = (row.id == activeID)
-            local shortName   = row.shortName or row.name
+            local shortName   = row.shortName
             -- Active-row: leading asterisk so the player can see which lumber is accumulating.
             local displayName = isActive and ("* " .. shortName) or shortName
             local qNeed = queueNeed[row.id]       -- dense map pre-seeded 0 for all LUMBER_DATA ids
@@ -151,16 +151,17 @@ Selectors:Register("lumber.counterRows", {
 })
 
 -- ===== Blips for radar =======================================================
--- Returns all blips with ageSec computed at selector time.
+-- Returns all blips with ageSec against the clock the observer stamps
+-- (session.lumber.now: each harvest and the 1s heartbeat), not the live clock.
 -- Zone/age filtering is deferred to the radar paint (live C_Map.GetBestMapForUnit).
 -- Filtering here caused empty radar on ZoneObserver cold-start/debounce/sub-zone race.
 -- Sorted by ageSec ascending so newest blips render on top.
 Selectors:Register("lumber.blipsForRadar", {
     reads = { "session.lumber.blips",
-              "session.lumber.tick" },
+              "session.lumber.now" },
     fn = function(state, _ctx)
         local blips = state.session.lumber.blips
-        local now   = _G.GetTime and _G.GetTime() or 0  -- exception(boundary): GetTime nil in headless
+        local now   = state.session.lumber.now
 
         local out = {}
         for _, b in ipairs(blips) do
@@ -280,7 +281,7 @@ Selectors:Register("lumber.sessionStats", {
     memoized = true,
     reads = { "session.lumber.activeFarmingID",
               "session.resolvers.bag.tick",
-              "session.lumber.tick",       -- 1s live ticker drives duration/rate refresh between bag-deltas
+              "session.lumber.now",        -- the clock: the 1s heartbeat moves duration/rate between bag-deltas
               "session.identity.charKey",
               "account.lumber.sessions" },
     calls = { "lumber.activeFarmingID" },
@@ -288,26 +289,23 @@ Selectors:Register("lumber.sessionStats", {
         local activeID = Selectors:Call("lumber.activeFarmingID", state, ctx)
         if not activeID then return nil end
 
-        local charKey = state.session.identity.charKey
-        local charSessions = state.account.lumber.sessions[charKey] or {}
-        local session = charSessions[activeID]
-        if not session then return nil end
+        -- LUMBER_SESSION_START writes this record in the reduce that sets activeFarmingID.
+        local session = state.account.lumber.sessions[state.session.identity.charKey][activeID]
 
         local Bag     = HDG.BagObserver
         -- Bag-only to match the bag-only startCount (LUMBER_SESSION_START records the
         -- pre-harvest BAG count). GetTotal here counted bank+warband stock as
         -- "gathered this session" -- e.g. harvest 1 with 67 in the bank showed +68.
         -- Mirrors LumberObserver:FinalizeSession's bag-only delta.
-        local held    = Bag and Bag:GetBagCount(activeID) or 0
-        local now     = _G.GetTime and _G.GetTime() or 0  -- exception(boundary): GetTime nil in headless
-        local duration = math.max(1, now - session.startedAt)
+        local held    = Bag:GetBagCount(activeID)
+        local duration = math.max(1, state.session.lumber.now - session.startedAt)
         local totalGathered = held - session.startCount
         if totalGathered < 0 then totalGathered = 0 end
 
         -- Display name from LUMBER_DATA (static constant; no Blizzard call needed).
         local lumberName
         for _, row in ipairs(HDG.Constants.LUMBER_DATA) do
-            if row.id == activeID then lumberName = row.shortName or row.name; break end
+            if row.id == activeID then lumberName = row.shortName; break end
         end
 
         return {

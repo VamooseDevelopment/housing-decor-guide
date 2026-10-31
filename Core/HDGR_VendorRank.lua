@@ -73,3 +73,19 @@ function HDG.VendorRank.Pick(row, preferredMapID)
     end
     return best
 end
+
+-- The vendor + Map / + Way target: the first vendor with a known location, one your
+-- faction can shop at first (yours or neutral), else any with a location (owner
+-- 2026-10-15). vendors[1] alone left a mappable second vendor unreachable. nil when
+-- no vendor has a location -- the buttons grey and the source line says why. The Decor
+-- tab's detail and Decor Quests' "not in your collection" line both ask it.
+function HDG.VendorRank.MapVendor(vendors, side)
+    local fallback
+    for _, v in ipairs(vendors) do
+        if v.canWaypoint then
+            if v.side == side or v.side == "N" then return v end
+            fallback = fallback or v
+        end
+    end
+    return fallback
+end

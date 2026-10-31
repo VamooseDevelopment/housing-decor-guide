@@ -43,46 +43,41 @@ local function aliasIndex(name)
     return canonical and HDG.Expansion.GetIndex(canonical) or nil
 end
 
--- Per-(profession, expansion) decor recipe index. Built directly from
--- HDGR_DecorDB (the curated 305-entry craftable-decor list -- every
--- entry is a decor recipe by construction). Registered as a memoized
--- selector with empty reads -- the framework's MatchesAny treats
--- reads={} as "effectively a constant; never invalidates from any
--- dispatch" (Paths.lua:48), so the index builds once on first call
--- and persists for the session. Cross-file consumers (Controller_Alts
--- tooltip handler) call via Selectors:Call same as in-file users.
+-- Per-(profession, expansion) decor recipe index, built from HDGR_DecorDB (every
+-- entry is a decor recipe by construction) and HDGR_RecipeSourceAugment (each
+-- recipe's required skill). Memoized on the static-data tick, so it builds once on
+-- first call and persists for the session. Cross-file consumers (Controller_Alts
+-- tooltip, recipeSources.topDecorCrafterByProf) call via Selectors:Call too.
 --
--- Returned shape: out[profName][expDisplay] = { recipeSet, total }.
--- recipeSet is keyed by spellID (which matches char.knownRecipes keys).
+-- Returned shape: out[profName][expDisplay] = { recipeSet, total, minSkill }.
+-- recipeSet is keyed by spellID (which matches char.knownRecipes keys). minSkill is
+-- the lowest skill any of the bucket's recipes asks for (the game's "Requires <Exp>
+-- <Prof> (N)"): from there a character can learn at least one of them, which is when
+-- the Alts cell reads "sufficient". It replaces a hand table from Wowhead's guides
+-- that was wrong on 8 of 102 buckets (docs/HDG_TEST_AUDIT_2026-10-31.md).
 --
--- DecorDB's `expansion` field is "<api> <profession>" (e.g. "Outland
--- Alchemy") rather than the bare api name. Strip the trailing profession
--- suffix and map api -> display via HDG.Expansion.GetByApi so the index
--- can be queried with the same display names the EXPANSION_DATA columns
--- use ("The Burning Crusade" rather than "Outland").
+-- DecorDB's `expansion` field is the profession skill line ("Classic Alchemy",
+-- "Kul Tiran Alchemy / Zandalari Alchemy"); HDG.Expansion.FromSkillLine maps it to
+-- the display name the EXPANSION_DATA columns use. Stripping the profession and
+-- asking GetByApi missed every Battle for Azeroth line.
+local function _addToDecorIndex(out, r)
+    local expDisplay = HDG.Expansion.FromSkillLine(r.expansion)
+    local profBucket = out[r.profession] or {}
+    out[r.profession] = profBucket
+    local cell = profBucket[expDisplay] or { recipeSet = {}, total = 0 }
+    profBucket[expDisplay] = cell
+    cell.recipeSet[r.spellID] = true
+    cell.total = cell.total + 1
+    local skill = HDG.StaticData.RecipeSources:Get(r.itemID).skill  -- exception(nullable): the source builder leaves skill nil when the game's text has no "(N)"
+    if skill then cell.minSkill = math.min(cell.minSkill or skill, skill) end
+end
+
 Selectors:Register("alts.decorRecipeIndex", {
     reads    = {"session.resolvers.staticData.tick"},
     memoized = true,
     fn = function()
         local out = {}
-        local decorDB = HDG.StaticData.Recipes:GetAll()
-        if type(decorDB) ~= "table" then return out end
-        for _, r in pairs(decorDB) do
-            if r.profession and r.expansion and r.spellID then
-                local apiName = r.expansion:gsub("%s+" .. r.profession .. "$", "")
-                local exp = HDG.Expansion.GetByApi and HDG.Expansion.GetByApi(apiName) or nil
-                local displayName = exp and exp.display or apiName
-                local profBucket = out[r.profession] or {}
-                local cell = profBucket[displayName]
-                if not cell then
-                    cell = { recipeSet = {}, total = 0 }
-                    profBucket[displayName] = cell
-                end
-                cell.recipeSet[r.spellID] = true
-                cell.total = cell.total + 1
-                out[r.profession] = profBucket
-            end
-        end
+        for _, r in pairs(HDG.StaticData.Recipes:GetAll()) do _addToDecorIndex(out, r) end
         return out
     end,
 })
@@ -100,9 +95,9 @@ local function getDecorBucket(profName, expDisplay)
 end
 
 -- Per-cell decor recipe data: total decor recipes for (prof, exp) + the
--- char's known count + the min skill threshold for that (prof, exp)
--- from HDGR_ProfessionThresholds. Returned as { total, known, threshold }
--- so formatCell can branch the color:
+-- char's known count + the bucket's skill floor (alts.decorRecipeIndex
+-- minSkill; nil when the bucket has no decor). Returned as total, known,
+-- threshold so formatCell can branch the color:
 --   known >= total > 0 -> success (all known)
 --   current >= threshold -> accent (skill sufficient for THIS bucket)
 --   else -> warning
@@ -111,13 +106,7 @@ local function decorDataFor(profName, expIdx, knownRecipes)
     local exp = HDG.Constants.EXPANSION_DATA[expIdx]
     if not exp then return 0, 0, nil end
     local data = getDecorBucket(profName, exp.display)
-    local total = data.total
-    -- HDGR_ProfessionThresholds[profession][expansion.display] -> { threshold, max }
-    local threshold
-    local td = HDG.StaticData.Professions:GetThresholds()
-    if td and td[profName] and td[profName][exp.display] then
-        threshold = td[profName][exp.display].threshold
-    end
+    local total, threshold = data.total, data.minSkill
     if total == 0 or not knownRecipes then return total, 0, threshold end
     local known = 0
     for recipeID in pairs(knownRecipes) do
@@ -127,7 +116,7 @@ local function decorDataFor(profName, expIdx, knownRecipes)
 end
 
 -- prof = the char's profession record; profName = its canonical English name (for
--- the decor + threshold seed lookups). Caller resolves both from the professionID.
+-- the decor-bucket lookup, which carries the skill floor). Caller resolves both from the professionID.
 local function buildCells(prof, profName)
     if not prof or not prof.skillLines then return {} end
     local cells = {}
@@ -218,23 +207,20 @@ end
 -- recipes_per_cell is bounded (~10-50 typical) and cells are bounded (12),
 -- so it stays cheap.
 -- profID joins the roster's char.professions (locale-invariant); profName is the
--- canonical English name for the decor-bucket + threshold seed lookups.
+-- canonical English name for the decor-bucket lookup (total, recipes, skill floor).
 local function buildSummaryCells(chars, profID, profName)
     local cells = {}
     -- Pass 1: best skill per expansion index.
     for _, char in pairs(chars) do
         _visitCharForBestSkill(char, profID, cells)
     end
-    -- Pass 2: per-cell decor total + threshold + UNION known across chars.
-    local thresholds = HDG.StaticData.Professions:GetThresholds()
+    -- Pass 2: per-cell decor total + skill floor + UNION known across chars.
     for idx, cell in pairs(cells) do
         local exp = HDG.Constants.EXPANSION_DATA[idx]
         if exp then
             local data = getDecorBucket(profName, exp.display)
-            local profT = thresholds and thresholds[profName]
-            local expT  = profT and profT[exp.display]
             cell.decorTotal     = data.total
-            cell.decorThreshold = expT and expT.threshold or nil
+            cell.decorThreshold = data.minSkill
             cell.decorKnown     = data.total > 0
                 and _countUnionKnown(chars, profID, data.recipeSet)
                 or 0

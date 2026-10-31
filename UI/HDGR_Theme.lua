@@ -161,6 +161,9 @@ function HDG.Theme:ApplyConfiguredTheme()
     local nativeChanged = (self.currentScheme.nativeButtons or false) ~= (scheme.nativeButtons or false)
     self.currentScheme = scheme
     self:BuildFontObjects()   -- resolves the (possibly newly-overridden) font face
+    -- Text measured in the old fonts goes stale now, not before (the fonts resolver in
+    -- HDGR_Store.lua): the repaints below then measure in the new ones.
+    HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.FONTS_BUILT })
     self:ApplyAll()
     -- ApplyAll only repaints Theme:Register'd widgets. Pooled data rows read
     -- Theme:GetColor at Configure-time and would keep the old scheme until
@@ -299,10 +302,18 @@ end
 
 -- A character name in its class color, legible on the current scheme. Class colors are
 -- tuned for dark grounds (Priest is pure white), so on a light scheme each one is
--- darkened until it reads at 4.5:1 on the lightest surface text sits on (raised) --
--- Aegis's rule (ThemeEngine LightClassColor, 2026-08-27). Memoised per scheme table.
+-- darkened until it reads at 4.5:1 on the DARKEST ground a name sits on -- Aegis's
+-- rule (ThemeEngine LightClassColor: the deepest ground, the text floor). Names paint
+-- on headers, even rows, odd rows and the sunken list canvas; darkening against the
+-- lightest ground (raised) left names under 4.5:1 on every other ground, 2.9:1 at
+-- worst (test audit B8, 2026-10-31).
+-- Memoised per scheme table.
 -- A GameTooltip stays dark whatever the scheme: tooltips use Format.ClassName as is.
 local LIGHT_CLASS_FLOOR = 4.5
+-- A ground is a surface at 95% alpha or more: the canvas paints at 95%, and a 5% blend
+-- can't lift a name off it. The translucent ones (hover, selected, overlay, divider)
+-- are tints and lines laid over a ground that is already counted.
+local OPAQUE_GROUND_ALPHA = 0.95
 local _lightClassHex = setmetatable({}, { __mode = "k" })   -- [scheme] = { [classFile] = "ffRRGGBB" }
 
 local function _linear(c)
@@ -320,7 +331,21 @@ local function _darkenToFloor(hex, ground)
         if (math.max(lum, floorLum) + 0.05) / (math.min(lum, floorLum) + 0.05) >= LIGHT_CLASS_FLOOR then break end
         r, g, b = r * 0.96, g * 0.96, b * 0.96
     end
-    return ("ff%02x%02x%02x"):format(math.floor(r * 255 + 0.5), math.floor(g * 255 + 0.5), math.floor(b * 255 + 0.5))
+    -- Truncated, not rounded: a channel rounded up lightens the name, and a colour
+    -- that just cleared the floor drops under it (Solarized Light Shaman, 4.49:1).
+    return ("ff%02x%02x%02x"):format(math.floor(r * 255), math.floor(g * 255), math.floor(b * 255))
+end
+
+-- The scheme's darkest opaque surface: the ground a darkened name must clear.
+local function _darkestGround(scheme)
+    local darkest, darkestLum
+    for _, ground in pairs(scheme.surface) do
+        local lum = _luminance(ground.r, ground.g, ground.b)
+        if ground.a >= OPAQUE_GROUND_ALPHA and (not darkestLum or lum < darkestLum) then
+            darkest, darkestLum = ground, lum
+        end
+    end
+    return darkest
 end
 
 function HDG.Theme:ClassName(name, classFile)
@@ -329,7 +354,7 @@ function HDG.Theme:ClassName(name, classFile)
     if not (scheme.isLight and base) then return HDG.Format.ClassName(name, classFile) end
     _lightClassHex[scheme] = _lightClassHex[scheme] or {}   -- exception(nullable): first class name painted under this scheme
     local perScheme = _lightClassHex[scheme]
-    perScheme[classFile] = perScheme[classFile] or _darkenToFloor(base, scheme.surface.raised)   -- exception(nullable): first paint of this class
+    perScheme[classFile] = perScheme[classFile] or _darkenToFloor(base, _darkestGround(scheme))   -- exception(nullable): first paint of this class
     return "|c" .. perScheme[classFile] .. name .. "|r"
 end
 
@@ -908,6 +933,17 @@ HDG.Theme.Skinners = {
         if not (tex and tex.SetColorTexture) then return end
         local c = HDG.Theme:GetColor("semantic." .. ((state and state.variant) or "success"))
         tex:SetColorTexture(c.r, c.g, c.b, (state and state.dim) and 0.35 or 1)
+    end,
+
+    -- PieTrack / PieSwipe: HDG.UI:Pie's disc (the empty share, faint text.dim) and its
+    -- swipe (the done share, semantic.warning -- the "under way" gold of the state text).
+    PieTrack = function(tex, _scheme)
+        local c = HDG.Theme:GetColor("text.dim")
+        tex:SetVertexColor(c.r, c.g, c.b, 0.35)
+    end,
+    PieSwipe = function(cooldown, _scheme)
+        local c = HDG.Theme:GetColor("semantic.warning")
+        cooldown:SetSwipeColor(c.r, c.g, c.b, 1)
     end,
 
     -- AccentBar: solid accent fill (status banner left bar, selected row bar).

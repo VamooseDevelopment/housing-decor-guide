@@ -474,7 +474,6 @@ local function _wireLandingCard(row, ed)
     -- Action buttons: shown only on editable rows; header rows have no _actionBtns.
     local btns = row._actionBtns
     if not btns then return end
-    local isSnapshot = ed.isSnapshot
     if btns.category then
         local displayName, currentCategoryID = ed.displayName, ed.categoryID
         btns.category:SetScript("OnClick", function(self)
@@ -494,12 +493,8 @@ local function _wireLandingCard(row, ed)
     if btns.export then
         btns.export:SetScript("OnClick", function()
             if not collectionID then return end
-            local def = HDG.Store:GetState().account.collections[collectionID]  -- exception(false-positive): top-level controller read
-            if not def then return end
-            local encoded = isSnapshot
-                and HDG.StyleSerializer:ExportSnapshot(def)
-                or  HDG.StyleSerializer:Export(def)
-            if encoded then HDG.UI:CopyDialog():Show("Export Style", encoded) end
+            local st = HDG.Store:GetState()  -- exception(false-positive): top-level click handler, not a row factory
+            HDG.UI:CopyDialog():Open("Export Style", HDG.StyleResolve.ShareCode(collectionID, st))
         end)
     end
     if btns.delete then
@@ -999,11 +994,11 @@ _registerCuratorIconCell("curatorSubcategoryIcon",
 local function _curatorTileDef(self_)
     if not self_._tipName then return nil end   -- exception(nullable): cell not yet painted
     local th = HDG.Theme:GetColor("text.heading")
-    local td = HDG.Theme:GetColor("text.dim")
     local lines = { { text = self_._tipName, r = th.r, g = th.g, b = th.b } }
-    if self_._tipPlace ~= "" then lines[#lines+1] = { text = self_._tipPlace, r = td.r, g = td.g, b = td.b } end
-    lines[#lines+1] = { text = "Stored: " .. self_._tipStored, r = td.r, g = td.g, b = td.b }
-    lines[#lines+1] = { text = "Placed: " .. self_._tipPlaced, r = td.r, g = td.g, b = td.b }
+    -- Plain strings draw tooltip white: these are read, not hints, so never dim.
+    if self_._tipPlace ~= "" then lines[#lines+1] = self_._tipPlace end
+    lines[#lines+1] = "Stored: " .. self_._tipStored
+    lines[#lines+1] = "Placed: " .. self_._tipPlaced
     return { anchor = "ANCHOR_RIGHT", extraLines = lines }
 end
 
@@ -1298,7 +1293,8 @@ HDG.CardGrid:RegisterCellKind("stylesPreviewTile", {
 })
 
 -- ===== Row factory: stylesImportPreviewRow ==================================
--- One row per parsed itemID. Dim "unknown" tail for items not in the catalog.
+-- One row per parsed itemID ("#id" tail, "unknown" for items not in the
+-- catalog), or per tag of a Smart Set code (axis and severity tail, no icon).
 local function _layoutImportPreviewRow(row)
     local icon = row:CreateTexture(nil, "OVERLAY")
     icon:SetSize(14, 14)
@@ -1338,7 +1334,7 @@ local function _importPreviewRowFactory(template)
             HDG.Theme:Register(row, "RowChrome", { selected = false })
             _paintIconTextureOrAtlas(row._iconTex, ed)
             row._nameFs:SetText(ed.name or "?")
-            row._tailFs:SetText(ed.isKnown and ("#" .. tostring(ed.itemID)) or "unknown")
+            row._tailFs:SetText(ed.tail)
             row:SetHeight(template.height)
         end,
         Reset = function(row)
@@ -1351,7 +1347,7 @@ end
 
 HDG.Rows:Register("stylesImportPreviewRow", {
     font    = "small", height = 18, factory = _importPreviewRowFactory,
-    key = function(ed) return "imp:" .. tostring(ed and ed.itemID or "?") end,
+    key = function(ed) return "imp:" .. ed.key end,   -- itemID, or "tag:<axis>:<tag>"
 })
 
 -- ===== Row factory: stylesExportSourceRow ===================================
@@ -1442,12 +1438,12 @@ local function _exportNativeCode(key, st)
         if not set then return "" end
         return HDG.Projects.CrateCodec.Encode({ name = set.name, decor = set.items })
     end
-    local rec = HDG.StyleResolve.RecordFor(key, st)  -- style: / concept: / collection:
-    if not rec then return "" end
-    return HDG.StyleSerializer:Export(rec)
+    if not HDG.StyleResolve.RecordFor(key, st) then return "" end  -- exception(nullable): stale UI key
+    return HDG.StyleResolve.ShareCode(key, st)  -- style: / smartset: (its tags) / snapshot: / concept: / collection:
 end
 
 local function _exportCaption(fmt, key, count)
+    if key:match("^smartset:") then return HDG.Locale:Get("STY_EXPORT_SMARTSET_HINT") end
     if fmt ~= "dd2" then return HDG.Locale:Get("STY_EXPORT_HDG_HINT") end
     if key == "collection"  then return string.format(HDG.Locale:Get("STY_EXPORT_DD2_COLLECTION"), count) end
     if key:match("^style:") then return HDG.Locale:Get("STY_EXPORT_DD2_STYLE_LOSSY") end
@@ -1470,8 +1466,11 @@ local function _refreshExportCode(rootFrame)
         codeBox.EditBox:SetMaxBytes(0)
     end
 
-    -- Collection needs a warm catalog; retry (don't cache) until ready.
-    if key == "collection" and not HDG.HousingCatalogObserver:IsReady() then
+    -- The whole collection and a preset whose tags pick its decor need a warm
+    -- catalog; retry (don't cache) until ready. A Smart Set shares its tags, so
+    -- it never waits (NeedsCatalog).
+    local needsCatalog = key == "collection" or HDG.StyleResolve.NeedsCatalog(key, st)
+    if needsCatalog and not HDG.HousingCatalogObserver:IsReady() then
         HDG.HousingCatalogObserver:RequestLoad("export-collection")
         codeBox:SetText(""); caption:SetText(HDG.Locale:Get("STY_EXPORT_LOADING"))
         _exportLast.key = nil
@@ -1569,6 +1568,16 @@ _openAddStylesMenu = function(anchor, categoryID, categoryName)
             end }
     end
     HDG.UI.ShowMenu(anchor, items)
+end
+
+-- A Smart Set code always lands in Filtered Sets (the destination row hides for
+-- it). tagCount is read before the commit, which resets the import state.
+local function _commitSmartSetImport(tagCount)
+    local A = HDG.Constants.ACTIONS
+    HDG.Store:Dispatch({ type = A.STYLES_IMPORT_COMMIT_AS_SMARTSET })
+    HDG.Store:Dispatch({ type = A.STYLES_SET_VIEW, payload = { view = "landing" } })
+    -- styles_action is a user-tag -> this toasts the status rail for ~2s (ADR-013).
+    HDG.Log:Info("styles_action", HDG.Locale:Get("STY_IMPORT_SMARTSET_DONE"):format(tagCount))
 end
 
 local StylesController = {}
@@ -1776,6 +1785,7 @@ function StylesController:Wire(rootFrame)
     HDG.UI.OnClick(rootFrame, "stylesPanel.importCommit", function()
         local A    = HDG.Constants.ACTIONS
         local imp  = HDG.Store:GetState().session.ui.styles.import  -- exception(false-positive): top-level commit handler reads view-global import state, not a row factory
+        if imp.parseSmartSet then _commitSmartSetImport(imp.parseSmartSet.tagCount); return end
         local dest = imp.destination
         -- Default destination is "style" (My Styles); see the import factory + radio.
         local commit = (dest == "set"      and A.STYLES_IMPORT_COMMIT_AS_SET)

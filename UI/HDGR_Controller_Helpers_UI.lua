@@ -48,6 +48,36 @@ function UI.OnClick(rootFrame, widgetId, fn)
     UI.W(rootFrame, widgetId):SetScript("OnClick", fn)
 end
 
+-- ===== Vendor navigation ===================================================
+-- Waypoint and Show on Map for a vendor { mapID, x, y, name, side }, for the row
+-- buttons and detail panels of every tab that offers them. `side` is the vendor's
+-- A/H/N allegiance from VendorAugment: Waypoints warns when it is the other
+-- faction's.
+function UI.WaypointToVendor(v) HDG.Waypoints:Set(v.mapID, v.x, v.y, v.name, v.side) end
+function UI.ShowVendorOnMap(v) HDG.Waypoints:ShowOnMap(v.mapID, v.x, v.y, v.name) end
+
+-- A detail panel's Waypoint and Show on Map buttons, for the vendor vendorOf()
+-- names at click time. Both are enabled only for a vendor with a location, so it
+-- is never nil when one is clicked.
+function UI.WireVendorNav(rootFrame, waypointId, mapId, vendorOf)
+    UI.OnClick(rootFrame, waypointId, function() UI.WaypointToVendor(vendorOf()) end)
+    UI.OnClick(rootFrame, mapId, function() UI.ShowVendorOnMap(vendorOf()) end)
+end
+
+-- ===== Hyperlinks in a label ===============================================
+-- A label's |H links live on its parent frame: mouse and hyperlinks on there,
+-- the click and enter handlers set, and the tooltip hidden on leave.
+local function _hideTooltip() HDG.TooltipEngine:Hide() end
+
+function UI.WireHyperlinkHost(rootFrame, labelId, onClick, onEnter)
+    local host = UI.W(rootFrame, labelId):GetParent()
+    host:EnableMouse(true)
+    host:SetHyperlinksEnabled(true)
+    host:SetScript("OnHyperlinkClick", onClick)
+    host:SetScript("OnHyperlinkEnter", onEnter)
+    host:SetScript("OnHyperlinkLeave", _hideTooltip)
+end
+
 -- Add a recipe to the craft queue + toast the amount added on the status rail.
 -- The single funnel for every "add to queue" site: the Recipes +stepper / Queue
 -- Add button and the Goblin / Decor shift-click handlers all route here. `opts`
@@ -497,6 +527,41 @@ function UI.RowPinButton(row)
     pin:SetPoint("RIGHT", row, "RIGHT", -4, 0)
     pin:Hide()
     return pin
+end
+
+-- "Map" left of a row's waypoint pin -- a Map beside every Waypoint (owner 10-30): the
+-- world map with HDG's pin, where the pin sets a waypoint. Hidden until shown by the painter.
+function UI.RowMapButton(row, pin)
+    local b = HDG.UI.RowButton(row, HDG.Locale:Get("COMMON_MAP"))
+    b:SetPoint("RIGHT", pin, "LEFT", -4, 0)
+    b:Hide()
+    return b
+end
+
+-- ===== Decor Quests text in parts ==========================================
+-- The selectors' runs = { { tone, text }, ... } -> one colour-coded string, the tab's and the
+-- Quest Tracker's alike (review 2026-10-31 L2): one tone map, so a tone either paints, the
+-- other does too, and one it doesn't know errors.
+local RUN_TONE = {
+    text    = "text.primary",
+    dim     = "text.dim",
+    accent  = "semantic.accent",
+    success = "semantic.success",
+    warn    = "semantic.warning",
+    error   = "semantic.error",
+    sunken  = "surface.sunken",   -- the number on the tracker's disc for the step to head for
+    mark    = "semantic.warning", -- a who line's quest "!" and "?": each theme's gold
+}
+
+function UI.Toned(tone, text)
+    local token = RUN_TONE[tone] or error(("UI.Toned: no tone %q"):format(tostring(tone)), 2)
+    return HDG.Theme:ColorCode(token) .. text .. "|r"
+end
+
+function UI.RunsText(runs)
+    local out = {}
+    for i, r in ipairs(runs) do out[i] = UI.Toned(r[1], r[2]) end
+    return table.concat(out)
 end
 
 -- ===== Keyed mark/sweep frame pools (hygiene A8) =============================

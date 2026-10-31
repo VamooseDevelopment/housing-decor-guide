@@ -1,7 +1,7 @@
 -- ============================================================================
 -- HDGR_ProfessionsDB (PRUNED -- decor-relevant recipes only)
--- Generated: 2026-10-19 20:43:34
--- Source: HDG_ProfessionsDB.lua (9380 full recipes)
+-- Generated: 2026-10-31 11:57:10
+-- Source: HDG_ProfessionsDB.lua (9381 full recipes)
 -- Output: 1093 recipes (11.7% retained, 88.3% dropped)
 -- Build:  housingdecorguide-tools/professionsdb/build_pruned_professions.lua
 --
@@ -809,6 +809,7 @@ HDGR_ProfessionsDB = {
 [173058]="Umbral Ink^311405^Ink^^b,1,173056~b,1,173060~b,1,180732",
 [181788]="Unrefined Arrowheads^337426^Quest Recipes^^b,1,181787~b,1,181789",
 [257050]="Veil-Secured Animacone^1261958^House Decor^^b,12,251772,Arden Lumber~b,3,171292~b,2,177061,Twilight Bark~b,2,173170,Essence of Rebirth",
+[284552]="Venthyr Alchemy Rack^1316323^House Decor^^b,5,251772~b,5,171292,Ground Nightshade~b,5,171289,Ground Widowbloom~b,1,180732,Rune Etched Vial",
 [257098]="Venthyr Anima Bottle^1261998^House Decor^^b,3,251772,Arden Lumber~b,3,172230,Soul Dust~b,2,171832,Sinvyr Ore",
 [173129]="Versatile Jewel Cluster^311859^Gems^^b,4,173110,Umbryl~b,1,173168",
 [173123]="Versatile Jewel Doublet^311866^Gems^^b,2,173110,Umbryl~b,2,173168",
@@ -1043,7 +1044,6 @@ HDGR_ProfessionsDB = {
 [122602]="Stone of the Earth^181648^Trinkets and Trinket Upgrades^^b,70,108996~b,15,118472,Savage Blood~b,1,122601~b,15,113263,Sorcerous Earth",
 [122603]="Stone of the Waters^181649^Trinkets and Trinket Upgrades^^b,70,108996~b,15,118472,Savage Blood~b,1,122602~b,15,113262",
 [111442]="Sturgeon Stew^160979^Fish Dishes^^b,10,109140,Blind Lake Sturgeon Flesh",
-[115524]="Taladite Crystal^170700^Reagents and Research^^b,20,109118,Blackrock Ore~b,10,109119,True Iron Ore",
 [113588]="Temporal Crystal^169092^Reagents and Research^^b,1,111245",
 [108257]="Truesteel Ingot^171690^Reagents and Research^^b,20,109119,True Iron Ore~b,10,109118,Blackrock Ore",
 [115807]="Versatility Taladite^170723^Gems^^b,10,109118,Blackrock Ore~b,2,109126,Gorgrond Flytrap",

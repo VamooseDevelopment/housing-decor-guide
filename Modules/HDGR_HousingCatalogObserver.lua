@@ -361,15 +361,13 @@ local COST_FIELDS = { "currencyID", "itemID", "amount", "icon" }
 local COST_FIELD_SET = {}
 for _, f in ipairs(COST_FIELDS) do COST_FIELD_SET[f] = true end
 local _costKeyBuf = {}
-local function _sharedCost(list)
-    local shared = _sweepShared
-    if not shared then return list end  -- exception(nullable): nil between sweeps, for a row built for a decor just collected
+local function _costKey(list)
     local n = 0
     for i = 1, #list do
         local e = list[i]
         for k in pairs(e) do
             if not COST_FIELD_SET[k] then
-                error(("catalog cost sharing: field %q is not in the cost key"):format(tostring(k)), 2)
+                error(("catalog cost key: field %q is not in the cost key"):format(tostring(k)), 3)
             end
         end
         for j = 1, #COST_FIELDS do
@@ -379,7 +377,13 @@ local function _sharedCost(list)
             _costKeyBuf[n] = v == nil and "-" or (type(v) == "number" and "n" or "s") .. v
         end
     end
-    local key = table.concat(_costKeyBuf, "\31", 1, n)
+    return table.concat(_costKeyBuf, "\31", 1, n)
+end
+
+local function _sharedCost(list)
+    local shared = _sweepShared
+    if not shared then return list end  -- exception(nullable): nil between sweeps, for a row built for a decor just collected
+    local key = _costKey(list)
     local hit = shared.cost[key]
     if hit then return hit end
     shared.cost[key] = list
@@ -1221,7 +1225,7 @@ function R:BuildRow(info)
     R:_bakeSourceTypes(row)  -- row.sourceType (sourceName / sourceDetail are built on read)
     if t then t, hk = _lap("recipe+sourceTypes+bonus", t, hk) end
     R:_bakeVariantDyes(row, variants)  -- row.dyedVariants[] (per-owned-variant dye derivation)
-    if t and row.variants then t, hk = _lap("variantDyes", t, hk) end   -- only rows that had variants to walk
+    if t and variants then t, hk = _lap("variantDyes", t, hk) end   -- only rows that had variants to walk
     -- Single canonical source/gate bake. Produces row.sourceTags[] in
     -- SOURCE_KIND_PRIORITY order; entries carry text + extras (factionPrefix,
     -- achievementID, ...) for kinds that have them, nothing for chip-only
@@ -1270,13 +1274,22 @@ end
 
 -- _bakeExpansion: row.expansion, the one tag field a row stores. The sweep runs this
 -- and not _bakeTags, whose labels are display text built on read: the sweep built
--- them for every row and the slim copy dropped them. Every Expansion tag is written
--- in turn, as _classifyTag does, so the two agree.
+-- them for every row and the slim copy dropped them. It holds EVERY Expansion tag,
+-- oldest first ("Classic, Midnight", HDG.Expansion.Join): an item tagged with two
+-- belongs to both (owner ruling 2026-10-31), and keeping one left the filter, the
+-- list and the details each naming a different one.
+local _expansionNames = {}   -- reused per row: a table per row was 1,788 for 5 that need one
 function R:_bakeExpansion(row)
     if not row.dataTagsByID then return end  -- exception(boundary): Blizzard struct field optional
+    local n = 0
     for tagID, displayName in pairs(row.dataTagsByID) do
-        if R.tagIDToGroup[tagID] == "Expansion" then row.expansion = displayName end
+        if R.tagIDToGroup[tagID] == "Expansion" then
+            n = n + 1
+            _expansionNames[n] = displayName
+        end
     end
+    for i = #_expansionNames, n + 1, -1 do _expansionNames[i] = nil end   -- a longer list's tail from the last row
+    if n > 0 then row.expansion = HDG.Expansion.Join(_expansionNames) end
 end
 
 -- _bakeTags: the tag labels from dataTagsByID, built on read (_bakeDisplay):
@@ -1285,7 +1298,7 @@ end
 -- _classifyTag: inner helper extracted from the loop to keep _bakeTags flat.
 local function _classifyTag(row, tagID, displayName, styleFaction, getCategory)
     local group = R.tagIDToGroup[tagID]   -- tagIDToGroup is init'd to {} at load (line ~47), never nil
-    if group == "Expansion" then row.expansion = displayName; return end
+    if group == "Expansion" then return end   -- row.expansion holds every one (_bakeExpansion)
     if group == "Size"      then row.sizeLabel = displayName; return end
     if getCategory then
         local cat = getCategory(tagID)
@@ -1305,10 +1318,10 @@ function R:_bakeTags(row)
         table.sort(styleFaction)
     end
     row.tagsLabel     = table.concat(styleFaction, ", ")
-    -- Palette-colored expansion label (scheme-invariant; safe to bake).
+    -- Palette-colored expansion label (scheme-invariant; safe to bake), each
+    -- expansion in its own colour.
     if row.expansion and row.expansion ~= "" then
-        local hex = HDG.Expansion.GetColorHex(row.expansion)
-        row.expansionLabel = hex and (hex .. row.expansion .. "|r") or row.expansion
+        row.expansionLabel = HDG.Expansion.Colored(row.expansion)
     end
 end
 
@@ -1359,7 +1372,7 @@ local function _resolveVendorNpc(parsed, Aug)
     local v = _resolving
     for k in pairs(v) do v[k] = nil end
     for k, val in pairs(parsed) do v[k] = val end
-    local npcID = Aug and Aug:ResolveName(v.name, v.zone)
+    local npcID = Aug:ResolveName(v.name, v.zone)
     v.npcID       = npcID
     v.canWaypoint = false   -- true only once a location is known (below): an npcID alone maps nowhere
     if not npcID then return v end
@@ -1402,21 +1415,65 @@ local function _vendorKey(v)
     return v.name .. "\31" .. v.zone .. "\31" .. v.faction .. "\31" .. _keyPart(v.cost) .. "\31" .. _keyPart(v.npcID)
 end
 
--- The item's price at a vendor, linked to the vendor's record: built once a sweep
--- per resolved vendor, then shared. costEntries keys by identity, which the
--- raw-line memo and _sharedCost make one list per content.
+-- The item's price at a vendor, linked to the vendor's record, and its vendor key:
+-- built once a sweep per resolved vendor, then shared. costEntries keys by
+-- identity, which the raw-line memo and _sharedCost make one list per content.
 local function _vendorEntry(parsed, Aug)
     local v = _resolveVendorNpc(parsed, Aug)
-    local shared = _sweepShared
-    if not shared then return _linkVendor(v) end  -- exception(nullable): nil between sweeps, for a row built for a decor just collected
-    local byKey = _child(shared.vendorEntries, v.costEntries or NONE)  -- exception(optional): a block with no priced line has no costEntries
     local key = _vendorKey(v)
+    local shared = _sweepShared
+    if not shared then return _linkVendor(v), key end  -- exception(nullable): nil between sweeps, for a row built for a decor just collected
+    local byKey = _child(shared.vendorEntries, v.costEntries or NONE)  -- exception(optional): a block with no priced line has no costEntries
     local entry = byKey[key]
     if not entry then
         entry = _linkVendor(v)
         byKey[key] = entry
     end
-    return entry
+    return entry, key
+end
+
+-- Exact duplicates: the catalog lists a vendor once for each zone it names, then
+-- VendorAugment moves every one of those to the vendor's one zone, so they come out
+-- the same vendor, zone and price (79 rows of June's recorded catalog; Second Chair
+-- Pawdo four times on 248116). Owner ruling 2026-10-31: those are one record, and a
+-- different price stays its own. The price is its cost entries, not its text: the
+-- Disguised Decor Duel Vendor's "100" is two prices, in two currencies. By content,
+-- so a row built between sweeps, whose entries are not shared, merges the same way.
+local _seenVendorKeys = {}
+local function _dropDuplicateVendors(list, keys)
+    local n = 0
+    for i = 1, #list do
+        local key = keys[i] .. "\31" .. _costKey(list[i].costEntries or NONE)  -- exception(optional): a block with no priced line has no costEntries
+        if not _seenVendorKeys[key] then
+            _seenVendorKeys[key] = true
+            n = n + 1
+            list[n] = list[i]
+        end
+    end
+    for i = #list, n + 1, -1 do list[i] = nil end
+    for key in pairs(_seenVendorKeys) do _seenVendorKeys[key] = nil end
+end
+
+-- No price beside a price: the same vendor and zone with no priced line is the
+-- same offer, minus what it costs. The curated override names Second Chair Pawdo
+-- with no price where the catalog has him at 75g (17 rows of June's recorded
+-- catalog). An unknown price is not a different one (owner ruling 2026-10-31,
+-- merge duplicates), so the priced record stands for both.
+local _pricedPlaces = {}
+local function _dropUnpricedTwins(list)
+    for _, v in ipairs(list) do
+        if v.costEntries then _pricedPlaces[v.name .. "\31" .. v.zone] = true end
+    end
+    local n = 0
+    for i = 1, #list do
+        local v = list[i]
+        if v.costEntries or not _pricedPlaces[v.name .. "\31" .. v.zone] then
+            n = n + 1
+            list[n] = v
+        end
+    end
+    for i = #list, n + 1, -1 do list[i] = nil end
+    for key in pairs(_pricedPlaces) do _pricedPlaces[key] = nil end
 end
 
 local function _sharedVendors(list)
@@ -1446,26 +1503,33 @@ local function _dropNotSoldBy(row)
     row.vendors = keep
 end
 
+local _vendorKeyBuf = {}   -- the row's vendor keys, by position; reused per row
 function R:_bakeVendors(row)
     -- Fold CatalogOverride vendors (row.sources type=5) into row.vendors so the whole
     -- pipeline -- the zone/faction filters, the per-item vendor display, AND the byVendor
     -- index -- sees ONE complete vendor list (catalog + override-supplied vendors). The
     -- resolve loop below then stamps their npcID/zone from VendorAugment like any vendor.
+    -- The parser's shape, cost "" included: a catalog block naming the same vendor with
+    -- no Cost line is then the same record, and merges (Morta Gage on 269316).
     if row.sources then
         for _, s in ipairs(row.sources) do
             if s.type == 5 and s.name and s.name ~= "" then
                 row.vendors = row.vendors or {}
-                row.vendors[#row.vendors + 1] = { name = s.name, zone = s.detail or "", faction = "", standing = "" }
+                row.vendors[#row.vendors + 1] = { name = s.name, zone = s.detail or "", cost = "", faction = "", standing = "" }
             end
         end
     end
     if not row.vendors then row.vendors = _sharedVendors({}); return end
     _dropNotSoldBy(row)
-    local Aug = HDG.StaticData.VendorAugment
-    for i, v in ipairs(row.vendors) do
-        row.vendors[i] = _vendorEntry(v, Aug)   -- price here + the vendor's record
+    local Aug, list = HDG.StaticData.VendorAugment, row.vendors
+    for i, v in ipairs(list) do
+        list[i], _vendorKeyBuf[i] = _vendorEntry(v, Aug)   -- price here + the vendor's record
     end
-    row.vendors = _sharedVendors(row.vendors)
+    if #list > 1 then
+        _dropDuplicateVendors(list, _vendorKeyBuf)
+        _dropUnpricedTwins(list)
+    end
+    row.vendors = _sharedVendors(list)
 end
 
 -- _bakeVariantDyes: per-owned-dyed-variant display data baked once at sweep time.
@@ -1592,8 +1656,9 @@ local function _formatCostLine(entries)
     return table.concat(parts, "  +  ")
 end
 
--- Order-independent key for a cost-entry set (dedup distinct payment options).
-local function _costKey(entries)
+-- Order-independent key for one payment option (dedup distinct options). Not
+-- _costKey above, which keys a cost list's exact content for the shared tables.
+local function _paymentOptionKey(entries)
     local parts = {}
     for _, e in ipairs(entries) do
         parts[#parts + 1] = HDG.Format.CostKey(e) .. "=" .. tostring(e.amount)
@@ -1619,7 +1684,7 @@ local function _costVariants(row, headEntries, headLine)
     for i = 1, n do
         local entries = (i == 1) and headEntries or _costFromVendor(vendors[i])
         if entries and #entries > 0 then
-            local key = _costKey(entries)
+            local key = _paymentOptionKey(entries)
             if not seen[key] then
                 seen[key] = true
                 lines[#lines + 1] = (i == 1) and headLine or _formatCostLine(entries)
@@ -1741,7 +1806,9 @@ end
 
 local function _composeSourceText(rec)
     if not rec then return nil end   -- exception(nullable): row carries only the source kinds it has
-    return _sourceWithZone(rec.source, rec.zone)
+    local text = _sourceWithZone(rec.source, rec.zone)
+    if rec.activity then return text .. " from " .. rec.activity end  -- exception(nullable): the catalog names an activity on a few records only
+    return text
 end
 
 -- Curated source type -> SOURCE_KINDS entry, shared by both bakes. WorldQuest
@@ -2317,6 +2384,9 @@ function R:_ParseSourceText(sourceText, row)
     local vendors = {}
     local current = nil
     local pendingZoneTarget = nil
+    -- "Activity: Stormarion Assault" comes BEFORE the Treasure/Drop/Event line it explains
+    -- (how you earn the cache), so it waits here for the next record.
+    local pendingActivity = nil
     local raw, pos = _nextSourceLine(sourceText, 1)
     while raw do
         local ts, hks
@@ -2340,6 +2410,7 @@ function R:_ParseSourceText(sourceText, row)
         local drop     = key == "Drop"        and val or nil
         local treasure = key == "Treasure"    and val or nil
         local event    = key == "Event"       and val or nil
+        local activity = key == "Activity"    and val or nil
         local bareKind = SOURCE_TOKENS[line]
         if vName then
             _flushVendor(vendors, current)
@@ -2349,15 +2420,21 @@ function R:_ParseSourceText(sourceText, row)
                 current.name  = current.names[1]
             end
             pendingZoneTarget = nil
+        elseif activity then
+            pendingActivity = activity
+            pendingZoneTarget = nil
         elseif drop then
             -- "Drop: <Source>" optional "Zone:" follows via pendingZoneTarget.
-            row.drop = { source = drop }
+            row.drop = { source = drop, activity = pendingActivity }
+            pendingActivity = nil
             pendingZoneTarget = row.drop
         elseif treasure then
-            row.treasure = { source = treasure }
+            row.treasure = { source = treasure, activity = pendingActivity }
+            pendingActivity = nil
             pendingZoneTarget = row.treasure
         elseif event then
-            row.event = { source = event }
+            row.event = { source = event, activity = pendingActivity }
+            pendingActivity = nil
             pendingZoneTarget = row.event
         elseif bareKind == "SHOP" then
             -- Bare "Shop"/"In-Game Shop" line. NOTE: Profession: lines deliberately
@@ -2539,29 +2616,17 @@ function R:GetDecorIDByItemID(itemID)
     return row and row.decorID
 end
 
--- Full itemID -> decorID map (StyleSerializer export, useDecorID=true). Built on demand.
-function R:GetDecorIDByItemIDMap()
-    local out = {}
-    for itemID, row in pairs(R.byItemID) do
-        if row.decorID then out[itemID] = row.decorID end
-    end
-    return out
-end
-
 function R:GetIcon(itemID)
     local row = R:GetRow(itemID)
     return row and row.iconTexture
 end
 
+-- Every expansion the catalog tags the item with, oldest first ("Classic, Midnight"):
+-- the row's own value, so the Expansion filter, the list and the details agree.
+-- Take it apart with HDG.Expansion.Members / Has.
 function R:GetExpansionForItem(itemID)
     local row = R:GetRow(itemID)
-    if not (row and row.dataTagsByID) then return nil end
-    for tagID, displayName in pairs(row.dataTagsByID) do
-        if R.tagIDToGroup[tagID] == "Expansion" then
-            return displayName
-        end
-    end
-    return nil
+    return row and row.expansion   -- exception(nullable): not ready, an unknown item, or a decor tagged with no expansion
 end
 
 function R:GetVendorsForItem(itemID)
@@ -2584,6 +2649,40 @@ function R:GetItemsByVendor(vendorName, vendorZone)
     return R.byVendor[(vendorName or "") .. "::" .. (vendorZone or "")]
 end
 
+-- The items a vendor sells, by npcID, across every record the catalog files it
+-- under (an event vendor can sit under its catalog name and its override name).
+-- For callers holding a VendorAugment npcID: the augment's name can differ from
+-- the catalog's ("Rae'ana (Silvermoon)" against "Rae'ana"), so a name lookup
+-- missed her (test audit B3, 2026-10-31). Built from byVendor on the first ask
+-- after a sweep; byVendor is replaced, never edited, between sweeps.
+local _itemsByNpc, _itemsByNpcOf = nil, nil
+
+local function _addNpcItems(out, seen, rec)
+    local items, had = out[rec.npcID], seen[rec.npcID]
+    if not items then
+        items, had = {}, {}
+        out[rec.npcID], seen[rec.npcID] = items, had
+    end
+    for _, itemID in ipairs(rec.items) do
+        if not had[itemID] then
+            had[itemID] = true
+            items[#items + 1] = itemID
+        end
+    end
+end
+
+function R:GetItemsByNpc(npcID)
+    if not R:IsReady() then return nil end
+    if _itemsByNpcOf ~= R.byVendor then
+        local out, seen = {}, {}
+        for _, rec in pairs(R.byVendor) do
+            if rec.npcID then _addNpcItems(out, seen, rec) end
+        end
+        _itemsByNpc, _itemsByNpcOf = out, R.byVendor
+    end
+    return _itemsByNpc[npcID]   -- exception(nullable): a vendor the catalog sells nothing at
+end
+
 function R:IterateRows(fn)
     if not R:IsReady() then return end
     for itemID, row in pairs(R.byItemID) do fn(itemID, row) end
@@ -2602,8 +2701,6 @@ end
 local DECOR_CATALOG_ID = 1   -- Blizzard's housing catalog is catalog 1
 
 function R:Resolve(itemID)
-    if type(itemID) ~= "number" then return nil end
-
     -- Primary: byItemID; falls back to Recipes for recipe-only paths and cold catalog.
     local decorID
     local nameFallback
@@ -2612,18 +2709,17 @@ function R:Resolve(itemID)
         decorID      = catalogRow.decorID
         nameFallback = catalogRow.name
     else
-        local db = HDG.StaticData.Recipes:GetAll()
-        local entry = db and db[itemID]
-        decorID      = entry and entry.decorID
+        local entry = HDG.StaticData.Recipes:Get(itemID)   -- the DecorDB is keyed by spellID
+        decorID      = entry and entry.decorID   -- exception(nullable): not every decor has a recipe
         nameFallback = entry and entry.name
     end
     if not decorID then return nil end
 
     local cat = _G.C_HousingCatalog
-    if not (cat and cat.GetCatalogEntryInfoByRecordID) then return nil end
+    if not (cat and cat.GetCatalogEntryInfoByRecordID) then return nil end  -- exception(boundary): C_HousingCatalog absent in headless tests
     -- exception(boundary): 12.0.5 dropped the 3rd arg (tryGetOwnedInfo); 3-arg throws "bad argument #2".
     local info = cat.GetCatalogEntryInfoByRecordID(DECOR_CATALOG_ID, decorID)
-    if type(info) ~= "table" then return nil end
+    if type(info) ~= "table" then return nil end  -- exception(boundary): nil for a record the client has not loaded
 
     return {
         asset           = info.asset,
@@ -2832,20 +2928,13 @@ end
 
 -- ===== In-memory row mutations ===============================================
 -- Observer owns byDecorID/byItemID. Called from onEnable subscriber on per-entry
--- events (ROW_ADDED / ROW_REMOVED / COUNTS_UPDATED) between full sweeps.
+-- events (ROW_ADDED / COUNTS_UPDATED) between full sweeps.
 
 function R:UpsertRow(decorID, entry)
     if not (decorID and entry) then return end
     local row = entry
     R.byDecorID[decorID] = row
     if row.itemID then R.byItemID[row.itemID] = row end
-end
-
-function R:RemoveRow(decorID)
-    if not decorID then return end
-    local row = R.byDecorID[decorID]
-    if row and row.itemID then R.byItemID[row.itemID] = nil end
-    R.byDecorID[decorID] = nil
 end
 
 function R:PatchCounts(decorID, counts)
@@ -3005,10 +3094,6 @@ HDG.Modules:Declare({
             elseif actionType == A.COLLECTION_CATALOG_ROW_ADDED then
                 if action and action.payload then
                     R:UpsertRow(action.payload.decorID, action.payload.entry)
-                end
-            elseif actionType == A.COLLECTION_CATALOG_ROW_REMOVED then
-                if action and action.payload then
-                    R:RemoveRow(action.payload.decorID)
                 end
             -- COLLECTION_CATALOG_ROW_COUNTS_UPDATED: the rows were patched
             -- synchronously in _ApplyEntry before the signal; nothing to do here.

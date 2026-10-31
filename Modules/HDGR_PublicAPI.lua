@@ -99,6 +99,10 @@ function API.RouteBlueprintToShopping(req)
     })
     HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.SHOPPING_LIST_IMPORT,
                          payload = { encoded = encoded } })
+    -- The import makes its list the active one. Count what landed there, not what
+    -- was sent: the decoder drops entries the catalog can't match.
+    local account = HDG.Store:GetState().account
+    local landed  = #account.vendorShoppingLists[account.activeShoppingListId].items
 
     -- SHOW THE RESULT. A list that lands silently in a closed window is a
     -- click that appeared to do nothing -- same reasoning as HDG's own routing.
@@ -113,6 +117,6 @@ function API.RouteBlueprintToShopping(req)
     -- purely to own a string. The operation IS blueprint routing, and it is what
     -- HDG's own Route to Shopping logs under, so the honest tag already exists.
     HDG.Log:Info("blueprints", ("routed %q via the API: %d item(s), %d skipped")
-        :format(name, #items, skipped))
-    return #items, skipped
+        :format(name, landed, skipped))
+    return landed, skipped
 end

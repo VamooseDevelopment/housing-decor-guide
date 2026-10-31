@@ -47,6 +47,15 @@ HDG.TooltipEngine = HDG.TooltipEngine or {}
 
 local TE = HDG.TooltipEngine
 
+-- ===== Blizzard's tooltip colours ===========================================
+-- HDG never re-skins GameTooltip, so its background is always near-black, and
+-- the light schemes' dark greens and teals would vanish on it. A line that needs
+-- a colour takes Blizzard's own (GlobalColor DB2, live 12.1.0.69814), never the
+-- scheme's; everything else stays tooltip white.
+TE.COLOR = {
+    NORMAL = { r = 1, g = 0.82, b = 0 },   -- NORMAL_FONT_COLOR: the name a tooltip is about
+}
+
 -- Resolve a possibly-"locale:KEY"-prefixed tooltip string to localised text at
 -- render (hover) time, so recipe defs can carry locale keys and switch live --
 -- no /reload, unlike build-time static LayoutConfig text. Plain strings pass through.
@@ -75,14 +84,16 @@ function TE.ClickHintLines(spec)
     return out
 end
 
--- Append grey click-hint lines (after a blank spacer) to a tooltip `extras`
--- array. No-op when spec is nil -- pooled rows that don't stamp _clickHints (e.g.
--- recipe/queue rows that share R.RecipeRow with the goblin scanner) get no hints.
+-- Append click-hint lines (after a blank spacer) to a tooltip `extras` array, in
+-- tooltip white: grey hints were hard to read in game (owner 10-31), and the
+-- spacer and mouse glyph already set them apart. No-op when spec is nil --
+-- pooled rows that don't stamp _clickHints (e.g. recipe/queue rows that share
+-- R.RecipeRow with the goblin scanner) get no hints.
 function TE.AppendClickHints(extras, spec)
     if not spec then return end  -- exception(nullable): per-row _clickHints stamp is optional
     if #extras > 0 then extras[#extras + 1] = " " end  -- blank spacer above the hints
     for _, line in ipairs(TE.ClickHintLines(spec)) do
-        extras[#extras + 1] = { text = line, r = 0.5, g = 0.5, b = 0.5 }
+        extras[#extras + 1] = { text = line, r = 1, g = 1, b = 1 }
     end
 end
 

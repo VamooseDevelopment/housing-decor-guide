@@ -16,6 +16,10 @@ HDG.Log:RegisterTags({
     waypoints_user = { level = "info", user = true, duration = 3 },
 })
 
+-- Every line the player reads is a WPT_* locale key, looked up when it prints: the
+-- language can change mid-session. The plain `waypoints` tag stays English (Debug tab).
+local function L(key) return HDG.Locale:Get(key) end
+
 -- ============================================================================
 -- PROVIDER SELECTION
 -- ============================================================================
@@ -85,6 +89,40 @@ end
 -- SINGLE WAYPOINT
 -- ============================================================================
 
+-- Point (x, y, map fractions) of uiMapID carried onto the parent map `onMap` through the
+-- world: the point's world position measured against onMap's corners (a map's x runs along
+-- the world's y and its y along the world's x, as VSS's Boundary.PositionOn). Not
+-- GetMapRectOnMap: that is where uiMapID is DRAWN on onMap, and Dalaran (125) is drawn on
+-- Crystalsong (127) away from where it floats -- the waypoint sat by the Violet Citadel, not
+-- at the cooking trainer; through the world it landed on her (in game 10-29). nil when either
+-- map has no world position, they are on different continents, or the point is off onMap.
+local function _pointOn(uiMapID, onMap, x, y)
+    if onMap == uiMapID then return x, y end
+    local c, w = C_Map.GetWorldPosFromMapPos(uiMapID, CreateVector2D(x, y))
+    local c0, w0 = C_Map.GetWorldPosFromMapPos(onMap, CreateVector2D(0, 0))
+    local _, w1 = C_Map.GetWorldPosFromMapPos(onMap, CreateVector2D(1, 1))
+    if not (w and w0) or c ~= c0 then return nil end   -- exception(boundary): an instanced map has no world position (MCP gotcha); a parent on another continent
+    local px, py = (w.y - w0.y) / (w1.y - w0.y), (w.x - w0.x) / (w1.x - w0.x)
+    if px < 0 or px > 1 or py < 0 or py > 1 then return nil end   -- off onMap: a map further up takes it
+    return px, py
+end
+
+-- The map a Blizzard waypoint goes on and the point there: uiMapID where the game allows
+-- waypoints, else the nearest parent map that does, the point carried onto it. A garrison's
+-- own map refuses them (Lunarfall 582: CanSetUserWaypointOnMap false; its zone, Shadowmoon
+-- Valley 539, takes the same spot -- in game 10-27). nil when no map up the chain does.
+local function _waypointMap(uiMapID, x, y)
+    local map = uiMapID
+    while map ~= 0 do
+        if C_Map.CanSetUserWaypointOnMap(map) then
+            local px, py = _pointOn(uiMapID, map, x, y)
+            if px then return map, px, py end
+        end
+        map = C_Map.GetMapInfo(map).parentMapID
+    end
+    return nil
+end
+
 -- Core single set -- returns (ok, provider/reason); NO messaging (so :Set and
 -- :RunBatch can centralize feedback). Internal-only; public callers use :Set.
 function HDG.Waypoints:_doSet(mapID, x, y, title)
@@ -98,7 +136,7 @@ function HDG.Waypoints:_doSet(mapID, x, y, title)
         if TomTom and TomTom.AddWaypoint then
             local ok, uid = pcall(function()
                 return TomTom:AddWaypoint(uiMapID, mapX, mapY, {
-                    title = title or "Vendor",
+                    title = title or L("WPT_PIN_VENDOR"),
                     persistent = false,
                     from = "HDG",
                 })
@@ -123,9 +161,12 @@ function HDG.Waypoints:_doSet(mapID, x, y, title)
 
     -- Blizzard's own waypoint, super-tracked (what Waypoint UI and the quest arrow show).
     -- A WAYPOINT ONLY (owner 2026-10-15): it neither opens the map nor drops HDG's pin --
-    -- that is the Map button's job. A zone Blizzard refuses waypoints in says so.
-    if not C_Map.CanSetUserWaypointOnMap(uiMapID) then return false, "unsupported_map" end
-    C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(uiMapID, mapX, mapY))
+    -- that is the Map button's job. A spot no map up the chain takes a waypoint on says so.
+    local onMap, wx, wy = _waypointMap(uiMapID, mapX, mapY)
+    if not onMap then return false, "unsupported_map" end
+    -- SetUserWaypoint answers wasSet (Blizzard's own /mappin and waypoint links check it): a
+    -- map that passes CanSet can still refuse the point, and must not read as "set".
+    if not C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(onMap, wx, wy)) then return false, "not_set" end
     C_SuperTrack.SetSuperTrackedUserWaypoint(true)
     return true, "native"
 end
@@ -146,6 +187,28 @@ function HDG.Waypoints:Set(mapID, x, y, title, faction)
         self:PrintResult(ok, provider, title, nil, faction)
     end
     return ok, provider
+end
+
+-- Blizzard's own arrow on a quest in the log (the Quest Tracker's Quest arrow): the game
+-- knows where its objectives are. SetSuperTrackedQuestID takes 0 to clear, never nil.
+function HDG.Waypoints:SuperTrackQuest(questID, title)
+    if InCombatLockdown() then
+        self:PrintResult(false, "combat", title)
+        return
+    end
+    C_SuperTrack.SetSuperTrackedQuestID(questID)
+    successLine(L("WPT_ARROW_SET"):format(title))
+end
+
+-- A Decor Quests Waypoint (the tracker's, a detail's): Blizzard's arrow on a quest in the
+-- log, else a waypoint at the step's start or the vendor's spot. spec = { title, questID |
+-- map + x + y (map percent) [+ side] }.
+function HDG.Waypoints:FollowQuestStep(spec)
+    if spec.questID then
+        self:SuperTrackQuest(spec.questID, spec.title)
+        return
+    end
+    self:Set(spec.map, spec.x, spec.y, spec.title, spec.side)
 end
 
 -- Run `fn` (which makes multiple :Set calls) as ONE batch: per-set messages are
@@ -210,21 +273,35 @@ end
 -- A MAP ONLY (owner 2026-10-15) -- it leaves your waypoint alone; Set is the waypoint.
 -- Coords are zone-pct (0-100). Says what happened either way, so no caller hand-rolls
 -- it and none stays silent (combat and a missing location used to be).
-function HDG.Waypoints:ShowOnMap(mapID, pctX, pctY, title)
-    local ok, reason = self:_doShowOnMap(mapID, pctX, pctY, title)
+-- stepNum: a Decor Quests step's pin, a disc with its number; nil pins a vendor.
+function HDG.Waypoints:ShowOnMap(mapID, pctX, pctY, title, stepNum)
+    local ok, reason = self:_doShowOnMap(mapID, pctX, pctY, title, stepNum)
     if ok then
-        successLine("Showing " .. (title or "vendor") .. " on the map.")
+        successLine(L("WPT_SHOWING"):format(title or L("WPT_NAME_VENDOR")))
     else
         self:PrintResult(false, reason)
     end
     return ok, reason
 end
 
-function HDG.Waypoints:_doShowOnMap(mapID, pctX, pctY, title)
+-- The Quest Tracker's place line: a waypoint at the spot AND the map open on it with HDG's
+-- pin, in one click (owner 10-30: the map alone isn't much help there). Every other Map
+-- stays map only. One chat line, the waypoint's; a map that can't open says why instead.
+-- faction: Set's, for its other-faction warning (a done decor's vendor).
+function HDG.Waypoints:SetAndShow(mapID, pctX, pctY, title, stepNum, faction)
+    local ok, reason = self:_doShowOnMap(mapID, pctX, pctY, title, stepNum)
+    if not ok then
+        self:PrintResult(false, reason)
+        return ok, reason
+    end
+    return self:Set(mapID, pctX, pctY, title, faction)
+end
+
+function HDG.Waypoints:_doShowOnMap(mapID, pctX, pctY, title, stepNum)
     if InCombatLockdown() then return false, "combat" end
     local uiMapID, mapX, mapY = HDG.Waypoints.ZonePctToMap(mapID, pctX, pctY)
     if not uiMapID then return false, "no_map" end
-    HDG.Waypoints:AddMapPin(uiMapID, mapX, mapY, title or "Vendor")
+    HDG.Waypoints:AddMapPin(uiMapID, mapX, mapY, title or L("WPT_PIN_VENDOR"), stepNum)
     HDG.Waypoints:OpenWorldMapAt(uiMapID)
     return true, "native"
 end
@@ -239,11 +316,11 @@ function HDG.Waypoints:MapAll(vendors)
     end
     local placed, firstMapID = self:SetMultiple(vendors)
     if placed == 0 then
-        warnLine("No vendor in this list has a known location yet.")
+        warnLine(L("WPT_MAP_ALL_NONE"))
         return 0
     end
     self:OpenWorldMapAt(firstMapID)
-    successLine(string.format("Mapped %d vendor%s.", placed, placed == 1 and "" or "s"))
+    successLine(L(placed == 1 and "WPT_MAPPED_ONE" or "WPT_MAPPED"):format(placed))
     return placed
 end
 
@@ -253,46 +330,42 @@ end
 
 -- Failure lines serve every button (Map and Wpt share the reasons; trainers and
 -- Shopping too), so they name the obstacle rather than the action or the target.
+-- Values are locale keys, looked up when the line prints.
 local FAIL_LINE = {
-    combat          = "Can't do that in combat -- try again after the fight.",
-    no_tomtom       = "TomTom is not installed. Set Waypoint Provider to Auto or Blizzard in HDG settings.",
-    unsupported_map = "The game doesn't allow waypoints in this zone.",
-    no_map          = "No known location yet.",
+    combat          = "WPT_FAIL_COMBAT",
+    no_tomtom       = "WPT_FAIL_NO_TOMTOM",
+    unsupported_map = "WPT_FAIL_UNSUPPORTED_MAP",
+    not_set         = "WPT_FAIL_NOT_SET",
+    no_map          = "WPT_FAIL_NO_MAP",
 }
+
+-- Opposite-faction vendor warning. A whole line per side: the faction's name changes the
+-- sentence around it in other languages.
+local function _warnOtherFaction(vendorFaction)
+    local playerFaction = UnitFactionGroup("player")
+    if playerFaction == "Alliance" and vendorFaction == "H" then warnLine(L("WPT_ONLY_HORDE")) end
+    if playerFaction == "Horde" and vendorFaction == "A" then warnLine(L("WPT_ONLY_ALLIANCE")) end
+end
 
 function HDG.Waypoints:PrintResult(ok, provider, title, count, vendorFaction)
     if not ok then
         -- Every reason is minted in this file; one without a line is a bug here.
-        warnLine(assert(FAIL_LINE[provider], "Waypoints: no FAIL_LINE for " .. tostring(provider)))
+        warnLine(L(assert(FAIL_LINE[provider], "Waypoints: no FAIL_LINE for " .. tostring(provider))))
         return
     end
     if count and count > 1 then
         if provider == "tomtom" then
-            successLine(string.format("Set %d TomTom waypoints.", count))
+            successLine(L("WPT_SET_TOMTOM_BATCH"):format(count))
         else
             -- Blizzard keeps ONE user waypoint: each Set replaced the last. Say which
             -- one is live rather than promise a route through all of them.
-            successLine(string.format("Waypoint set for %s -- the game tracks one at a time (%d vendors).",
-                title or "the last vendor", count))
+            successLine(L("WPT_SET_BATCH"):format(title or L("WPT_NAME_LAST_VENDOR"), count))
         end
     else
-        local name = title or "vendor"
-        if provider == "tomtom" then
-            successLine("TomTom waypoint set for " .. name)
-        else
-            successLine("Waypoint set for " .. name)
-        end
+        local name = title or L("WPT_NAME_VENDOR")
+        successLine(L(provider == "tomtom" and "WPT_SET_TOMTOM" or "WPT_SET"):format(name))
     end
-    -- Opposite-faction vendor warning
-    if vendorFaction and vendorFaction ~= "N" then
-        local playerFaction = UnitFactionGroup("player")
-        local vendorIsAlliance = vendorFaction == "A"
-        local vendorIsHorde = vendorFaction == "H"
-        if (playerFaction == "Alliance" and vendorIsHorde) or (playerFaction == "Horde" and vendorIsAlliance) then
-            local label = vendorIsAlliance and "Alliance" or "Horde"
-            warnLine("Note: This is a " .. label .. "-only vendor.")
-        end
-    end
+    if vendorFaction and vendorFaction ~= "N" then _warnOtherFaction(vendorFaction) end
 end
 
 -- ============================================================================
@@ -308,7 +381,7 @@ HDGR_VendorPinMixin = HDGR_VendorPinMixin or {}
 local _mapFrame
 local _pinPool
 local _currentMapID
-local _pendingPins = {}     -- [mapID] = { {mapID,x,y,title}, ... }
+local _pendingPins = {}     -- [mapID] = { {mapID,x,y,title,num}, ... }
 local _mapPinsInitialized = false
 
 local function _getCanvasParent()
@@ -322,21 +395,52 @@ local function _onPinReleased(_, pin)
     pin:OnReleased()
 end
 
+-- A pin is a vendor's (Blizzard's decor-vendor icon) or a Decor Quests step's: the tracker's
+-- disc for the step to head for -- accent ring, filled in the text colour, its number in the
+-- sunken one (review G1). Blizzard's quest "!" read as a quest on offer there (owner 10-29).
+local PIN_SIZE, PIN_DISC = 20, 16   -- the ring, and the disc in it (the tracker's 26 / 22)
+local VENDOR_ATLAS = "housing-decor-vendor_32"
+
+local function _pinDiscTexture(pin, layer, size, token)
+    local tex = pin:CreateTexture(nil, layer)
+    tex:SetPoint("CENTER")
+    tex:SetSize(size, size)
+    tex:SetTexture("Interface\\Buttons\\WHITE8X8")
+    HDG.UI.CircleMask(tex)
+    HDG.UI.ToneTexture(tex, token)
+    return tex
+end
+
 function HDGR_VendorPinMixin:OnLoad()
     self:SetFrameStrata("HIGH")  -- must be HIGH; canvas default renders behind Blizzard UI
-    self:SetSize(20, 20)
+    self:SetSize(PIN_SIZE, PIN_SIZE)
     self:EnableMouse(true)
     -- Frame not Button: Button template is wrong for pool-acquire semantics;
     -- RegisterForClicks is Button-only and crashed on first acquire (removed).
     -- Click routes via OnMouseUp -> self:OnClick (wired in pool createFunc).
     self.icon = self:CreateTexture(nil, "ARTWORK")
     self.icon:SetAllPoints()
-    self.icon:SetAtlas("housing-decor-vendor_32")
+    self.icon:SetAtlas(VENDOR_ATLAS)
+    self._ring = _pinDiscTexture(self, "BACKGROUND", PIN_SIZE, "semantic.accent")
+    self._fill = _pinDiscTexture(self, "BORDER", PIN_DISC, "text.primary")
+    self._num = HDG.UI.RowText(self, "caption", "Text", "CENTER")
+    self._num:SetPoint("CENTER")
+end
+
+-- The vendor's icon, or a step's disc and number.
+function HDGR_VendorPinMixin:PaintFace(num)
+    local disc = num ~= nil
+    self.icon:SetShown(not disc)
+    self._ring:SetShown(disc)
+    self._fill:SetShown(disc)
+    self._num:SetShown(disc)
+    if disc then self._num:SetText(HDG.Theme:ColorCode("surface.sunken") .. num .. "|r") end
 end
 
 function HDGR_VendorPinMixin:OnAcquired(data)
     self:SetFrameStrata("HIGH")  -- re-stamp on every acquire (recycled pins may have been touched)
     self.data = data
+    self:PaintFace(data.num)
     self._x, self._y = data.x, data.y
     self:ApplyPosition()
     self:Show()
@@ -400,14 +504,15 @@ end
 
 -- ---- Public API ----------------------------------------------------------
 
-function HDG.Waypoints:AddMapPin(mapID, x, y, title)
+-- stepNum: a Decor Quests step's disc (nil for a vendor, every other Map's).
+function HDG.Waypoints:AddMapPin(mapID, x, y, title, stepNum)
     _pendingPins[mapID] = _pendingPins[mapID] or {}
     -- Map on the same vendor twice used to stack a second pin on the first.
     for _, p in ipairs(_pendingPins[mapID]) do
         if p.x == x and p.y == y and p.title == title then return end
     end
     table.insert(_pendingPins[mapID], {
-        mapID = mapID, x = x, y = y, title = title,
+        mapID = mapID, x = x, y = y, title = title, num = stepNum,
     })
     if _mapFrame and WorldMapFrame and WorldMapFrame:IsShown()
        and WorldMapFrame:GetMapID() == mapID then
@@ -426,7 +531,7 @@ function HDG.Waypoints:SetMultiple(vendors)
     for _, v in ipairs(vendors) do
         local uiMapID, mapX, mapY = HDG.Waypoints.ZonePctToMap(v.mapID, v.x, v.y)
         if uiMapID then
-            HDG.Waypoints:AddMapPin(uiMapID, mapX, mapY, v.name or "Vendor")
+            HDG.Waypoints:AddMapPin(uiMapID, mapX, mapY, v.name or L("WPT_PIN_VENDOR"))
             placed = placed + 1
             firstMapID = firstMapID or uiMapID
         end
@@ -434,9 +539,26 @@ function HDG.Waypoints:SetMultiple(vendors)
     return placed, firstMapID
 end
 
+-- The X by Find Decor's, Recipe Sources' and Decor Quests' search boxes.
 function HDG.Waypoints:ClearAllMapPins()
     wipe(_pendingPins)
     if _pinPool then _pinPool:ReleaseAll() end
+    HDG.Log:Info("waypoints_user", L("WPT_PINS_CLEARED"))
+end
+
+-- Drop Decor Quests' step pins (the numbered discs) and keep the vendor pins. Returns how
+-- many it dropped.
+function HDG.Waypoints:ClearStepPins()
+    local dropped = 0
+    for mapID, list in pairs(_pendingPins) do
+        local keep = {}
+        for _, p in ipairs(list) do
+            if p.num then dropped = dropped + 1 else keep[#keep + 1] = p end
+        end
+        _pendingPins[mapID] = keep[1] and keep or nil   -- an existing key: clearing it mid-pairs is allowed
+    end
+    if dropped > 0 and _mapFrame and WorldMapFrame:IsShown() then _refreshAll() end
+    return dropped
 end
 
 -- ---- Init ----------------------------------------------------------------
@@ -456,9 +578,10 @@ function HDG.Waypoints:InitMapPins()
     -- the pool ignores any return value; second-frame pattern means OnReleased=nil,
     -- ReleaseAll crashes on first pin).
     local _vendorPinTooltipDef = function(self)
+        local d = self.data
         return {
-            title      = self.data and self.data.title or "Vendor",
-            extraLines = { { text = "Click to navigate", r = 0.78, g = 0.78, b = 0.78 } },
+            title      = d.num and L("WPT_PIN_STEP"):format(d.num, d.title) or d.title,   -- exception(optional): only a step's pin carries num
+            extraLines = { { text = L("WPT_PIN_CLICK"), r = 0.78, g = 0.78, b = 0.78 } },
         }
     end
 
@@ -484,9 +607,18 @@ function HDG.Waypoints:InitMapPins()
             C_Timer.After(0.1, function() _refreshWhenReady(mapID, attempts + 1) end)
         end
     end
+    -- Every map canvas fires MapSet (the zone map, the hybrid minimap, the flight map, the
+    -- House Finder); only the world map's own one redraws, or another canvas's map wipes our
+    -- pins. The world map sets its mapID before it fires, so its own pass this check.
     EventRegistry:RegisterCallback("MapCanvas.MapSet", function(_, mapID)
+        if mapID ~= WorldMapFrame:GetMapID() then return end
         _refreshWhenReady(mapID)
     end, _mapFrame)
+    -- Reopening on the map it last showed fires no MapSet (SetMapID skips an unchanged map),
+    -- so redraw on every open: a Map clicked, or Stop tracking pressed, while it was closed
+    -- (checklist b-next-button, 10-30: the waypoint set, no disc). No mapID: the map is read
+    -- when it draws, so waiting on the canvas never draws the zone a Map has since moved it off.
+    WorldMapFrame:HookScript("OnShow", function() _refreshWhenReady() end)
 
     hooksecurefunc(WorldMapFrame, "OnFrameSizeChanged", _onResize)
     -- Zoom: react to Blizzard's canvas scale-change EVENT (taint-preserving hook),

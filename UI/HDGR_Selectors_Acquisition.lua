@@ -38,119 +38,121 @@ end
 -- countLabel composes both. Plus master/detail selectors for the right
 -- panel: acq.selectedNpcID + acq.selected.* flat selectors per field.
 
--- Master vendor list. Reads HousingCatalogObserver; joins with VendorAugment
--- for coords / faction / expansion.
+-- Master vendor list: one row per byVendor (name, zone), joined with VendorAugment
+-- for location, allegiance and expansion, plus the vendors who sell only recipes.
 --
--- `faction` and `reps` are DIFFERENT axes:
---   faction = vendor's allegiance (A/H/N) from VendorAugment, or "N" default.
---   reps    = set of rep faction NAMES that gate items this vendor sells.
---             Built from catalog row.factionGate per item -- O(1) at filter
---             time by caching on the vendor record.
+-- `side` and `reps` are DIFFERENT axes:
+--   side = vendor's allegiance (A/H/N) from VendorAugment, or "N" default; `faction`
+--          is its label. Named as the catalog's vendor records name it, so one
+--          Waypoint path serves every tab (UI.WaypointToVendor).
+--   reps = set of rep faction NAMES that gate items this vendor sells.
+--          Built from catalog row.factionGate per item -- O(1) at filter
+--          time by caching on the vendor record.
 --
 -- canWaypoint = the vendor has a location (VendorRank.HasLocation). Vendors known
 -- only by name, and new ones with no coords yet, still appear with canWaypoint=false.
 -- Reads session.resolvers.catalog.tick so the list rebuilds on each sweep.
 local FACTION_LABEL = { A = "Alliance", H = "Horde", N = "Neutral" }
+
+-- The rep factions gating any item this vendor sells (the Reputation filter's axis).
+local function _vendorReps(catalogVendor)
+    local reps = {}
+    for _, itemID in ipairs(catalogVendor.items) do
+        local gate = HDG.HousingCatalogObserver:GetRow(itemID).factionGate
+        if gate and gate.factionName ~= "" then  -- exception(nullable): only a rep-gated item has a factionGate
+            reps[gate.factionName] = true
+        end
+    end
+    return reps
+end
+
+-- What VendorAugment knows of a vendor: where it stands, its side, expansion and
+-- curated note. Its zone is the display one: a curated sub-zone or city
+-- ("Dazar'alor") where the catalog ships the parent map ("Zuldazar").
+local function _stampVendorAugment(row, meta)
+    row.zone        = meta.zone
+    row.mapID       = meta.mapID
+    row.x, row.y    = meta.x, meta.y   -- nil for a vendor new to the game: a map, no coords yet
+    row.side        = meta.faction
+    row.faction     = FACTION_LABEL[meta.faction]
+    row.expansion   = meta.exp
+    row.note        = meta.note   -- a curated endeavor/vendor note, on some vendors only
+    row.canWaypoint = HDG.VendorRank.HasLocation(meta.mapID, meta.x, meta.y)
+end
+
+-- One catalog vendor's row. catalogZone stays the catalog's zone string: it is
+-- the key into byVendor for the click -> stamp -> lookup round-trip, and diverges
+-- from the display zone for ~10-20 vendors. ResolveName picks the npcID per
+-- (name, zone): ~9 vendor names stand in several zones, one row each.
+local function _catalogVendorRow(catalogVendor)
+    local npcID = HDG.StaticData.VendorAugment:ResolveName(catalogVendor.name, catalogVendor.zone)
+    local row = {
+        npcID = npcID, name = catalogVendor.name,
+        zone = catalogVendor.zone, catalogZone = catalogVendor.zone,
+        side = "N", faction = FACTION_LABEL.N, canWaypoint = false,
+        itemCount = #catalogVendor.items, recipeCount = 0, reps = _vendorReps(catalogVendor),
+    }
+    if npcID then  -- exception(nullable): a name VendorAugment cannot resolve (and the "World Vendors" groupings) has no npcID
+        _stampVendorAugment(row, HDG.StaticData.VendorAugment:Get(npcID))
+    end
+    return row
+end
+
+-- One row per npcID. The catalog sometimes lists ONE vendor under several zone
+-- strings (Gina Mudclaw -> "Timeless Isle" + "Valley of the Four Winds"; only
+-- Valley is real): both resolve to one npcID, and the mislabeled one would be a
+-- phantom no click can select. The row whose catalog zone IS its resolved
+-- location wins. `seen` maps npcID -> list index.
+local function _addVendorRow(list, seen, row)
+    local prev = row.npcID and seen[row.npcID]  -- exception(nullable): npcID-less rows never collide
+    if not prev then
+        list[#list + 1] = row
+        if row.npcID then seen[row.npcID] = #list end
+    elseif row.catalogZone == row.zone and list[prev].catalogZone ~= row.zone then
+        list[prev] = row
+    end
+end
+
+-- A vendor who sells recipes and no decor, known to VendorAugment alone.
+local function _recipeOnlyVendorRow(npcID, meta, recipeCount)
+    local row = { npcID = npcID, name = meta.name, catalogZone = meta.zone,
+                  itemCount = 0, recipeCount = recipeCount, reps = {} }
+    _stampVendorAugment(row, meta)
+    return row
+end
+
+-- byVendor only knows DECOR sellers, so recipe-only vendors (Lyrendal, Construct
+-- V'anore, the Ashran profession vendors) would be invisible. Stamp recipeCount
+-- on the catalog vendors that also sell recipes; add the recipe-only ones.
+local function _unionRecipeVendors(list, seen)
+    for npcID, count in pairs(HDG.StaticData.RecipeSources:VendorCounts()) do
+        local meta = HDG.StaticData.VendorAugment:Get(npcID)
+        if seen[npcID] then
+            list[seen[npcID]].recipeCount = count
+        elseif meta then  -- exception(nullable): a recipe vendor VendorAugment lacks is skipped; RecipeSources:VendorAugmentGaps warns it once after the scan
+            list[#list + 1] = _recipeOnlyVendorRow(npcID, meta, count)
+        end
+    end
+end
+
+-- pairs() yields byVendor in undefined order: name then zone gives a deterministic
+-- display and stable scrollbox row identity.
+local function _byNameThenZone(a, b)
+    if a.name ~= b.name then return a.name < b.name end
+    return a.zone < b.zone
+end
+
 Selectors:Register("acq.allVendors", {
     memoized = true,  -- perf: base vendor walk; called transitively ~1000x/session
     reads = {"session.resolvers.staticData.tick",  "session.resolvers.catalog.tick" },
     fn = function()
         if not HDG.HousingCatalogObserver:IsReady() then return {} end
-        -- Iterate byVendor entries directly (one per (name, zone) composite
-        -- key). Catalog ships ~9 vendor names that exist in multiple zones --
-        -- each emits its own row here so the UI shows them as separate
-        -- vendors (e.g., "High Tides" Ren at Founder's Point vs Razorwind
-        -- Shores). VendorAugment.ResolveName(name, zone) gives the matching
-        -- npcID per row; meta gives coords / faction.
-        local list  = {}
-        local seen  = {}  -- npcID -> list index (recipeCount stamp + recipe-vendor dedup)
+        local list, seen = {}, {}
         for _, catalogVendor in pairs(HDG.HousingCatalogObserver.byVendor) do
-            -- catalogVendor = { name, zone, items, faction, standing }
-            local name = catalogVendor.name
-            local zone = catalogVendor.zone
-            local npcID = HDG.StaticData.VendorAugment:ResolveName(name, zone)
-            local meta  = npcID and HDG.StaticData.VendorAugment:Get(npcID) or nil
-            local reps = {}
-            for _, itemID in ipairs(catalogVendor.items) do
-                local row = HDG.HousingCatalogObserver:GetRow(itemID)
-                if row and row.factionGate and row.factionGate.factionName
-                   and row.factionGate.factionName ~= "" then
-                    reps[row.factionGate.factionName] = true
-                end
-            end
-            local factionRaw = (meta and meta.faction) or "N"
-            local metaZone = meta and meta.zone
-            local row = {
-                npcID      = npcID,
-                name       = name,
-                -- Two zones: display (curated VendorAugment when known --
-                -- e.g., "Dazar'alor" instead of catalog's broader "Zuldazar")
-                -- and catalogZone (the authoritative key into byVendor, used
-                -- for the click->stamp->lookup round-trip). They diverge for
-                -- ~10-20 vendors where VendorAugment lists a sub-zone /
-                -- city while catalog ships the parent map.
-                zone       = metaZone or zone,
-                catalogZone = zone,
-                mapID      = meta and meta.mapID,
-                x          = meta and meta.x,
-                y          = meta and meta.y,
-                faction    = FACTION_LABEL[factionRaw] or factionRaw,
-                factionRaw = factionRaw,
-                expansion  = meta and meta.expansion,
-                note       = meta and meta.note,   -- exception(nullable): curated endeavor/vendor note; VendorAugment lookup can miss
-                itemCount  = #catalogVendor.items,
-                recipeCount = 0,
-                reps       = reps,
-            }
-            row.canWaypoint = HDG.VendorRank.HasLocation(row.mapID, row.x, row.y)
-            -- De-dupe by npcID. The catalog sometimes lists ONE vendor under
-            -- multiple zone strings (Gina Mudclaw -> "Timeless Isle" + "Valley of
-            -- the Four Winds"; only Valley is real) -- both resolve to one npcID,
-            -- leaving the bad one as a non-selectable phantom. Keep the row whose
-            -- catalogZone matches the resolved location; drop the mislabeled other.
-            local prev = npcID and seen[npcID]
-            if prev then
-                if zone == metaZone and list[prev].catalogZone ~= metaZone then
-                    list[prev] = row   -- the correctly-zoned row wins
-                end
-            else
-                list[#list + 1] = row
-                if npcID then seen[npcID] = #list end
-            end
+            _addVendorRow(list, seen, _catalogVendorRow(catalogVendor))
         end
-
-        -- Union recipe vendors. byVendor only knows DECOR sellers, so recipe-only
-        -- vendors (Lyrendal, Construct V'anore, the Ashran profession vendors -- 0
-        -- decor) are invisible above. Stamp recipeCount on catalog vendors that also
-        -- sell recipes; add the recipe-only ones from VendorAugment (which covers them).
-        for npcID, count in pairs(HDG.StaticData.RecipeSources:VendorCounts()) do
-            local idx = seen[npcID]
-            if idx then
-                list[idx].recipeCount = count
-            else
-                local meta = HDG.StaticData.VendorAugment:Get(npcID)
-                if meta then  -- exception(boundary): recipe vendor must be in (generated) VendorAugment
-                    local factionRaw = meta.faction or "N"
-                    list[#list + 1] = {
-                        npcID = npcID, name = meta.name,
-                        zone = meta.zone, catalogZone = meta.zone,
-                        mapID = meta.mapID, x = meta.x, y = meta.y,
-                        faction = FACTION_LABEL[factionRaw] or factionRaw,
-                        factionRaw = factionRaw, expansion = meta.expansion,
-                        itemCount = 0, recipeCount = count, reps = {},
-                        canWaypoint = HDG.VendorRank.HasLocation(meta.mapID, meta.x, meta.y),
-                    }
-                end
-                -- Missing from VendorAugment: skipped. The gap is warned once by
-                -- RecipeSources:VendorAugmentGaps after the recipe scan (selectors stay pure).
-            end
-        end
-        -- pairs() yields entries in undefined order -- sort by name then zone
-        -- for deterministic display + stable scrollbox row identity.
-        table.sort(list, function(a, b)
-            if (a.name or "") ~= (b.name or "") then return (a.name or "") < (b.name or "") end
-            return (a.zone or "") < (b.zone or "")
-        end)
+        _unionRecipeVendors(list, seen)
+        table.sort(list, _byNameThenZone)
         return list
     end,
 })
@@ -239,7 +241,7 @@ Selectors:Register("acq.detailTitle", {
         end
         local vendor = Selectors:Call("acq.selectedVendor", state, ctx)
         if not vendor then return "Select a vendor" end
-        local icon = FACTION_ATLAS[vendor.factionRaw or "N"]
+        local icon = FACTION_ATLAS[vendor.side]
         local prefix = icon
             and string.format("|A:%s:14:14|a ", icon)
             or  ""
@@ -290,24 +292,23 @@ Selectors:Register("acq.milestoneText", {
 
 -- Expansion label for the panel header slot, right-aligned beside the
 -- title. Flips per viewMode: item-view -> item.expansion, vendor-view ->
--- vendor.expansion. Lore-colored via HDG.Expansion.GetColorHex (matches
+-- vendor.expansion. Lore-colored via HDG.Expansion.Colored (matches
 -- decorDetailPanel.headerExpansion).
+local function _detailSubject(state, ctx)
+    if Selectors:Call("acq.viewMode", state, ctx) == "item" then
+        return Selectors:Call("acq.selectedItem", state, ctx)
+    end
+    return Selectors:Call("acq.selectedVendor", state, ctx)
+end
+
 Selectors:Register("acq.detailExpansion", {
     calls = {"acq.viewMode", "acq.selectedItem", "acq.selectedVendor"},
     fn = function(state, ctx)
-        local mode = Selectors:Call("acq.viewMode", state, ctx)
-        local exp
-        if mode == "item" then
-            local item = Selectors:Call("acq.selectedItem", state, ctx)
-            exp = item and item.expansion
-        else
-            local vendor = Selectors:Call("acq.selectedVendor", state, ctx)
-            exp = vendor and vendor.expansion
-        end
-        if not exp or exp == "?" or exp == "" then return "" end
-        local hex = HDG.Expansion.GetColorHex(exp)
-        if not hex then return exp end
-        return hex .. exp .. "|r"
+        local subject = _detailSubject(state, ctx)
+        if not subject then return "" end  -- exception(nullable): nothing selected yet
+        local exp = subject.expansion
+        if not exp or exp == "?" or exp == "" then return "" end  -- exception(nullable): an untagged item, or a vendor VendorAugment lacks
+        return HDG.Expansion.Colored(exp)   -- a decor tagged with two shows both
     end,
 })
 
@@ -325,7 +326,7 @@ Selectors:Register("acq.preset", {
 -- Per-preset boolean selectors. Drive chip `active` bindings so the
 -- currently-selected preset paints highlighted. Generated from
 -- HDG.Constants.ACQ_PRESETS.
-for _, entry in ipairs(HDG.Constants.ACQ_PRESETS or {}) do
+for _, entry in ipairs(HDG.Constants.ACQ_PRESETS) do
     local captured = entry.value
     Selectors:Register("acq.preset.active_" .. captured, {
         calls = {"acq.preset"},
@@ -344,9 +345,10 @@ local ENDEAVOR_CURRENCY = HDG.Constants.COUPON_CURRENCY_ID
 --   isGoldOnly    = has cost AND every entry is gold
 -- Reads baked costEntries from the observer.
 local function _itemCostFlags(itemID)
-    local row = itemID and HDG.HousingCatalogObserver:GetRow(itemID)
-    local entries = row and row.costEntries
-    if not (entries and #entries > 0) then return false, false end
+    local row = HDG.HousingCatalogObserver:GetRow(itemID)
+    if not row then return false, false end  -- exception(nullable): itemID outside the catalog
+    local entries = row.costEntries
+    if #entries == 0 then return false, false end
     local GOLD = HDG.Constants.CURRENCY_GOLD
     local endeavor, allGold = false, true
     for _, e in ipairs(entries) do
@@ -465,7 +467,7 @@ Selectors:Register("acq.missingOnly", {
 -- Curried Missing predicate: toggle off -> pass-all; on -> uncollected-only.
 -- Mirrors the old matchesPreset "missing" branch (reads owned set live).
 Selectors:Register("acq.matchesMissing", {
-    reads = {"account.collection.ownedDecorIDs", "session.resolvers.catalog.tick"},
+    reads = {"session.resolvers.catalog.tick"},
     calls = {"acq.missingOnly", "decor.isCollected"},
     fn = function(state, ctx)
         if not Selectors:Call("acq.missingOnly", state, ctx) then
@@ -490,7 +492,7 @@ Selectors:Register("acq.sourceMenuItems", {
     memoized = true,
     fn = function()
         local items = {}
-        for _, opt in ipairs(HDG.Constants.ACQ_SOURCES or {}) do
+        for _, opt in ipairs(HDG.Constants.ACQ_SOURCES) do
             items[#items + 1] = { kind = "checkbox", value = opt.value, text = opt.label,
                 isAll = opt.value == "all" }
         end
@@ -539,27 +541,32 @@ Selectors:Register("acq.matchesSource", {
     end,
 })
 
--- Unified item-intrinsic filter predicate (source + expansion + preset),
--- reused by BOTH view modes: item mode tests it per item.itemID; vendor mode
--- tests "sells >=1 item passing it" (see _vendorSellsMatchingItem). Returns
+-- Unified item-intrinsic filter predicate (source + expansion + preset, and the
+-- Hide PvP decor setting), reused by BOTH view modes: item mode tests it per
+-- item.itemID; vendor mode tests "sells >=1 item passing it" (see _vendorSellsMatchingItem). Returns
 -- fn(itemID) -> bool, composing the existing matchesSource + matchesPreset
 -- closures (which read the catalog row by itemID) plus an expansion check via
--- the catalog's GetExpansionForItem. sweepGeneration read covers the GetRow /
+-- the catalog's GetExpansionForItem: an item tagged with two expansions passes
+-- either one's filter (owner ruling 2026-10-31). sweepGeneration read covers the GetRow /
 -- GetExpansionForItem observer-cache lookups; matchesPreset transitively
 -- carries decor.isCollected (the "missing" signal).
 Selectors:Register("acq.matchesItemFilters", {
-    calls = {"acq.matchesSource", "acq.matchesPreset", "acq.matchesMissing", "acq.expansionFilter"},
+    calls = {"acq.matchesSource", "acq.matchesPreset", "acq.matchesMissing", "acq.expansionFilter",
+             "decor.isHiddenPvp"},
     reads = {"session.resolvers.catalog.tick"},
     fn = function(state, ctx)
         local matchSource  = Selectors:Call("acq.matchesSource",   state, ctx)
         local matchPreset  = Selectors:Call("acq.matchesPreset",   state, ctx)
         local matchMissing = Selectors:Call("acq.matchesMissing",  state, ctx)
+        local isHiddenPvp  = Selectors:Call("decor.isHiddenPvp",   state, ctx)
         local expSet = Selectors:Call("acq.expansionFilter", state, ctx)
         local hasExp = next(expSet) ~= nil
         return function(itemID)
             if not itemID then return false end
-            if hasExp and not expSet[HDG.HousingCatalogObserver:GetExpansionForItem(itemID)] then
-                return false
+            if isHiddenPvp(itemID) then return false end
+            if hasExp then
+                local exp = HDG.HousingCatalogObserver:GetExpansionForItem(itemID)
+                if not (exp and HDG.Expansion.Has(exp, expSet)) then return false end   -- exception(nullable): a decor tagged with no expansion matches no expansion filter
             end
             if matchSource  and not matchSource(itemID)  then return false end
             if matchPreset  and not matchPreset(itemID)  then return false end
@@ -576,40 +583,43 @@ local function _matchesNeedle(row, needle)
     local recipe, fv = row.recipe, row.vendors[1]
     local exp = HDG.HousingCatalogObserver:GetExpansionForItem(row.itemID)
     return row.name:lower():find(needle, 1, true)
-        or (recipe and recipe.profession:lower():find(needle, 1, true))
+        or (recipe and recipe.profession:lower():find(needle, 1, true))   -- exception(nullable): most decor is not crafted
         or (exp and exp:lower():find(needle, 1, true))   -- exception(nullable): a row with no expansion tag
-        or (fv and fv.name:lower():find(needle, 1, true))
+        or (fv and fv.name:lower():find(needle, 1, true))   -- exception(nullable): a vendorless row has no first vendor
+end
+
+-- One vendor of an item on the zone / faction axes. Its entry already carries
+-- VendorAugment's display zone and side (the bake's _resolveVendorNpc); a vendor
+-- VendorAugment cannot resolve keeps the catalog zone and has no side, which reads
+-- as Neutral, as in acq.allVendors.
+local function _vendorOnAxes(v, f)
+    if f.hasZone and not f.zoneSet[v.zone] then return false end
+    return not f.hasFaction or f.factionSet[FACTION_LABEL[v.side or "N"]] == true  -- exception(nullable): an unresolved vendor has no side
 end
 
 -- Vendor-axis filters (rep / zone / faction) in ITEM mode, by walking the
 -- item's baked row.vendors (the existing item->vendor index -- no new index).
 -- Rep is item-intrinsic (catalog factionGate; the vendor "reps" set is DERIVED
--- from it). Zone/faction pass if ANY vendor matches -- display zone +
--- FACTION_LABEL'd faction resolved via the baked npcID, mirroring allVendors.
--- Vendor mode filters the vendor list itself, separately.
-local function _passesVendorAxes(item, hasRep, hasZone, hasFaction, repSet, zoneSet, factionSet, Aug)
-    local catRow = HDG.HousingCatalogObserver:GetRow(item.itemID)  -- exception(boundary): GetRow nil pre-bake
-    if hasRep then
-        local fg = catRow and catRow.factionGate
-        if not (fg and fg.factionName and repSet[fg.factionName]) then return false end
+-- from it). Zone/faction pass if ANY vendor matches. Vendor mode filters the
+-- vendor list itself, separately.
+local function _passesVendorAxes(item, f)
+    local catRow = HDG.HousingCatalogObserver:GetRow(item.itemID)
+    if f.hasRep then
+        local fg = catRow.factionGate
+        if not (fg and f.repSet[fg.factionName]) then return false end  -- exception(nullable): only a rep-gated item has a factionGate
     end
-    if hasZone or hasFaction then
-        for _, v in ipairs(catRow and catRow.vendors or {}) do  -- exception(boundary): row.vendors absent pre-bake
-            local meta   = v.npcID and Aug:Get(v.npcID)
-            local zoneOK = (not hasZone)    or zoneSet[((meta and meta.zone) or v.zone)] == true
-            local facOK  = (not hasFaction) or factionSet[(FACTION_LABEL[(meta and meta.faction) or "N"] or "Neutral")] == true
-            if zoneOK and facOK then return true end
-        end
-        return false
+    if not (f.hasZone or f.hasFaction) then return true end
+    for _, v in ipairs(catRow.vendors) do
+        if _vendorOnAxes(v, f) then return true end
     end
-    return true
+    return false
 end
 
 -- First REP source tag carrying a live faction + requirement code, or nil.
 -- Shared by the row-list chip-dim stamp, the by-vendor item list, and the
 -- detail source line. row nil / no sourceTags pre-bake -> nil.
 local function _findRepSourceTag(row)
-    if not (row and row.sourceTags) then return nil end  -- exception(boundary): GetRow nil + sourceTags absent pre-bake
+    if not row.sourceTags then return nil end  -- exception(nullable): a row with no source signal has no tags
     for _, t in ipairs(row.sourceTags) do
         if t.kind == "REP" and t.factionID and t.requiredCode then return t end
     end
@@ -622,7 +632,7 @@ local function _repMetForRow(row)
     local t = _findRepSourceTag(row)
     if not t then return nil end
     local prog = HDG.RepObserver:GetProgress(t.factionID, t.requiredCode)
-    return (prog and prog.met) == true
+    return (prog and prog.met) == true  -- exception(nullable): GetProgress is nil for a faction the client cannot read
 end
 
 -- Find Decor list rows are reused across rebuilds, one table per itemID, for the
@@ -635,8 +645,7 @@ end
 -- catalog row.
 local _rowsByItemID = setmetatable({}, { __mode = "v" })
 -- expansion and profession are read on demand: only the visible rows paint them.
--- The expansion is GetExpansionForItem's, the one the Expansion filter tests, not
--- the row's stored tag -- an item with two Expansion tags reads differently in the two.
+-- The expansion is GetExpansionForItem's, every one the item is tagged with.
 local ROW_META = { __index = function(row, key)
     local item = row._item
     if key == "expansion" then
@@ -692,6 +701,30 @@ local function _acqItemRow(item, isCollected, state)
     return row
 end
 
+-- The Find Decor item filters, read once per list build.
+local function _readItemFilters(state, ctx)
+    local q = Selectors:Call("acq.filterQuery", state, ctx)
+    local f = {
+        needle        = q ~= "" and q:lower() or nil,
+        matchItem     = Selectors:Call("acq.matchesItemFilters", state, ctx),
+        matchCurrency = Selectors:Call("acq.matchesCurrency", state, ctx),
+        repSet        = Selectors:Call("acq.repFilter", state, ctx),
+        zoneSet       = Selectors:Call("acq.zoneFilter", state, ctx),
+        factionSet    = Selectors:Call("acq.factionFilter", state, ctx),
+    }
+    f.hasRep, f.hasZone, f.hasFaction = next(f.repSet) ~= nil, next(f.zoneSet) ~= nil, next(f.factionSet) ~= nil
+    return f
+end
+
+-- Search, then the source / expansion / preset filters, then currency, then the
+-- vendor axes.
+local function _itemPasses(item, f)
+    if f.needle and not _matchesNeedle(item, f.needle) then return false end
+    if not (f.matchItem(item.itemID) and f.matchCurrency(item)) then return false end
+    if not (f.hasRep or f.hasZone or f.hasFaction) then return true end
+    return _passesVendorAxes(item, f)
+end
+
 -- Filtered items: search applies to name + profession + expansion + sourceName;
 -- source + expansion + preset compose on top via acq.matchesItemFilters.
 Selectors:Register("acq.items", {
@@ -703,41 +736,18 @@ Selectors:Register("acq.items", {
     -- Status ticks + account.questCompletions + rep tick: re-stamp questDone/achEarned/
     -- repMet (the row-list chip-dim signals) when completion or rep changes. Gate the
     -- impure IsComplete/IsEarned/GetProgress calls below -- same boundary as the detail line.
-    -- sweepGeneration: the rep-axis GetRow(itemID).factionGate lookup below reads the bake.
-    -- staticData: the zone/faction axes read VendorAugment.
+    -- catalog: the rep-axis GetRow(itemID).factionGate lookup below reads the bake.
+    -- staticData: the zone/faction axes read the VendorAugment zone and side the bake stamped.
     reads = {"session.resolvers.questStatus.tick", "session.resolvers.achievementStatus.tick", "account.questCompletions",
              "session.resolvers.rep.tick", "session.resolvers.catalog.tick", "session.resolvers.staticData.tick"},
     fn = function(state, ctx)
-        local all       = Selectors:Call("decor.allItems",         state, ctx)
-        local q         = Selectors:Call("acq.filterQuery",        state, ctx)
-        local matchItem = Selectors:Call("acq.matchesItemFilters", state, ctx)
-        local matchCurrency = Selectors:Call("acq.matchesCurrency", state, ctx)
-        local isColl    = Selectors:Call("decor.isCollected",      state, ctx)
-        local repSet     = Selectors:Call("acq.repFilter",     state, ctx)
-        local zoneSet    = Selectors:Call("acq.zoneFilter",    state, ctx)
-        local factionSet = Selectors:Call("acq.factionFilter", state, ctx)
-        local hasRep     = next(repSet)     ~= nil
-        local hasZone    = next(zoneSet)    ~= nil
-        local hasFaction = next(factionSet) ~= nil
-        local Aug        = HDG.StaticData.VendorAugment
-        local needle     = q ~= "" and q:lower() or nil
+        local f      = _readItemFilters(state, ctx)
+        local isColl = Selectors:Call("decor.isCollected", state, ctx)
         local out = {}
-        for _, item in ipairs(all) do
-            local pass = true
-            if needle then
-                pass = _matchesNeedle(item, needle) and true or false
-            end
-            if pass and not matchItem(item.itemID) then pass = false end
-            if pass and not matchCurrency(item) then pass = false end
-            if pass and (hasRep or hasZone or hasFaction) then
-                pass = _passesVendorAxes(item, hasRep, hasZone, hasFaction,
-                                         repSet, zoneSet, factionSet, Aug)
-            end
-            if pass then
-                -- Source chips: row factories call UI.GateChips(ed.itemID,
-                -- questDone, achEarned), which reads row.sourceTags baked at BuildRow.
-                out[#out + 1] = _acqItemRow(item, isColl and isColl(item.itemID) or false, state)
-            end
+        for _, item in ipairs(Selectors:Call("decor.allItems", state, ctx)) do
+            -- Source chips: row factories call UI.GateChips(ed.itemID, questDone,
+            -- achEarned), which reads row.sourceTags baked at BuildRow.
+            if _itemPasses(item, f) then out[#out + 1] = _acqItemRow(item, isColl(item.itemID) == true, state) end
         end
         return out
     end,
@@ -940,7 +950,9 @@ Selectors:Register("acq.currencyMenuItems", {
 local function _soldForAnyOf(row, set)
     if not row then return false end  -- exception(boundary): GetRow nil pre-bake
     if _anyEntryIn(row.costEntries, set) then return true end
-    for _, v in ipairs(row.vendors or {}) do  -- exception(nullable): a vendorless row has no vendors
+    -- No `row.vendors or {}`: a table a vendorless row, every row on each pass (review P8).
+    if not row.vendors then return false end  -- exception(nullable): a vendorless row has no vendors
+    for _, v in ipairs(row.vendors) do
         if v.costEntries and _anyEntryIn(v.costEntries, set) then return true end  -- exception(nullable): priceless vendor block
     end
     return false
@@ -955,6 +967,38 @@ Selectors:Register("acq.matchesCurrency", {
         local set = Selectors:Call("acq.currencyFilter", state, ctx)
         if next(set) == nil then return function() return true end end
         return function(row) return _soldForAnyOf(HDG.HousingCatalogObserver:GetRow(row.itemID), set) end
+    end,
+})
+
+-- ===== PvP decor ==============================================================
+-- What the "Hide PvP decor" setting leaves out: decor any vendor prices in Honor or
+-- Marks of Honor (Constants.PVP_COST_KEYS), read the way the Currency filter reads
+-- prices, so picking Honor there lists the same decor.
+Selectors:Register("decor.pvpItemIDs", {
+    reads    = {"session.resolvers.catalog.tick"},
+    memoized = true,
+    fn = function()
+        local set = {}
+        HDG.HousingCatalogObserver:IterateRows(function(itemID, row)
+            if _soldForAnyOf(row, HDG.Constants.PVP_COST_KEYS) then set[itemID] = true end
+        end)
+        return set
+    end,
+})
+
+Selectors:Register("decor.hidesPvp", {
+    reads = {"account.config.hidePvpDecor"},
+    fn = function(state) return state.account.config.hidePvpDecor end,
+})
+
+-- The setting's one predicate for the Decor, Acquire and Zone Scanner lists:
+-- fn(itemID) -> true when that decor is hidden. Off hides nothing.
+Selectors:Register("decor.isHiddenPvp", {
+    calls = {"decor.hidesPvp", "decor.pvpItemIDs"},
+    fn = function(state, ctx)
+        if not Selectors:Call("decor.hidesPvp", state, ctx) then return function() return false end end
+        local pvp = Selectors:Call("decor.pvpItemIDs", state, ctx)
+        return function(itemID) return pvp[itemID] == true end
     end,
 })
 
@@ -979,7 +1023,6 @@ Selectors:Register("acq.currentZones", {
         local function add(name) if listed[name] then out[name] = true end end
         add(zone.zoneLevelName)
         add(zone.currentZoneName)
-        if zone.currentMapID == 0 then return out end   -- 0 = the game gave no map: no vendors stand on it
         local Aug = HDG.StaticData.VendorAugment
         for _, npcID in ipairs(Aug:GetVendorsByMap(zone.currentMapID) or {}) do  -- exception(nullable): a map with no vendors has no bucket
             add(Aug:Get(npcID).zone)
@@ -1255,7 +1298,7 @@ Selectors:Register("acq.tagPreset", {
     fn = function(state, ctx)
         local v = Selectors:Call("acq.preset", state, ctx)
         if not v then return "" end
-        for _, opt in ipairs(HDG.Constants.ACQ_PRESETS or {}) do
+        for _, opt in ipairs(HDG.Constants.ACQ_PRESETS) do
             if opt.value == v then return tagText("Preset", opt.label) end
         end
         return tagText("Preset", v)
@@ -1276,7 +1319,7 @@ Selectors:Register("acq.tagSource", {
         local set = Selectors:Call("acq.sourceFilter", state, ctx)
         if next(set) == nil then return "" end
         local labels = {}
-        for _, opt in ipairs(HDG.Constants.ACQ_SOURCES or {}) do labels[opt.value] = opt.label end
+        for _, opt in ipairs(HDG.Constants.ACQ_SOURCES) do labels[opt.value] = opt.label end
         return tagText("Source", _joinSet(set, labels))
     end,
 })
@@ -1289,17 +1332,14 @@ Selectors:Register("acq.tagCurrency", {
     end,
 })
 
--- Filtered vendors: AND-join across every axis. Adding a new axis adds
--- one local + one xxxOK guard -- pattern is mechanical, debugging stays
--- legible (one condition per visual filter).
--- Walk catalog items for this vendor; pass if at least one is uncollected.
+-- ===== Shop by Vendor filters (acq.vendors) ==================================
 -- Resolve a vendor record's byVendor entry. byVendor is keyed by the catalog
 -- Zone: line (v.catalogZone); v.zone is the curated DISPLAY zone, which diverges
 -- for ~10-20 vendors (curated sub-zone vs catalog's parent map). Centralised so
 -- NO caller reconstructs the lookup and picks the wrong zone field -- that
 -- divergence silently dropped zone-diverged vendors from filters + allCollected.
 local function _vendorEntry(v)
-    return HDG.HousingCatalogObserver:GetItemsByVendor(v.name, v.catalogZone or v.zone)
+    return HDG.HousingCatalogObserver:GetItemsByVendor(v.name, v.catalogZone)
 end
 
 -- A vendor passes an item-intrinsic filter (source / expansion / preset) if it
@@ -1307,9 +1347,21 @@ end
 -- vendor-mode half of the unified filter model -- ONE item predicate, both views.
 local function _vendorSellsMatchingItem(v, itemPred)
     local catalogVendor = _vendorEntry(v)
-    if not (catalogVendor and catalogVendor.items) then return false end
+    if not catalogVendor then return false end  -- exception(nullable): a recipe-only vendor has no byVendor entry
     for _, itemID in ipairs(catalogVendor.items) do
         if itemPred(itemID) then return true end
+    end
+    return false
+end
+
+-- What the Hide PvP decor setting keeps in vendor mode: a vendor with a recipe, or
+-- with one decor that isn't PvP. Not an item filter: that dropped every vendor with
+-- no decor, which is every recipe-only vendor (caught moving the tests onto the real
+-- observer, 2026-10-31). A vendor with no recipe comes from the catalog's byVendor.
+local function _sellsMoreThanPvp(v, isHiddenPvp)
+    if v.recipeCount > 0 then return true end
+    for _, itemID in ipairs(_vendorEntry(v).items) do
+        if not isHiddenPvp(itemID) then return true end
     end
     return false
 end
@@ -1319,7 +1371,7 @@ end
 -- next vendor -- and that item also passes the item filters (itemPred nil = none).
 local function _vendorSellsFor(v, set, itemPred)
     local catalogVendor = _vendorEntry(v)
-    if not (catalogVendor and catalogVendor.items) then return false end  -- exception(nullable): byVendor lookup can miss
+    if not catalogVendor then return false end  -- exception(nullable): a recipe-only vendor has no byVendor entry
     for _, itemID in ipairs(catalogVendor.items) do
         local row = HDG.HousingCatalogObserver:GetRow(itemID)
         if row and (not itemPred or itemPred(itemID))  -- exception(boundary): GetRow nil pre-bake
@@ -1361,93 +1413,121 @@ local function _vendorMatchesSearch(v, needle)
     return v.zone and v.zone:lower():find(needle, 1, true) and true or false
 end
 
+-- Rep set-intersect: the vendor sells at least one item gated by ANY picked rep.
+local function _vendorHasAnyRep(v, repSet)
+    for r in pairs(repSet) do
+        if v.reps[r] then return true end
+    end
+    return false
+end
+
+-- The axes acq.vendors filters on, read once per evaluation. The vendor's own axes
+-- (search, faction, zone, rep) test the vendor record. The item axes (source /
+-- expansion / preset / Missing) flow through the shared item predicate: a vendor
+-- passes if it sells >=1 catalog item matching ALL of them -- the same logic as Find
+-- by Item, so the achievement / quest presets narrow to empty when no vendor sells
+-- such items. The Recipes preset filters VENDORS (recipeCount) instead, so it and
+-- its Missing stay out of hasItemFilter.
+local function _readVendorFilters(state, ctx)
+    local function call(name) return Selectors:Call(name, state, ctx) end
+    local query, preset, missingOnly = call("acq.filterQuery"), call("acq.preset"), call("acq.missingOnly")
+    local recipesPreset = preset == "recipes"
+    local f = {
+        needle      = query ~= "" and query:lower() or nil,
+        factionSet  = call("acq.factionFilter"),
+        zoneSet     = call("acq.zoneFilter"),
+        repSet      = call("acq.repFilter"),
+        currencySet = call("acq.currencyFilter"),
+        preset = preset, recipesPreset = recipesPreset, missingOnly = missingOnly,
+        hidesPvp    = call("decor.hidesPvp"),
+        hasItemFilter = next(call("acq.sourceFilter")) ~= nil or next(call("acq.expansionFilter")) ~= nil
+            or (preset ~= nil and not recipesPreset) or (missingOnly and not recipesPreset),
+    }
+    f.hasFaction, f.hasZone = next(f.factionSet) ~= nil, next(f.zoneSet) ~= nil
+    f.hasRep, f.hasCurrency = next(f.repSet) ~= nil, next(f.currencySet) ~= nil
+    return f
+end
+
+-- Nothing picked and Hide PvP decor off: acq.vendors is the whole list.
+local function _anyVendorFilterOn(f)
+    return f.needle ~= nil or f.hasFaction or f.hasZone or f.hasRep or f.hasItemFilter
+        or f.recipesPreset or f.hasCurrency or f.hidesPvp
+end
+
+-- What the per-vendor test asks besides the picked sets. The item predicate serves
+-- the currency check too: under Hide PvP, an Honor price on PvP decor doesn't count.
+-- Recipe knowledge is for Recipes + Missing (missing = an unknown recipe).
+local function _addVendorPredicates(f, state, ctx)
+    if f.hasItemFilter or (f.hidesPvp and not f.recipesPreset) then
+        f.itemPred = Selectors:Call("acq.matchesItemFilters", state, ctx)
+    end
+    f.isHiddenPvp = Selectors:Call("decor.isHiddenPvp", state, ctx)
+    if f.recipesPreset and f.missingOnly then
+        f.knowledge = Selectors:Call("recipes.knowledge", state, ctx)
+    end
+end
+
+-- The vendor's own axes: search (name or zone), faction, zone, rep.
+local function _ownAxesOK(v, f)
+    if f.needle and not _vendorMatchesSearch(v, f.needle) then return false end
+    if f.hasFaction and f.factionSet[v.faction] ~= true then return false end
+    if f.hasZone and f.zoneSet[v.zone] ~= true then return false end
+    return not f.hasRep or _vendorHasAnyRep(v, f.repSet)
+end
+
+-- The item axes: the vendor sells >=1 item the item filters pass -- or, under the Rep
+-- preset, a rep-gated RECIPE (the catalog only knows rep-gated decor; recipe gates
+-- live in RecipeSources) -- and, with a Currency pick, >=1 such item at its own price.
+local function _itemAxesOK(v, f)
+    if f.hasItemFilter and not _vendorSellsMatchingItem(v, f.itemPred)
+            and not (f.preset == "reputation" and _vendorHasRepGatedRecipe(v.npcID)) then
+        return false
+    end
+    return not f.hasCurrency or _vendorSellsFor(v, f.currencySet, f.itemPred)
+end
+
+-- The Recipes preset: a vendor selling a recipe; with Missing on, one the account
+-- doesn't know.
+local function _recipePresetOK(v, f)
+    if not f.recipesPreset then return true end
+    if f.missingOnly then return _vendorHasUnknownRecipe(f.knowledge, v.npcID) end
+    return v.recipeCount > 0
+end
+
+-- AND across every axis. Hide PvP decor is a vendor rule (_sellsMoreThanPvp); the
+-- item predicate leaves PvP decor out on its own when another item filter is on.
+local function _vendorPasses(v, f)
+    return _ownAxesOK(v, f) and _itemAxesOK(v, f) and _recipePresetOK(v, f)
+        and (not f.hidesPvp or _sellsMoreThanPvp(v, f.isHiddenPvp))
+end
+
+-- Filtered vendors: acq.allVendors through every active axis (the helpers above read
+-- only through the selectors named in `calls`).
 Selectors:Register("acq.vendors", {
     memoized = true,  -- perf: filters the vendor walk; memo dedupes per flush
     reads = {"session.resolvers.staticData.tick"},
     calls = {"recipes.knowledge", "acq.allVendors", "acq.filterQuery", "acq.factionFilter",
              "acq.zoneFilter", "acq.repFilter", "acq.sourceFilter",
              "acq.expansionFilter", "acq.preset", "acq.missingOnly",
-             "acq.currencyFilter", "acq.matchesItemFilters"},
+             "acq.currencyFilter", "acq.matchesItemFilters", "decor.hidesPvp", "decor.isHiddenPvp"},
     fn = function(state, ctx)
-        local all       = Selectors:Call("acq.allVendors",      state, ctx)
-        local q         = Selectors:Call("acq.filterQuery",     state, ctx)
-        local factionSet = Selectors:Call("acq.factionFilter",   state, ctx)
-        local zoneSet    = Selectors:Call("acq.zoneFilter",      state, ctx)
-        local repSet     = Selectors:Call("acq.repFilter",       state, ctx)
-        local sourceSet  = Selectors:Call("acq.sourceFilter",    state, ctx)
-        local expSet     = Selectors:Call("acq.expansionFilter", state, ctx)
-        local preset    = Selectors:Call("acq.preset",          state, ctx)
-        local missingOnly = Selectors:Call("acq.missingOnly",   state, ctx)
-        local currencySet = Selectors:Call("acq.currencyFilter", state, ctx)
-        -- Vendor-intrinsic axes (multi-select SETs) -- checked per-vendor below.
-        local hasSearch  = q       ~= ""
-        local hasFaction = next(factionSet) ~= nil
-        local hasZone    = next(zoneSet)    ~= nil
-        local hasRep     = next(repSet)     ~= nil
-        -- Item-intrinsic axes (source / expansion / preset) flow through the
-        -- shared item predicate: a vendor passes if it sells >=1 catalog item
-        -- matching ALL active ones. Makes Sources + Expansion + presets work in
-        -- vendor mode with the same logic as Find-by-Item; achievement/quest
-        -- presets correctly narrow to empty when no vendor sells such items.
-        -- "recipes" preset filters at the VENDOR level (recipeCount), not via the
-        -- item-source predicate -- handled separately in the loop below.
-        local recipesPreset = (preset == "recipes")
-        local hasItemFilter = (next(sourceSet) ~= nil) or (next(expSet) ~= nil)
-            or (preset ~= nil and not recipesPreset)
-            or (missingOnly and not recipesPreset)
-        local hasCurrency = next(currencySet) ~= nil
-        if not (hasSearch or hasFaction or hasZone or hasRep or hasItemFilter or recipesPreset or hasCurrency) then
-            return all
-        end
-        local itemPred = hasItemFilter
-            and Selectors:Call("acq.matchesItemFilters", state, ctx) or nil
-        local needle = hasSearch and q:lower() or nil
-
+        local all = Selectors:Call("acq.allVendors", state, ctx)
+        local f = _readVendorFilters(state, ctx)
+        if not _anyVendorFilterOn(f) then return all end
+        _addVendorPredicates(f, state, ctx)
         local out = {}
         for _, v in ipairs(all) do
-            local searchOK  = (not hasSearch)  or _vendorMatchesSearch(v, needle)
-            local factionOK = (not hasFaction) or factionSet[v.faction] == true
-            local zoneOK    = (not hasZone)    or zoneSet[v.zone] == true
-            -- Rep set-intersect: vendor passes if its reps set contains ANY picked
-            -- rep name (sells at least one item gated by one of the chosen reps).
-            local repOK     = not hasRep
-            if hasRep and v.reps then
-                for r in pairs(repSet) do if v.reps[r] then repOK = true; break end end
-            end
-            local itemOK    = (not hasItemFilter) or _vendorSellsMatchingItem(v, itemPred)
-            -- Currency asks this vendor's own price, on an item the item filters pass too.
-            local currencyOK = (not hasCurrency) or _vendorSellsFor(v, currencySet, itemPred)
-            -- Rep preset also matches a vendor selling a rep-gated RECIPE (the
-            -- catalog only knows rep-gated decor; recipe gates live in RecipeSources).
-            if not itemOK and preset == "reputation" and _vendorHasRepGatedRecipe(v.npcID) then
-                itemOK = true
-            end
-            -- Recipes preset: "Missing" = sells an UNKNOWN recipe (item-based
-            -- missing is bypassed for recipe vendors via hasItemFilter above).
-            local recipeOK
-            if not recipesPreset then
-                recipeOK = true
-            elseif missingOnly then
-                recipeOK = _vendorHasUnknownRecipe(Selectors:Call("recipes.knowledge", state, ctx), v.npcID)
-            else
-                recipeOK = v.recipeCount > 0
-            end
-            if searchOK and factionOK and zoneOK and repOK and itemOK and recipeOK and currencyOK then
-                out[#out + 1] = v
-            end
+            if _vendorPasses(v, f) then out[#out + 1] = v end
         end
         return out
     end,
 })
 
--- Count label: "X vendors" / "X items"; "X of Y" when filtered.
--- Helper below: true only when vendor has >=1 catalog item AND all are collected.
+-- True only when the vendor sells >=1 catalog item AND all are collected: the
+-- allCollected stamp acq.vendorRows and acq.selectedVendor put on their copies.
 local function vendorAllCollected(v, isColl)
-    if not (v.name and isColl) then return false end
     local catalogVendor = _vendorEntry(v)
-    if not (catalogVendor and catalogVendor.items and #catalogVendor.items > 0) then
-        return false
-    end
+    if not catalogVendor or #catalogVendor.items == 0 then return false end  -- exception(nullable): a recipe-only vendor has no byVendor entry
     for _, itemID in ipairs(catalogVendor.items) do
         if not isColl(itemID) then return false end
     end
@@ -1524,6 +1604,7 @@ Selectors:Register("acq.mapAllLabel", {
     end,
 })
 
+-- Count label: "X vendors" / "X items"; "X of Y" when filtered.
 Selectors:Register("acq.countLabel", {
     calls = {"acq.viewMode", "decor.allItems", "acq.items", "acq.allVendors", "acq.vendors"},
     fn = function(state, ctx)
@@ -1575,7 +1656,7 @@ Selectors:Register("acq.selectedVendor", {
         local all = Selectors:Call("acq.allVendors", state, ctx)
         for _, v in ipairs(all) do
             if (id and v.npcID == id)
-            or (not id and v.name == name and (v.catalogZone or v.zone) == zone) then
+            or (not id and v.name == name and v.catalogZone == zone) then
                 -- Shallow-copy and stamp allCollected. acq.allVendors is
                 -- memoized so we can't mutate the cached row.
                 local isColl  = Selectors:Call("decor.isCollected", state, ctx)
@@ -1623,22 +1704,22 @@ Selectors:Register("acq.showVendorWowhead", {
 -- Header meta line: Zone . Faction . coords. Expansion was removed -- it
 -- already lives in the panel header's expansion-badge slot
 -- (acq.detailExpansion binding), so duplicating it here was clutter.
--- Coords render without parens for the cleaner look. "?" elided.
+-- Coords render without parens for the cleaner look; the curated note ends it.
 Selectors:Register("acq.selected.headerLine", {
     calls = {"acq.selectedVendor"},
     fn = function(state, ctx)
         local v = Selectors:Call("acq.selectedVendor", state, ctx)
         if not v then return "" end
         local parts = {}
-        if v.zone    and v.zone    ~= "?" and v.zone    ~= "" then parts[#parts+1] = v.zone end
-        if v.faction and v.faction ~= "?" and v.faction ~= "" then parts[#parts+1] = v.faction end
-        if v.x and v.y and v.x > 0 and v.y > 0 then
+        if v.zone ~= "" then parts[#parts+1] = v.zone end   -- the catalog can ship a vendor with no Zone: line
+        parts[#parts+1] = v.faction
+        if v.x and v.y and v.x > 0 and v.y > 0 then  -- exception(nullable): a vendor new to the game has no coords yet
             parts[#parts+1] = string.format("%.1f, %.1f", v.x, v.y)
         else
             -- where the coords would sit: why Waypoint / Show on Map are greyed
             parts[#parts+1] = HDG.Locale:Get("VENDOR_LOC_UNKNOWN")
         end
-        if v.note and v.note ~= "" then parts[#parts+1] = v.note end
+        if v.note then parts[#parts+1] = v.note end  -- exception(nullable): a curated note, on some vendors only
         return table.concat(parts, "  -  ")
     end,
 })
@@ -1653,114 +1734,111 @@ Selectors:Register("acq.selectedVendorMappable", {
     end,
 })
 
+-- "Requires <faction>" on a recipe sold behind a rep gate. A recipe source carries
+-- factionID and minRep together. Friendship reps (Silvermoon Court subsidiaries)
+-- progress by named ranks, not Renown -- don't fabricate a Renown number. Met-aware
+-- through RepObserver (renown + friendship), refreshed by the rep tick in reads.
+-- Unmet reads as plain text: no dim on readable content (owner 2026-10-31).
+local function _recipeRepLine(recipe, textCC)
+    local fac  = HDG.Constants.REP_FACTIONS[recipe.factionID]
+    local name = fac and fac.name or "this faction"  -- exception(nullable): REP_FACTIONS lists the factions HDG names, not every one a recipe can need
+    local reqStr = name
+    if fac and fac.friendship then  -- exception(nullable): the same REP_FACTIONS miss
+        reqStr = name .. " reputation"
+    elseif recipe.minRep >= 9 then
+        reqStr = name .. " Renown " .. (recipe.minRep - 8)
+    end
+    local prog = HDG.RepObserver:GetProgress(recipe.factionID, recipe.minRep)
+    if prog and prog.met then  -- exception(nullable): GetProgress is nil for a faction the client cannot read
+        return HDG.Theme:GetTextStateColorToken("collected") .. "|A:common-icon-checkmark:12:12|a Requires " .. reqStr .. "|r"
+    end
+    return textCC .. "Requires " .. reqStr .. "|r"
+end
+
+-- A selected recipe shows the RECIPE facts (known / cost / rep / profession), not
+-- the crafted item's "Cost: free / Collected" -- those belong to the decor item,
+-- listed separately under the Crafted source. "Where" is the recipe-aware
+-- "Available from" vendor list below, with Wpt/Map per vendor.
+local function _recipeDetailLines(recipe, textCC)
+    local lines = {}
+    if recipe.teaches then  -- exception(nullable): only the Find Decor recipes list names what the scroll teaches
+        lines[#lines + 1] = textCC .. "Teaches: " .. recipe.teaches .. "|r"
+    end
+    lines[#lines + 1] = textCC .. (recipe.isKnown and "Recipe known" or "Recipe not known") .. "|r"
+    if recipe.costText ~= "" then lines[#lines + 1] = textCC .. "Cost: |r" .. recipe.costText end
+    if recipe.factionID then lines[#lines + 1] = _recipeRepLine(recipe, textCC) end  -- exception(nullable): only a rep-gated source carries factionID
+    lines[#lines + 1] = textCC .. recipe.profession .. "|r"
+    return table.concat(lines, "\n")
+end
+
+-- Every payment option (an item buyable for 30 coupons OR 500g shows both), or
+-- `freeText` for an item with no cost. costVariants has an entry whenever there
+-- is any cost.
+local function _itemCostText(row, freeText)
+    local cv = row.costVariants
+    if #cv > 0 then return table.concat(cv, "  or  ") end
+    return row.costLine ~= "" and row.costLine or freeText
+end
+
+-- Whether the player meets the item's PRIMARY gate (sourceTags[1]); nil when it
+-- has none this can check. Impure calls, gated by the quest/ach/rep ticks in reads.
+local function _primaryGateMet(state, row)
+    local g = row.sourceTags and row.sourceTags[1]  -- exception(nullable): a row with no source tags
+    if not g then return nil end
+    if g.kind == "QUEST" and row.questID then
+        return _recordedCompletion(state, row.questID) ~= nil or HDG.QuestNameResolver:IsComplete(row.questID) == true
+    elseif g.kind == "ACH" and row.achievementID then
+        return HDG.AchievementObserver:IsEarned(row.achievementID) == true
+    elseif g.kind == "REP" and g.factionID and g.requiredCode then
+        local prog = HDG.RepObserver:GetProgress(g.factionID, g.requiredCode)
+        return (prog and prog.met) == true  -- exception(nullable): GetProgress is nil for a faction the client cannot read
+    end
+    return nil
+end
+
+-- The gate line, met-aware: a green check when satisfied, plain text when not
+-- (no dim on readable content, owner 2026-10-31). Mirrors the recipe path.
+local function _gateLineText(state, row, textCC)
+    if _primaryGateMet(state, row) == true then
+        return HDG.Theme:GetTextStateColorToken("collected") .. "|A:common-icon-checkmark:12:12|a " .. row.gateLine .. "|r"
+    end
+    return textCC .. row.gateLine .. "|r"
+end
+
+-- Cost, collection (counts flux at runtime, so DecorFormat reads the live row),
+-- placement and the gate line, each projected from the row's bake.
+local function _itemDetailLines(state, row, textCC)
+    local lines = { textCC .. "Cost: |r" .. _itemCostText(row, "free"), HDG.DecorFormat:Collection(row) }
+    if row.placementLabel ~= "" then lines[#lines + 1] = textCC .. row.placementLabel .. "|r" end
+    if row.gateLine then lines[#lines + 1] = _gateLineText(state, row, textCC) end  -- exception(nullable): only a gated item has a gate line
+    return table.concat(lines, "\n")
+end
+
 -- Compact detail text for the action-column SELECTED block. Multi-line,
 -- narrow-column friendly (action col is 150px wide). Each line projects a
 -- single field from the catalog row (baked at BuildRow time) or a DecorFormat
 -- helper for state-dependent rendering (collection counts flux at runtime).
 -- Returns "" when nothing is selected so the parent visibility-gate collapses.
 --
--- Reads account.config.scheme so the dim-wrap color codes refresh on scheme
--- swap. staticData.tick covers ItemAugment lookups inside the row bake (gate
+-- Reads account.config.scheme so the color codes refresh on scheme swap.
+-- staticData.tick covers ItemAugment lookups inside the row bake (gate
 -- factionID resolution).
 Selectors:Register("acq.selectedItem.compactDetail", {
     calls = {"acq.selectedItemID", "decor.isCollected", "acq.selectedRecipe"},
     -- quest/ach/rep ticks (+ questCompletions): the gate line is met-aware (green check
-    -- when satisfied, dim when not) -- it refreshes when completion or rep changes.
+    -- when satisfied) -- it refreshes when completion or rep changes.
     reads = {"account.config.scheme", "session.resolvers.staticData.tick",
              "session.resolvers.catalog.tick", "session.resolvers.rep.tick",
              "session.resolvers.questStatus.tick", "session.resolvers.achievementStatus.tick", "account.questCompletions"},
     fn = function(state, ctx)
-        local dimCC  = HDG.Theme:ColorCode("text.dim")
         local textCC = HDG.Theme:ColorCode("text.primary")
-
-        -- Recipe selection: show the RECIPE facts (known / cost / rep / profession),
-        -- NOT the crafted item's "Cost: free / Collected" -- those belong to the
-        -- decor item, which is listed separately under the Crafted source.
         local recipe = Selectors:Call("acq.selectedRecipe", state, ctx)
-        if recipe then
-            local rlines = {}
-            if recipe.teaches then
-                rlines[#rlines + 1] = dimCC .. "Teaches: |r" .. textCC .. recipe.teaches .. "|r"
-            end
-            rlines[#rlines + 1] = recipe.isKnown and (textCC .. "Recipe known|r")
-                                                  or  (dimCC .. "Recipe not known|r")
-            if recipe.costText ~= "" then
-                rlines[#rlines + 1] = dimCC .. "Cost: |r" .. recipe.costText
-            end
-            if recipe.factionID and recipe.factionID > 0 then
-                local fac  = HDG.Constants.REP_FACTIONS[recipe.factionID]
-                local name = (fac and fac.name) or "this faction"
-                local reqStr = name
-                if fac and fac.friendship then
-                    -- Friendship reps (Silvermoon Court subsidiaries) progress by
-                    -- named ranks, not Renown -- don't fabricate a Renown number.
-                    reqStr = name .. " reputation"
-                elseif recipe.minRep and recipe.minRep >= 9 then
-                    reqStr = name .. " Renown " .. (recipe.minRep - 8)
-                end
-                -- Live met-check via RepObserver (renown + friendship); reads
-                -- session.resolvers.rep.tick so it refreshes when the player's rep changes.
-                local prog = HDG.RepObserver:GetProgress(recipe.factionID, recipe.minRep)
-                if prog and prog.met then
-                    rlines[#rlines + 1] = HDG.Theme:GetTextStateColorToken("collected")
-                        .. "|A:common-icon-checkmark:12:12|a Requires " .. reqStr .. "|r"
-                else
-                    rlines[#rlines + 1] = dimCC .. "Requires " .. reqStr .. "|r"
-                end
-            end
-            if recipe.profession then
-                rlines[#rlines + 1] = textCC .. recipe.profession .. "|r"
-            end
-            -- "Where" lives in the reused "Available from" vendor list below
-            -- (acq.selectedItem.vendors is recipe-aware) -- with Wpt/Map per vendor.
-            return table.concat(rlines, "\n")
-        end
-
+        if recipe then return _recipeDetailLines(recipe, textCC) end
         local id = Selectors:Call("acq.selectedItemID", state, ctx)
         if not id then return "" end
         local row = HDG.HousingCatalogObserver:GetRow(id)
-        if not row then return "" end
-
-        local F      = HDG.DecorFormat
-
-        local lines = {}
-        -- Cost line: show every payment option (an item buyable for 30 coupons
-        -- OR 500g shows both). costVariants is >=1 entry when there's any cost.
-        local cv   = row.costVariants
-        local cost = (cv and #cv > 0) and table.concat(cv, "  or  ")
-                  or (row.costLine ~= "" and row.costLine or (dimCC .. "free|r"))
-        lines[#lines+1] = dimCC .. "Cost: |r" .. cost
-        -- Collection status (counts flux at runtime; helper reads live row).
-        lines[#lines+1] = F:Collection(row)
-        -- Placement (icon + label both baked).
-        if row.placementLabel ~= "" then
-            lines[#lines+1] = textCC .. row.placementLabel .. "|r"
-        end
-        -- Optional gate line -- MET-AWARE for the primary gate (sourceTags[1]): green
-        -- checkmark + bright when satisfied, dim when not. Mirrors the recipe path + the
-        -- row-list chip dimming. boundary: IsComplete/IsEarned/GetProgress gated by the
-        -- quest/ach/rep ticks in this selector's reads.
-        if row.gateLine then
-            local g, met = row.sourceTags and row.sourceTags[1], nil
-            if g then
-                if g.kind == "QUEST" and row.questID then
-                    met = _recordedCompletion(state, row.questID) ~= nil
-                       or HDG.QuestNameResolver:IsComplete(row.questID) == true
-                elseif g.kind == "ACH" and row.achievementID then
-                    met = HDG.AchievementObserver:IsEarned(row.achievementID) == true
-                elseif g.kind == "REP" and g.factionID and g.requiredCode then
-                    local prog = HDG.RepObserver:GetProgress(g.factionID, g.requiredCode)
-                    met = (prog and prog.met) == true
-                end
-            end
-            if met == true then
-                lines[#lines+1] = HDG.Theme:GetTextStateColorToken("collected")
-                    .. "|A:common-icon-checkmark:12:12|a " .. row.gateLine .. "|r"
-            else
-                lines[#lines+1] = dimCC .. row.gateLine .. "|r"
-            end
-        end
-        return table.concat(lines, "\n")
+        if not row then return "" end  -- exception(nullable): catalog not swept yet
+        return _itemDetailLines(state, row, textCC)
     end,
 })
 
@@ -1796,41 +1874,103 @@ Selectors:Register("acq.isItemsView_list", {
 
 -- ===== Item-view selectors =====================================
 -- Vendors that sell the selected item. Sources: catalog observer (vendor
--- names/zones from sourceText) + VendorAugment (coords/npcID). Cost is a
--- text string from sourceText; integer goldCost not available (VendorDB retired).
+-- names/zones from sourceText) + VendorAugment (coords/npcID). A row's price is
+-- costLine, the formatted line the vendor row paints.
 -- Recipe-aware: when a recipe scroll is selected (Find Decor recipes view), the
 -- "Available from" list shows the vendor(s) that sell the SCROLL -- reusing the
 -- decor-item vendor row (name/zone/cost + Wpt/Map) so where + waypoint come for
 -- free. Rows carry VendorAugment coords (zone-pct) the Wpt/Map buttons consume.
--- One row per vendor source in the recipe source augment, each priced at THAT vendor.
-local function _recipeVendorRow(v)
-    local meta = HDG.StaticData.VendorAugment:Get(v.npcID)  -- exception(boundary): generated augment
-    return {
-        costLine   = HDG.Format.FormatRecipeCost(v),
-        npcID      = v.npcID,
-        name       = (meta and meta.name) or ("NPC " .. tostring(v.npcID)),  -- exception(boundary): augment gap
-        zone       = (meta and meta.zone) or "",
-        mapID      = meta and meta.mapID,
-        x          = meta and meta.x,
-        y          = meta and meta.y,
-        faction    = (meta and meta.faction) or "",
-        factionRaw = (meta and meta.faction) or "",
-        mappable   = meta ~= nil and HDG.VendorRank.HasLocation(meta.mapID, meta.x, meta.y),
-        expansion  = meta and meta.exp,
-        costText   = "",
-        goldCost   = 0,
-        factionID  = v.factionID or 0,
-        minRep     = v.minRep or 0,
-        repName    = "",
-    }
+
+-- An item's rep gate, the same at every vendor: factionID, minRep and name from
+-- ItemAugment (a rep-gated augment row carries all three), else the catalog's
+-- Faction: line, which names the faction only. 0 / 0 / "" = no gate.
+local function _itemRepGate(catRow, aug)
+    if aug and aug.factionID then  -- exception(nullable): ItemAugment is sparse; most items have no row, most rows no rep gate
+        return aug.factionID, aug.minRep, aug.factionName
+    end
+    local gate = catRow.factionGate
+    return 0, 0, gate and gate.factionName or ""  -- exception(nullable): only a rep-gated item has a factionGate
 end
+
+-- Where a vendor of the selected item stands, from its VendorAugment row: location,
+-- side and expansion. Wpt/Map are live only with a location; without one they grey
+-- out and the meta line says why (owner 2026-10-15) -- never a silent click.
+local function _stampItemVendorLocation(row, meta)
+    row.mapID, row.x, row.y = meta.mapID, meta.x, meta.y
+    row.side      = meta.faction
+    row.expansion = meta.exp
+    row.mappable  = HDG.VendorRank.HasLocation(meta.mapID, meta.x, meta.y)
+end
+
+-- One row per vendor source in the recipe source augment, each priced at THAT vendor.
+-- A recipe source carries factionID and minRep together, only when rep-gated.
+local function _recipeVendorRow(v)
+    local row = {
+        costLine = HDG.Format.FormatRecipeCost(v), npcID = v.npcID,
+        name = "NPC " .. v.npcID, zone = "", faction = "", side = "", mappable = false,
+        costText = "", factionID = v.factionID or 0, minRep = v.minRep or 0, repName = "",  -- exception(nullable): an ungated source has no factionID / minRep
+    }
+    local meta = HDG.StaticData.VendorAugment:Get(v.npcID)
+    if meta then  -- exception(nullable): a recipe vendor VendorAugment lacks keeps its npc number (RecipeSources:VendorAugmentGaps warns it)
+        row.name, row.zone, row.faction = meta.name, meta.zone, meta.faction
+        _stampItemVendorLocation(row, meta)
+    end
+    return row
+end
+
+local function _byName(a, b) return a.name < b.name end
 
 local function _recipeVendorRows(itemID)
     local out = {}
     for _, v in ipairs(HDG.StaticData.RecipeSources:Get(itemID).sources) do
         if v.kind == "vendor" then out[#out + 1] = _recipeVendorRow(v) end
     end
-    table.sort(out, function(a, b) return (a.name or "") < (b.name or "") end)
+    table.sort(out, _byName)
+    return out
+end
+
+-- One catalog vendor of the selected item. faction is the catalog's (a rep name for
+-- a rep-gated item); side is VendorAugment's A/H/N, which the opposite-faction
+-- warning reads.
+local function _catalogItemVendorRow(catRow, v, repGate)
+    local npcID = HDG.StaticData.VendorAugment:ResolveName(v.name, v.zone)
+    local row = {
+        costLine = catRow.costLine,  -- baked cost line for the vendor meta row (cost - zone - faction)
+        npcID = npcID, name = v.name, zone = v.zone, faction = v.faction, side = "", mappable = false,
+        costText = v.cost,
+        factionID = repGate[1], minRep = repGate[2], repName = repGate[3],
+        questID = 0, achieveID = 0,
+    }
+    if npcID then  -- exception(nullable): a vendor name VendorAugment cannot resolve has no npcID, so no location
+        _stampItemVendorLocation(row, HDG.StaticData.VendorAugment:Get(npcID))
+    end
+    return row
+end
+
+-- One row per npcID. The catalog sometimes lists ONE vendor under two zone strings
+-- (Gina Mudclaw under "Valley of the Four Winds" + "Timeless Isle"; only Valley is
+-- real) -> two rows keyed "ivr_<npcID>" -> a Bind-stage key collision. Mirrors
+-- acq.allVendors: the row whose zone IS the resolved location wins.
+local function _addItemVendorRow(out, seen, row)
+    local prev = row.npcID and seen[row.npcID]  -- exception(nullable): npcID-less rows never collide
+    if not prev then
+        out[#out + 1] = row
+        if row.npcID then seen[row.npcID] = #out end
+        return
+    end
+    local metaZone = HDG.StaticData.VendorAugment:Get(row.npcID).zone
+    if row.zone == metaZone and out[prev].zone ~= metaZone then out[prev] = row end
+end
+
+local function _catalogItemVendorRows(itemID)
+    local catRow = HDG.HousingCatalogObserver:GetRow(itemID)
+    if not catRow then return {} end  -- exception(nullable): catalog not swept yet
+    local repGate = { _itemRepGate(catRow, HDG.StaticData.ItemAugment:Get(itemID)) }
+    local out, seen = {}, {}
+    for _, v in ipairs(catRow.vendors) do
+        _addItemVendorRow(out, seen, _catalogItemVendorRow(catRow, v, repGate))
+    end
+    table.sort(out, _byName)
     return out
 end
 
@@ -1844,61 +1984,7 @@ Selectors:Register("acq.selectedItem.vendors", {
         if recipe then return _recipeVendorRows(recipe.itemID) end
         local itemID = Selectors:Call("acq.selectedItemID", state, ctx)
         if not itemID then return {} end
-        local row = HDG.HousingCatalogObserver:GetRow(itemID)
-        if not (row and row.vendors) then return {} end
-        local aug = HDG.StaticData.ItemAugment:Get(itemID)
-        local out  = {}
-        local seen = {}   -- npcID -> out index (de-dupe multi-zone vendor dups)
-        for _, v in ipairs(row.vendors) do
-            local npcID = HDG.StaticData.VendorAugment:ResolveName(v.name, v.zone)
-            local meta  = npcID and HDG.StaticData.VendorAugment:Get(npcID)
-            local factionID = (aug and aug.factionID) or 0
-            local minRep    = (aug and aug.minRep) or 0
-            local repName   = (aug and aug.factionName)
-                           or (row.factionGate and row.factionGate.factionName) or ""
-            local newRow = {
-                costLine   = row.costLine,  -- baked cost line for the vendor meta row (cost - zone - faction)
-                npcID      = npcID,
-                name       = v.name,
-                zone       = v.zone or (meta and meta.zone) or "",
-                mapID      = meta and meta.mapID,
-                x          = meta and meta.x,
-                y          = meta and meta.y,
-                faction    = v.faction or (meta and meta.faction) or "",
-                -- A/H/N from VendorAugment, never v.faction: the catalog puts a REP name
-                -- there for rep-gated items, which the opposite-faction warning can't read.
-                factionRaw = (meta and meta.faction) or "",
-                -- Wpt/Map are live only with a location; without one they grey out and
-                -- the meta line says why (owner 2026-10-15) -- never a silent click.
-                mappable   = meta ~= nil and HDG.VendorRank.HasLocation(meta.mapID, meta.x, meta.y),
-                expansion  = meta and meta.exp,
-                costText   = v.cost or "",  -- catalog text (no integer gold available)
-                goldCost   = 0,
-                factionID  = factionID,
-                minRep     = minRep,
-                repName    = repName,
-                currCost   = nil,   -- DEFERRED: CostAugment (no integer cost yet)
-                questID    = 0,
-                achieveID  = 0,     -- DEFERRED: CostAugment
-            }
-            -- De-dupe by npcID. The catalog sometimes lists ONE vendor under two
-            -- zone strings (e.g. Gina Mudclaw under "Valley of the Four Winds" +
-            -- "Timeless Isle"; only Valley is real) -> two rows with the same key
-            -- "ivr_<npcID>" -> Bind-stage key collision. Mirrors acq.allVendors:
-            -- keep the row whose zone IS the resolved (meta) location, drop the phantom.
-            local prev = npcID and seen[npcID]
-            if prev then
-                local metaZone = meta and meta.zone
-                if metaZone and v.zone == metaZone and out[prev].zone ~= metaZone then
-                    out[prev] = newRow
-                end
-            else
-                out[#out + 1] = newRow
-                if npcID then seen[npcID] = #out end
-            end
-        end
-        table.sort(out, function(a, b) return (a.name or "") < (b.name or "") end)
-        return out
+        return _catalogItemVendorRows(itemID)
     end,
 })
 
@@ -2027,12 +2113,9 @@ Selectors:Register("acq.selectedItem.shortRibbonText", {
         if not id then return "" end
         local row = HDG.HousingCatalogObserver:GetRow(id)
         if not row then return "" end
-        local cv = row.costVariants
-        local costStr = (cv and #cv > 0) and table.concat(cv, "  or  ")
-                     or (row.costLine ~= "" and row.costLine or "-")
         return table.concat({
-            "Cost: " .. costStr,
-            string.format("Stored: %d  -  Placed: %d", row.quantity or 0, row.numPlaced or 0),  -- exception(boundary): catalog struct field sparse
+            "Cost: " .. _itemCostText(row, "-"),
+            string.format("Stored: %d  -  Placed: %d", row.quantity, row.numPlaced),
             row.placementLabel,
         }, "\n")
     end,
@@ -2059,36 +2142,10 @@ Selectors:Register("acq.selected.wowheadUrl", {
     end,
 })
 
--- CardGrid items: all items sold by the selected vendor, shaped
--- for acqVendorItemTile rendering. Sort puts uncollected tiles first,
--- then collected, alphabetical within each group. Catalog enrichment is
--- best-effort -- when catRow is nil (item not in catalog cache yet), the
--- tile still renders with name+cost; icon falls back to "?" via
--- CardGrid:PaintIcon's missing-texture branch.
---
--- Memoized: 4+ consumers fire on the same dispatch (acq.detailTitle,
--- acq.runSummary.text, items tile/list bindings). Cache invalidates on
--- selectedNpcID change + collection ownership + live-set + catalog
--- updates via the calls-chain reads closure.
--- One by-vendor item row: catalog facts + gate-met chip-dim stamps
--- (questDone/achEarned account-wide; repMet live via the REP sourceTag). Cost
--- is text-only (catalog sourceText; VendorDB retired). Rep name from
--- ItemAugment, supplemented by the catalog factionGate when the augment is
--- silent. exception(boundary): IsComplete/IsEarned/GetProgress gated by the
--- questStatus/achievementStatus/rep ticks in the selector's reads.
-local function _buildSelectedVendorItem(state, itemID, catRow, isColl)
-    local aug       = HDG.StaticData.ItemAugment:Get(itemID)
-    local factionID = aug and aug.factionID or 0
-    local minRep    = aug and aug.minRep    or 0
-    local repName   = aug and aug.factionName or ""
-    local gate = catRow.factionGate
-    if gate and gate.factionName and gate.factionName ~= "" and repName == "" then
-        repName = gate.factionName
-    end
-    local iconTex, iconAtl = HDG.Format.CoerceIconPair(catRow.iconTexture, catRow.iconAtlas)
-    local firstVendor = catRow.vendors and catRow.vendors[1]  -- exception(nullable): vendors absent on drop-only rows
-    local costText = (firstVendor and firstVendor.cost) or ""
-
+-- The quest / achievement chip stamps: nil where the item has no such gate, else
+-- whether it is done (account-wide). Impure calls, gated by the questStatus /
+-- achievementStatus ticks in the selector's reads.
+local function _gateStamps(state, catRow)
     local questDone, achEarned = nil, nil
     if catRow.questID then
         questDone = _recordedCompletion(state, catRow.questID) ~= nil
@@ -2097,18 +2154,30 @@ local function _buildSelectedVendorItem(state, itemID, catRow, isColl)
     if catRow.achievementID then
         achEarned = HDG.AchievementObserver:IsEarned(catRow.achievementID) == true
     end
+    return questDone, achEarned
+end
 
+-- One by-vendor item row: catalog facts + gate-met chip-dim stamps (repMet live
+-- via the REP sourceTag). Rep name from ItemAugment, supplemented by the catalog
+-- factionGate when the augment is silent. numStored / numPlaced are the catalog
+-- row's live counts (a placement patches them and invalidates catalog.tick).
+-- costText is the detail panel's cost text -- every payment option, each in its
+-- own currency -- and "" for a free item, so a tile shows no cost rather than 0.
+local function _buildSelectedVendorItem(state, itemID, catRow, isColl)
+    local factionID, minRep, repName = _itemRepGate(catRow, HDG.StaticData.ItemAugment:Get(itemID))
+    local iconTex, iconAtl = HDG.Format.CoerceIconPair(catRow.iconTexture, catRow.iconAtlas)
+    local questDone, achEarned = _gateStamps(state, catRow)
     return {
         questDone         = questDone,
         achEarned         = achEarned,
         repMet            = _repMetForRow(catRow),
         kind              = "item",
         itemID            = itemID,
-        name              = catRow.name or "Unknown",
-        isCollected       = isColl and isColl(itemID) or false,
-        numStored         = catRow.quantity or 0,
-        numPlaced         = 0,  -- placement count not in catalog
-        costText          = costText,  -- text only; integer unavailable
+        name              = catRow.name,
+        isCollected       = isColl(itemID) == true,
+        numStored         = catRow.quantity,
+        numPlaced         = catRow.numPlaced,
+        costText          = _itemCostText(catRow, ""),
         costLine          = catRow.costLine,  -- baked cost line (icons); single-option fallback for costLineVariant
         costVariants      = catRow.costVariants,  -- per-payment-option lines (listRows expands)
         factionID         = factionID,
@@ -2124,6 +2193,14 @@ local function _buildSelectedVendorItem(state, itemID, catRow, isColl)
     }
 end
 
+-- CardGrid items: all items sold by the selected vendor, shaped
+-- for acqVendorItemTile rendering. Sort puts uncollected tiles first,
+-- then collected, alphabetical within each group.
+--
+-- Memoized: 4+ consumers fire on the same dispatch (acq.detailTitle,
+-- acq.runSummary.text, items tile/list bindings). Cache invalidates on
+-- selectedNpcID change + collection ownership + live-set + catalog
+-- updates via the calls-chain reads closure.
 Selectors:Register("acq.selected.items", {
     memoized = true,
     calls = {"decor.isCollected", "acq.selectedVendor"},
@@ -2147,18 +2224,14 @@ Selectors:Register("acq.selected.items", {
         -- never from the augment.
         local vendor = Selectors:Call("acq.selectedVendor", state, ctx)
         if not vendor then return {} end  -- exception(nullable): nothing selected yet
-        local vendorEntry = HDG.HousingCatalogObserver:GetItemsByVendor(vendor.name, vendor.catalogZone or vendor.zone)
+        local vendorEntry = HDG.HousingCatalogObserver:GetItemsByVendor(vendor.name, vendor.catalogZone)
         if not vendorEntry then return {} end  -- exception(nullable): catalog-only vendor whose bucket the observer has not baked yet
         local isColl = Selectors:Call("decor.isCollected", state, ctx)
         local out = {}
+        -- byVendor items come from rows already in byItemID, committed in the same
+        -- atomic sweep, so every one has its catalog row (acq.allVendors reads it so too).
         for _, itemID in ipairs(vendorEntry.items) do
-            local catRow = HDG.HousingCatalogObserver.byItemID[itemID]
-            -- exception(nullable): byVendor items are added from rows already in
-            -- byItemID within the same atomic sweep commit, so a miss is impossible
-            -- by construction -- silent skip keeps this selector pure.
-            if catRow then
-                out[#out + 1] = _buildSelectedVendorItem(state, itemID, catRow, isColl)
-            end
+            out[#out + 1] = _buildSelectedVendorItem(state, itemID, HDG.HousingCatalogObserver.byItemID[itemID], isColl)
         end
         table.sort(out, function(a, b)
             if a.isCollected ~= b.isCollected then
@@ -2233,8 +2306,8 @@ Selectors:Register("acq.selected.listRows", {
         local items   = Selectors:Call("acq.selected.items",   state, ctx)
         local recipes = Selectors:Call("acq.selected.recipes", state, ctx)
         -- An item buyable two ways (30 Community Coupons OR 500g) lists once per
-        -- payment option here; the cardGrid stays one-tile-per-item (no cost on
-        -- tiles, so a dup tile would be indistinguishable).
+        -- payment option here; the cardGrid stays one-tile-per-item (a tile shows
+        -- no cost, so a dup would be indistinguishable; its tooltip lists every option).
         local hasMultiCost = false
         for _, it in ipairs(items) do
             if it.costVariants and #it.costVariants > 1 then hasMultiCost = true break end
@@ -2310,8 +2383,8 @@ Selectors:Register("acq.selected.mapPoint", {
         if v.mapID and v.mapID ~= 0 then
             return {
                 mapID = v.mapID,
-                x     = (v.x or 0) / 100,
-                y     = (v.y or 0) / 100,
+                x     = (v.x or 0) / 100,   -- exception(nullable): a vendor new to the game has a map, no coords yet
+                y     = (v.y or 0) / 100,   -- exception(nullable): as x
                 name  = v.name,
                 zone  = v.zone,
             }
@@ -2345,7 +2418,8 @@ Selectors:Register("acq.selected.note", {
         if not id then return "" end
         local notes = state.account.vendorNotes
         local n = notes[id]
-        return (n and n.text) or ""
+        if not n then return "" end  -- exception(nullable): most vendors have no note
+        return n.text
     end,
 })
 

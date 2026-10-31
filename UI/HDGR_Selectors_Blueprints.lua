@@ -328,13 +328,26 @@ local BLOCK_FLAGS = {
     { bit = 128, g = "ERR_HOUSING_BLUEPRINT_REQUIREMENT_HOUSE_SIZE",       alt = "house size not unlocked" },
 }
 
+-- Blizzard's reason for each unmet requirement the server flags, in flag order.
+-- Kept as a list: joined, they are several sentences that run off the verdict's
+-- one line, so the line's hover lists them one per line.
+local function _blockingReasons(flags)
+    local reasons = {}
+    for _, f in ipairs(BLOCK_FLAGS) do
+        if flags % (f.bit * 2) >= f.bit then
+            reasons[#reasons + 1] = _G[f.g] or f.alt  -- exception(boundary): Blizzard string, nil headless/pre-12.1
+        end
+    end
+    return reasons
+end
+
 Selectors:Register("blueprints.budgetFit", {
     reads = { "session.blueprints.selectedCode", "session.blueprints.manifests",
               "session.blueprints.groups", "account.blueprints.pastedTypes" },
     fn = function(state)
         local sb = state.session.blueprints
         local m = sb.selectedCode and sb.manifests[sb.selectedCode]
-        if not m or m.status ~= "received" then return { meters = {}, fits = false } end  -- exception(nullable): no manifest yet
+        if not m or m.status ~= "received" then return { meters = {}, fits = false, blockingReasons = {} } end  -- exception(nullable): no manifest yet
         local raw = m.raw
         -- 12.1 (68675) reshaped the blueprint contents budget (verified in-game
         -- 2026-07-15). `budgetInfo` now holds `interiorBudgets` + `exteriorBudgets`,
@@ -369,17 +382,8 @@ Selectors:Register("blueprints.budgetFit", {
             mt.caption = METER_CAPTION[mt.state]
         end
         local blocking = raw.blockingRequirementFlags
-        local blockingText
-        if blocking ~= 0 then
-            local parts = {}
-            for _, f in ipairs(BLOCK_FLAGS) do
-                if blocking % (f.bit * 2) >= f.bit then
-                    parts[#parts + 1] = _G[f.g] or f.alt  -- exception(boundary): Blizzard string, nil headless/pre-12.1
-                end
-            end
-            blockingText = table.concat(parts, " ")   -- Blizzard's strings are full sentences
-        end
-        return { meters = meters, fits = (blocking == 0), blocking = blocking, blockingText = blockingText }
+        return { meters = meters, fits = (blocking == 0), blocking = blocking,
+                 blockingReasons = _blockingReasons(blocking) }
     end,
 })
 
@@ -973,7 +977,7 @@ Selectors:Register("blueprints.fitVerdict", {
         local insp = Selectors:Call("blueprints.inspector", state, ctx)
         if not insp or insp.status ~= "received" then return "" end
         local b = Selectors:Call("blueprints.budgetFit", state, ctx)
-        if not b.fits then return b.blockingText end
+        if not b.fits then return table.concat(b.blockingReasons, " ") end   -- Blizzard's strings are full sentences
         if insp.missingTotal > 0 then
             return ("Fits this house -- %d piece%s to acquire first"):format(
                 insp.missingTotal, insp.missingTotal == 1 and "" or "s")

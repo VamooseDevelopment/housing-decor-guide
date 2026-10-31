@@ -60,11 +60,6 @@ function SE:IsCacheReady()
     return cacheBuilt
 end
 
--- [decorID] = row; row.itemID for the itemID. Empty when catalog not swept.
-function SE:GetDecorToItem()
-    return HDG.HousingCatalogObserver.byDecorID or {}
-end
-
 -- ===== Public API (membership + rule unified) ==============================
 
 -- GetCollectionItems(id) -> array of decorID (stub; returns empty)

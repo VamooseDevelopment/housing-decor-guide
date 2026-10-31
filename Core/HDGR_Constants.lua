@@ -14,7 +14,9 @@ HDG.Constants = {
     --      layout placements (docs/crate-redesign/10-FINAL-MODEL.md);
     -- v9 = account.recipes retired: learned state is each character's knownRecipes
     --      (docs/LEARNED_STATE_SSOT_PLAN_2026-10-25.md).
-    SCHEMA_VERSION = 9,
+    -- v10 = Decor Quests: a ladder's pick is the quest picked, not its place; the tracker's
+    --      shown flag is per character (docs/DECOR_QUESTS_UX_REVIEW_2026-10-29.md B1, R2).
+    SCHEMA_VERSION = 10,
     -- Standard icon crop (trims the baked border off square item icons).
     -- Consumed via SetTexCoord(unpack(HDG.Constants.ICON_CROP)) (hygiene A6).
     ICON_CROP = { 0.08, 0.92, 0.08, 0.92 },
@@ -137,6 +139,9 @@ HDG.Constants = {
         [5] = "Style",
         [6] = "Theme",
     },
+    -- Alliance and Horde: tags in the Style group (tagIDs from the recorded
+    -- catalog; names are localized). They say who may buy a piece, not its look.
+    FACTION_TAG_IDS = { [159] = "Alliance", [160] = "Horde" },
 
     -- Profession master data. Each entry: name, TradeSkillLineID, 2-letter code, atlas, shortLabel.
     -- shortLabel trims the longer names for cramped strips (Goblin filter pills).
@@ -654,6 +659,34 @@ HDG.Constants = {
         { value = "other",     key = "RS_PRESET_OTHER"     },
         { value = "rep",       key = "RS_PRESET_REP"       },
     },
+    -- Decor Quests presets, in strip order (the mockup's); each shows its count.
+    -- "done" is the warband's (any character finished the decor quest); "here" is
+    -- the one chip that reads only this character.
+    DQ_PRESETS = {
+        { value = "todo",     key = "DQ_PRESET_TODO"     },
+        { value = "progress", key = "DQ_PRESET_PROGRESS" },
+        { value = "here",     key = "DQ_PRESET_HERE"     },
+        { value = "done",     key = "DQ_PRESET_DONE"     },
+        { value = "all",      key = "DQ_PRESET_ALL"      },
+    },
+    -- A step another character of the warband did: the quest log's own "warband completed" mark.
+    DQ_WARBAND_ICON = "|A:warband-completed-icon:14:14|a",   -- 14: a touch over the 12 px check (owner)
+    DQ_WHOLE_ZONE_STEPS = 25,   -- a line longer than this is a zone's whole storyline (the detail says so)
+    -- The detail's wrapped lines (Bold B, owner 10-30): the widths its selectors measure them at
+    -- (HDG.TextMeasure) and the heights its rows give each line. A detail row is about 430 px wide
+    -- in its 480 px column (the panel's padding, the list's inset, the scrollbar). step: a ladder
+    -- step's who line, from its title column (46), short of the row's edge, and a lone quest's,
+    -- from 8, short of its Wpt; next: the Next block's text, inside the box and its padding (10)
+    -- each side; way: the block's button (84) and the gap before it; stepOf: "step 12 of 61"
+    -- beside Next. The rows set these widths on the text, so it wraps where it was measured.
+    DQ_DETAIL_TEXT = { step = 370, next = 410, way = 90, stepOf = 84, body = 15, subheading = 18 },
+    -- The Quest Tracker: its header's X and arrow and the gap before each (the LayoutConfig's;
+    -- the selectors measure the title past them), headPad the header's height over its title's
+    -- lines, and the rule row under a step, the line ruleAt down its ruleH.
+    DQ_TRACKER = { closeW = 24, arrowW = 20, gap = 4, headPad = 10, ruleH = 9, ruleAt = 6 },
+    DQ_ZONE_MORE_MAX = 4,
+    DQ_STEP_SEARCH_MIN = 3,     -- Decor Quests search: the letters before it looks in step names too       -- the Quest Tracker's Collected! card: the decor quests starting in its zone it names (Bold C)
+    DQ_CLASS_ID_MAX = 13,       -- the highest classID (Evoker): a class gate holding most of 1..13 names the rest
     -- Recipe Sources filter axes, in tag order: the session.ui.recipeSources set each
     -- reads, its tag's Locale format, and (dropdown axes) the "All X" menu entry.
     -- Profession's menu is the Recipes tab's own (recipes.professionMenuItems).
@@ -699,6 +732,8 @@ HDG.Constants = {
         warehouse      = true,
         mogul          = true,
         projectsPicker = true,
+        -- Decor Quests lists catalog decor and reads ownedDecorIDs (Collected, Hide collected).
+        decorQuests    = true,
     },
 
     -- Views that consume house level/favor/reward data (House tab + Projects/Architect
@@ -724,6 +759,7 @@ HDG.Constants = {
         { view = "recipes",      label = "Recipes" },
         { view = "warehouse",    label = "Warehouse" },
         { view = "recipeSources", label = "Recipe Sources" },
+        { view = "decorQuests",  label = "Decor Quests" },
         { view = "alts",         label = "Alts" },
         { view = "mogul",        label = "Mogul" },
         { view = "styles",       label = "Styles" },
@@ -758,6 +794,7 @@ HDG.Constants = {
         { kind = "parent", view = "acquisition", label = "Acquire", icon = "housing-decor-vendor_32", children = {
             { label = "Shop by Vendor", transient = { view = "acquisition", key = "viewMode", value = "vendor" }, activePath = "session.ui.acquisition.viewMode", activeValue = "vendor" },
             { label = "Find Decor",     transient = { view = "acquisition", key = "viewMode", value = "item"   }, activePath = "session.ui.acquisition.viewMode", activeValue = "item"   },
+            { label = "Decor Quests",   view = "decorQuests" },
         }},
         { kind = "parent", view = "recipes", label = "Crafting", icon = "Professions-Crafting-Orders-Icon", children = {
             { label = "Recipes",   view = "recipes" },
@@ -792,6 +829,7 @@ HDG.Constants = {
           iconPressed = "decor-controls-inspect-pressed", children = {
             { label = "Shopping",  launcher = "SHOPPING_WIDGET_TOGGLE" },
             { label = "Zone",      launcher = "ZONE_POPUP_TOGGLE" },
+            { label = "Quest Tracker", launcher = "DQ_TRACKER_TOGGLE" },
             -- Import: launcher (no hubView under noNavigate Tools) -- the action sets
             -- BOTH the Styles tab and the import sub-view, so one dispatch lands the user there.
             { label = "Import",    launcher = "STYLES_OPEN_IMPORT" },
@@ -828,6 +866,7 @@ HDG.Constants = {
         REMOVALIST_CLEAR    = "HDGR_REMOVALIST_CLEAR",    -- clear both picks
         REMOVALIST_SET_LETTER_FILTER = "HDGR_REMOVALIST_SET_LETTER_FILTER", -- filter plot list by A/B/C/D (nil = all)
         REMOVALIST_SET_PLOT = "HDGR_REMOVALIST_SET_PLOT", -- map-click: payload.role "source"/"target" sets that pick
+        REMOVALIST_SET_FACTION = "HDGR_REMOVALIST_SET_FACTION", -- payload.faction; a switch clears both picks (a plot number names a different plot on the other map)
         -- Atomic per-tab filter reset (per ADR-018). payload.tab discriminates which tab.
         UI_FILTER_RESET     = "HDGR_UI_FILTER_RESET",     -- payload: { tab = "decor"|"acquisition"|"recipes" }
         MAIN_WINDOW_TOGGLE  = "HDGR_MAIN_WINDOW_TOGGLE",  -- flips account.ui.mainWindowShown
@@ -880,7 +919,6 @@ HDG.Constants = {
         COLLECTION_ITEM_LEARNED        = "HDGR_COLLECTION_ITEM_LEARNED",        -- payload: { decorID }
         COLLECTION_ITEM_REMOVED        = "HDGR_COLLECTION_ITEM_REMOVED",        -- payload: { decorID }
         COLLECTION_CATALOG_ROW_ADDED   = "HDGR_COLLECTION_CATALOG_ROW_ADDED",   -- payload: { decorID, entry }
-        COLLECTION_CATALOG_ROW_REMOVED = "HDGR_COLLECTION_CATALOG_ROW_REMOVED", -- payload: { decorID }
         -- Mutable count fields changed; static row fields stay. Reducer patches 6 fields in place.
         COLLECTION_CATALOG_ROW_COUNTS_UPDATED = "HDGR_COLLECTION_CATALOG_ROW_COUNTS_UPDATED", -- payload: { decorID, counts = { quantity, numPlaced, numStored, remainingRedeemable, destroyableInstanceCount, firstAcquisitionBonus } }
 
@@ -980,6 +1018,18 @@ HDG.Constants = {
         -- clears the set. A filter dropdown dispatches { [payloadKey] = value }.
         RS_TOGGLE_FILTER                 = "HDGR_RS_TOGGLE_FILTER",                 -- payload: { <axis> = value|"all" }
         RS_TOGGLE_GROUP                  = "HDGR_RS_TOGGLE_GROUP",                  -- payload: { key = "P:<profession>"|"T:<group>" }
+        DQ_TOGGLE_FILTER                 = "HDGR_DQ_TOGGLE_FILTER",                 -- payload: { exp|kind = value|"all" }
+        DQ_TOGGLE_GROUP                  = "HDGR_DQ_TOGGLE_GROUP",                  -- payload: { key = "E:<expansion>"|"treasure" }
+        DQ_OPEN_FOLD                     = "HDGR_DQ_OPEN_FOLD",                     -- payload: { key = "<decorID>:<first step>" }
+        DQ_PICK_STEP                     = "HDGR_DQ_PICK_STEP",                     -- payload: { key = "d:<decorID>"|"k:<lineID>", quest, tracked }
+        DQ_TOGGLE_CHAPTER                = "HDGR_DQ_TOGGLE_CHAPTER",                -- payload: { lineID }
+        DQ_TRACK                         = "HDGR_DQ_TRACK",                         -- payload: { key = "d:<id>"|"k:<lineID>"|"camp:<id>", quest, rows }
+        DQ_TRACK_STOP                    = "HDGR_DQ_TRACK_STOP",
+        DQ_TRACKER_TOGGLE                = "HDGR_DQ_TRACKER_TOGGLE",                -- payload: nil | { visible }
+        DQ_TRACKER_EXPAND                = "HDGR_DQ_TRACKER_EXPAND",
+        DQ_TRACKER_POSITION_SET          = "HDGR_DQ_TRACKER_POSITION_SET",          -- payload: { x, y }
+        DQ_SHOW                          = "HDGR_DQ_SHOW",                          -- payload: { viewMode, selected, group, chapter }
+        DQ_ALT_SCANNED                   = "HDGR_DQ_ALT_SCANNED",                   -- payload: { charKey, name, classFile, at, progress }
 
         -- Mogul tab UI state (mode = "profit"|"collection"; viewMode = "char"|"account"; optimizeBy).
         MOGUL_SET_MODE               = "HDGR_MOGUL_SET_MODE",
@@ -1038,6 +1088,10 @@ HDG.Constants = {
         ITEM_INFO_RESOLVED         = "HDGR_ITEM_INFO_RESOLVED",         -- payload: { itemIDs = { [n] = itemID }, count = n }
         NPC_NAMES_RESOLVED         = "HDGR_NPC_NAMES_RESOLVED",         -- payload: { entries = { { npcID, name } } }
         QUEST_STATUS_RESOLVED      = "HDGR_QUEST_STATUS_RESOLVED",      -- payload: { questID = N }
+        QUEST_TITLES_RESOLVED      = "HDGR_QUEST_TITLES_RESOLVED",      -- no payload: quest titles arrived (batched)
+        QUEST_LOG_CHANGED          = "HDGR_QUEST_LOG_CHANGED",          -- no payload: a quest entered or left the log
+        QUEST_OBJECTIVES_CHANGED   = "HDGR_QUEST_OBJECTIVES_CHANGED",   -- no payload: objectives moved on a quest in the log
+        FONTS_BUILT                = "HDGR_FONTS_BUILT",                -- no payload: the Theme rebuilt its fonts (a scheme or font face change)
         -- First character to record a completion wins; stored account-wide.
         QUEST_COMPLETION_RECORDED  = "HDGR_QUEST_COMPLETION_RECORDED",  -- payload: { completions = { [questID]={name,class} } }
         ACHIEVEMENT_STATUS_RESOLVED = "HDGR_ACHIEVEMENT_STATUS_RESOLVED", -- payload: { achievementID = N }
@@ -1110,6 +1164,7 @@ HDG.Constants = {
         STYLES_IMPORT_COMMIT           = "HDGR_STYLES_IMPORT_COMMIT",           -- payload: { displayName? = string } -- Shopping List
         STYLES_IMPORT_COMMIT_AS_STYLE  = "HDGR_STYLES_IMPORT_COMMIT_AS_STYLE",  -- payload: { displayName? = string } -- My Styles (type=style collection)
         STYLES_IMPORT_COMMIT_AS_SET    = "HDGR_STYLES_IMPORT_COMMIT_AS_SET",    -- payload: { displayName? = string } -- Project Set (account.furnishingSets entry)
+        STYLES_IMPORT_COMMIT_AS_SMARTSET = "HDGR_STYLES_IMPORT_COMMIT_AS_SMARTSET", -- no payload -- a parsed Smart Set code -> a Smart Set (Filtered Sets)
         STYLES_IMPORT_RESET            = "HDGR_STYLES_IMPORT_RESET",
         STYLES_OPEN_IMPORT             = "HDGR_STYLES_OPEN_IMPORT",            -- open Import view fresh: sets Styles tab + import sub-view + resets. Used by the in-Styles button AND the Tools > Import nav leaf.
         STYLES_OPEN_EXPORT             = "HDGR_STYLES_OPEN_EXPORT",            -- open Export view fresh: sets Styles tab + export sub-view + resets. Used by the in-Styles button AND the Tools > Export nav leaf.
@@ -1175,7 +1230,6 @@ HDG.Constants = {
         CATALOG_LOAD_COMPLETED    = "HDGR_CATALOG_LOAD_COMPLETED",    -- payload: { rowCount }
         CATALOG_LOAD_FAILED       = "HDGR_CATALOG_LOAD_FAILED",       -- payload: { reason }
         CATALOG_REFRESH_QUEUED    = "HDGR_CATALOG_REFRESH_QUEUED",
-        CATALOG_REFRESH_COMPLETED = "HDGR_CATALOG_REFRESH_COMPLETED", -- payload: { rowCount }
         CATALOG_FORCE_RELOAD      = "HDGR_CATALOG_FORCE_RELOAD",      -- /hdgr refresh; observer rebuilds every row past coalesce
         -- Blizzard category/subcategory nav tree; shared by Style Curator + Projects decor picker.
         CATALOG_CATEGORY_TREE_UPDATED = "HDGR_CATALOG_CATEGORY_TREE_UPDATED", -- payload: { byID, subcatByID, rootIDs }
@@ -1397,6 +1451,15 @@ HDG.Constants.COIN_SILVER_ATLAS = "|A:coin-silver:14:14|a"
 HDG.Constants.COIN_COPPER_ATLAS = "|A:coin-copper:14:14|a"
 HDG.Constants.CURRENCY_GOLD = -1   -- sentinel; real currency IDs are positive
 HDG.Constants.GOLD_NAME     = "Gold"  -- the sentinel has no C_CurrencyInfo record to take a name from
+
+-- PvP decor: what the "Hide PvP decor" setting leaves out of the lists. The catalog
+-- marks nothing as PvP, but every PvP decor is priced in Honor or Marks of Honor
+-- (Riica, Joruh, Velerd, the Alterac Valley quartermaster), and nothing else is
+-- (owner, 2026-10-30). Format.CostKey keys, so the set reads like a currency filter.
+HDG.Constants.PVP_COST_KEYS = {
+    ["currency:1792"] = true,   -- Honor
+    ["item:137642"]   = true,   -- Mark of Honor
+}
 
 -- 134400 = INV_Misc_QuestionMark.blp -- canonical "?" placeholder for missing icons.
 HDG.Constants.PLACEHOLDER_ICON = 134400

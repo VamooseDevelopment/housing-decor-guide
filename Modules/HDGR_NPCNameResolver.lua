@@ -12,6 +12,9 @@
 -- in drains later than the first, so a miss stays queued for the next drain, up to
 -- MAX_DRAINS misses; after that the NPC keeps its English name for the session. While
 -- an NPC waits on a drain, or has been given up on, a caller's rebuild doesn't probe it.
+-- A name the client had at once goes out with the next drain too: the searches (Recipe
+-- Sources, Decor Quests) read only session.npcNames.names, so a name held only here would
+-- never be searched.
 --
 -- Secret strings: under taint a creature link's name line can come back secret
 -- (12.0.5). canaccesstable / canaccessvalue say so before any read that would throw,
@@ -23,7 +26,7 @@ local R = HDG.NPCNameResolver
 
 HDG.Log:RegisterTags({ npc_resolver = { user = false, level = "debug" } })
 
-R._cache          = R._cache          or {}      -- [npcID] = name a probe returned this session
+R._cache          = R._cache          or {}      -- [npcID] = name a probe returned at once, until the next drain stores it
 R._pending        = R._pending        or {}      -- [npcID] = drains that have missed it so far; probed again at the next
 R._gaveUp         = R._gaveUp         or {}      -- [npcID] = true after MAX_DRAINS misses: English for the session
 R._timerScheduled = R._timerScheduled or false   -- one drain timer pending
@@ -53,11 +56,15 @@ local function _probe(npcID)
     return text
 end
 
-function R:_Queue(npcID, misses)
-    self._pending[npcID] = misses
+function R:_Schedule()
     if self._timerScheduled then return end
     self._timerScheduled = true
     C_Timer.After(self.BATCH_WINDOW, function() R:Drain() end)
+end
+
+function R:_Queue(npcID, misses)
+    self._pending[npcID] = misses
+    self:_Schedule()
 end
 
 -- A drain missed it: queue it for the next drain, or give up after MAX_DRAINS misses.
@@ -79,18 +86,21 @@ function R:ResolveName(npcID, fallbackName)
     local name = _probe(npcID)
     if name then
         self._cache[npcID] = name
+        self:_Schedule()
         return name, true
     end
     self:_Queue(npcID, 0)
     return fallbackName, false
 end
 
--- Drain: probe the queue once more and dispatch every name that came in.
+-- Drain: probe the queue once more and dispatch every name that came in, with the names
+-- probes had at once since the last drain.
 function R:Drain()
     self._timerScheduled = false
-    local batch = self._pending
+    local batch, entries, missed = self._pending, {}, 0
     self._pending = {}
-    local entries, missed = {}, 0
+    for npcID, name in pairs(self._cache) do entries[#entries + 1] = { npcID = npcID, name = name } end
+    self._cache = {}
     for npcID, misses in pairs(batch) do
         local name = _probe(npcID)
         if name then

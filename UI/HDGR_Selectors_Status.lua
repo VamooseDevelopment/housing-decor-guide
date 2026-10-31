@@ -261,6 +261,24 @@ Selectors:Register("chrome.activeTab", {
     end,
 })
 
+-- A character's name as the cross-character hovers show it: with the realm when
+-- another of your characters has the same name (owner ruling 2026-10-31), so two
+-- Alices read Alice-Proudmoore and Alice-Stormrage. Counted over the whole account,
+-- so a name reads the same in every hover, whoever holds the item.
+local function _nameCounts(characters)
+    local counts = {}
+    for _, c in pairs(characters) do
+        if c.name then counts[c.name] = (counts[c.name] or 0) + 1 end  -- exception(nullable): legacy record may predate name capture
+    end
+    return counts
+end
+
+local function _shownName(charKey, c, nameCounts)
+    if not c.name then return charKey end   -- exception(nullable): legacy record may predate name capture
+    if nameCounts[c.name] > 1 then return charKey end   -- charKey is Name-Realm
+    return c.name
+end
+
 -- Essence of Lumber tracker (chrome badge + cross-character hover). Sums the
 -- per-char snapshots into an account-wide total -- soulbound means it can't be
 -- pooled, so the whole-warband number is the useful glance. perChar is sorted
@@ -273,6 +291,7 @@ Selectors:Register("chrome.essenceBadge", {
     reads = {"account.characters", "session.identity.charKey"},
     fn = function(state, ctx)
         local current = state.session.identity.charKey
+        local nameCounts = _nameCounts(state.account.characters)
         local total, perChar = 0, {}
         for charKey, c in pairs(state.account.characters) do
             local stock = c.essenceStock   -- exception(nullable): unset until this char is first scanned
@@ -280,7 +299,7 @@ Selectors:Register("chrome.essenceBadge", {
             if count > 0 then
                 total = total + count
                 perChar[#perChar + 1] = {
-                    name      = c.name or charKey,   -- exception(nullable): legacy record may predate name capture
+                    name      = _shownName(charKey, c, nameCounts),
                     classFile = c.classFile,
                     count     = count,
                     bag       = stock.bag,
@@ -314,7 +333,7 @@ Selectors:Register("chrome.essenceBadge", {
 -- BagObserver at the render site, and a selector must not call a Blizzard API.
 
 -- One character's contribution to the map: fold its bag + bank maps into `acc`.
-local function _foldCharacterStock(acc, charKey, c, currentKey)
+local function _foldCharacterStock(acc, charKey, c, currentKey, shownName)
     local stock = c.reagentStock   -- exception(nullable): unset until this char is first swept
     if not stock then return end
     local perItem = {}
@@ -328,7 +347,8 @@ local function _foldCharacterStock(acc, charKey, c, currentKey)
         local e = acc[itemID] or { total = 0, perChar = {} }
         e.total = e.total + count
         e.perChar[#e.perChar + 1] = {
-            name      = c.name or charKey,   -- exception(nullable): legacy record may predate name capture
+            charKey   = charKey,             -- who this is: two realms can each have an Alice
+            name      = shownName,
             classFile = c.classFile,
             count     = count,
             bag       = (stock.bag and stock.bag[itemID]) or 0,
@@ -353,9 +373,10 @@ Selectors:Register("characters.reagentStock", {
     memoized = true,
     fn = function(state)
         local currentKey = state.session.identity.charKey
+        local nameCounts = _nameCounts(state.account.characters)
         local out = {}
         for charKey, c in pairs(state.account.characters) do
-            _foldCharacterStock(out, charKey, c, currentKey)
+            _foldCharacterStock(out, charKey, c, currentKey, _shownName(charKey, c, nameCounts))
         end
         for _, entry in pairs(out) do
             table.sort(entry.perChar, _rosterOrder)

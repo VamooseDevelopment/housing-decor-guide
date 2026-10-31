@@ -34,7 +34,7 @@ function D:Help()
     _cmd("/hdgr dashtaint",        "audit WHO tainted the Blizzard dashboard's teleport chain")
     _cmd("/hdgr dashdump",         "visibility + data state of the stranded dashboard, layer by layer")
     _cmd("/hdgr dashsync",         "test whether a warm house-list request replies synchronously")
-    _cmd("/hdgr costdump <id>",    "dump a catalog row's parsed cost + sourceTags for an itemID")
+    _cmd("/hdgr costdump [id]",    "a row's parsed cost + sourceTags; no id: the picked vendor's tiles")
     _cmd("/hdgr dumpdecor <ids>",  "emit AllDecorDB-ready Lua rows for decorIDs (copy-paste)")
     _cmd("/hdgr tipdump [ids]",    "dump C_TooltipInfo line types for itemIDs (finds gates the catalog omits)")
     _cmd("/hdgr tipdump bags",     "  same, sweeping carried items -- control for 'can we see gates at all'")
@@ -373,9 +373,31 @@ function D:House()
 end
 
 -- Dump row's parsed cost + source table for an itemID. Diagnostic for endeavor/gold.
+-- /hdg costdump with no itemID: the tiles of the vendor picked in Shop by Vendor,
+-- each with the cost text its tooltip shows and the catalog row's cost line.
+-- Probe for "no Cost line on any tile" (owner 10-31), which the recorded catalog
+-- does not reproduce: 2,457 of 2,519 tiles carry one headless.
+local function _dumpVendorTiles()
+    local st = HDG.Store:GetState()
+    local ui = st.session.ui.acquisition
+    _print(("costdump tiles: vendor %s (npcID %s), catalog ready %s"):format(
+        tostring(ui.selectedVendorName), tostring(ui.selectedNpcID),
+        tostring(HDG.HousingCatalogObserver:IsReady())))
+    local tiles, priced = HDG.Selectors:Call("acq.selected.items", st, {}), 0
+    for i, ed in ipairs(tiles) do
+        if ed.costText ~= "" then priced = priced + 1 end
+        if i <= 6 then
+            local row = HDG.HousingCatalogObserver:GetRow(ed.itemID)
+            _G.print(("  %d %s | tile %q | row %q | variants %d"):format(ed.itemID, tostring(ed.name),
+                tostring(ed.costText), tostring(row and row.costLine), row and #row.costVariants or -1))  -- exception(nullable): probe prints a miss as -1
+        end
+    end
+    _G.print(("  %d tiles, %d with a cost"):format(#tiles, priced))
+end
+
 function D:CostDump(rest)
     local id = tonumber((rest or ""):match("%d+"))
-    if not id then _G.print("|cff666666Usage: /hdgr costdump <itemID>|r"); return end
+    if not id then return _dumpVendorTiles() end
     local row = HDG.HousingCatalogObserver:GetRow(id)
     if not row then
         _print(("no catalog row for %d (catalog ready? item matches searcher?)"):format(id))

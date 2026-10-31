@@ -312,7 +312,7 @@ local function _buildCardRow(entry, displayName, state, catalogReady, selectedID
         url          = def.url,
         isSnapshot   = entry.type == "snapshot",
         canEdit      = not isReadOnly and entry.type == "style",
-        canExport    = not isReadOnly,
+        canExport    = not isReadOnly and (catalogReady or not HDG.StyleResolve.NeedsCatalog(entry.id, state)),
         canDelete    = not isReadOnly,
     }
 end
@@ -502,15 +502,40 @@ Selectors:Register("styles.landing.looseStyles", {
 
 -- ===== Export surface =======================================================
 -- styles.export.sourceRows: grouped source list for the Export sub-view. Header
--- rows + item rows for the player's shopping lists / My Styles / furnishing
--- sets, plus a static Decor Collection row, filtered by the export search box.
--- PURE: the export CODE is built controller-side (codecs + the catalog observer
--- are non-store singletons), so this selector only enumerates keys + names.
+-- rows + item rows for the player's shopping lists / My Styles / Smart Sets /
+-- furnishing sets, plus a static Decor Collection row, filtered by the export
+-- search box. PURE: the export CODE is built controller-side (codecs + the
+-- catalog observer are non-store singletons), so this selector only enumerates
+-- keys + names.
 local EXPORT_GROUPS = {
     { group = "shopping", label = "SHOPPING LISTS" },
     { group = "style",    label = "MY STYLES" },
+    { group = "smartset", label = "locale:STY_EXPORT_GROUP_SMARTSETS" },
     { group = "set",      label = "FURNISHING SETS" },
 }
+
+-- The player's exportable sources by group, each sorted by name.
+local function _exportSourceItems(state)
+    local items = { shopping = {}, style = {}, smartset = {}, set = {} }
+    for id, list in pairs(state.account.vendorShoppingLists) do
+        -- Count what the card shows: _vendorListRecord leaves a blueprint list's dyes out.
+        items.shopping[#items.shopping + 1] = { key = "vsl:" .. id, name = list.name or id,  -- exception(nullable): list.name optional, mirror _vendorListRecord fallback
+            countHint = #_vendorListRecord(list, id).items }
+    end
+    for id, def in pairs(state.account.collections) do
+        local group = id:match("^(%a+):")   -- style: (incl. style:import:) and smartset:; snapshots stay off this list
+        if group == "style" or group == "smartset" then
+            items[group][#items[group] + 1] = { key = id, name = _entryDisplayName({ def = def, id = id }) }
+        end
+    end
+    for key, set in pairs(state.account.furnishingSets) do
+        items.set[#items.set + 1] = { key = key, name = set.name, countHint = #set.items }
+    end
+    for _, g in pairs(items) do
+        table.sort(g, function(a, b) return tostring(a.name):lower() < tostring(b.name):lower() end)
+    end
+    return items
+end
 
 Selectors:Register("styles.export.sourceRows", {
     reads = {
@@ -525,24 +550,7 @@ Selectors:Register("styles.export.sourceRows", {
         local selected = state.session.ui.styles.export.selectedKey
         local needle   = raw ~= "" and raw or nil
         local function match(name) return (not needle) or tostring(name):lower():find(needle, 1, true) ~= nil end
-
-        local items = { shopping = {}, style = {}, set = {} }
-        for id, list in pairs(state.account.vendorShoppingLists) do
-            -- Count what the card shows: _vendorListRecord leaves a blueprint list's dyes out.
-            items.shopping[#items.shopping + 1] = { key = "vsl:" .. id, name = list.name or id,  -- exception(nullable): list.name optional, mirror _vendorListRecord fallback
-                countHint = #_vendorListRecord(list, id).items }
-        end
-        for id, def in pairs(state.account.collections) do
-            if id:match("^style:") then
-                items.style[#items.style + 1] = { key = id, name = _entryDisplayName({ def = def, id = id }) }
-            end
-        end
-        for key, set in pairs(state.account.furnishingSets) do
-            items.set[#items.set + 1] = { key = key, name = set.name, countHint = #set.items }
-        end
-        for _, g in pairs(items) do
-            table.sort(g, function(a, b) return tostring(a.name):lower() < tostring(b.name):lower() end)
-        end
+        local items = _exportSourceItems(state)
 
         local out = {}
         -- Decor Collection FIRST: it's the only thing housing.wowdb.com can import,
@@ -559,7 +567,7 @@ Selectors:Register("styles.export.sourceRows", {
                 if match(it.name) then matched[#matched + 1] = it end
             end
             if #matched > 0 then
-                out[#out + 1] = { kind = "header", group = grp.group, label = grp.label, count = #matched }
+                out[#out + 1] = { kind = "header", group = grp.group, label = HDG.Locale:Resolve(grp.label), count = #matched }
                 for _, it in ipairs(matched) do
                     out[#out + 1] = { kind = "item", group = grp.group, key = it.key, name = it.name,
                                       countHint = it.countHint, isSelected = it.key == selected }
@@ -786,6 +794,37 @@ function HDG.StyleResolve.ItemsFor(id, state)
         return ids
     end
     return {}
+end
+
+-- A card whose decor its tag rules pick (a preset Room Concept) has none until
+-- the catalog loads, so its share code waits for it (ItemsFor's rules branch).
+-- A Smart Set shares its tags, which need no catalog.
+function HDG.StyleResolve.NeedsCatalog(id, state)
+    local coll = HDG.StyleResolve.RecordFor(id, state)
+    if not coll then return false end   -- exception(nullable): a furnishing set or the whole collection has no style record
+    if coll.type == "smartset" then return false end
+    return type(coll.rules) == "table" and not (type(coll.items) == "table" and #coll.items > 0)
+end
+
+-- id -> share code. A Smart Set shares its name, description and tag rules as an
+-- HDGSS:1: code (owner 2026-10-31: "Share the tags instead"), so the importer's
+-- own catalog picks the decor. Every other card shares its decor as an HDGVL:1:
+-- list, the format Shopping Import and Styles Import both read: one line per item,
+-- no vendor, qty 1, sorted so the same card gives the same code (a preset's
+-- matches come from a pairs walk).
+function HDG.StyleResolve.ShareCode(id, state)
+    local coll = HDG.StyleResolve.RecordFor(id, state)
+    if coll.type == "smartset" then return HDG.Parsers:Format("smartSet", coll) end
+    local ids = {}
+    for i, itemID in ipairs(HDG.StyleResolve.ItemsFor(id, state)) do ids[i] = itemID end
+    table.sort(ids)
+    local items = {}
+    for i, itemID in ipairs(ids) do items[i] = { itemID = itemID, qty = 1 } end
+    return HDG.ShoppingCodec.Encode({
+        name  = coll.displayName,
+        items = items,
+        meta  = { source = "style" },
+    })
 end
 
 -- Currently-selected collection record. Delegates to StyleResolve.RecordFor.
@@ -1436,6 +1475,9 @@ local SMARTSET_AXES = {
     "motif", "formality", "condition", "light", "palette", "seasonal",
 }
 
+-- "room" -> "Room": the builder's axis list and the import preview's tag rows.
+local function _axisLabel(axis) return axis:sub(1, 1):upper() .. axis:sub(2) end
+
 -- axisRows: 14-axis list with isActive flags + per-axis touched-tag count.
 Selectors:Register("styles.smartset.axisRows", {
     reads = {
@@ -1452,7 +1494,7 @@ Selectors:Register("styles.smartset.axisRows", {
             out[i] = {
                 kind     = "stylesAxisRow",
                 axis     = axis,
-                label    = axis:sub(1, 1):upper() .. axis:sub(2),
+                label    = _axisLabel(axis),
                 isActive = active == axis,
                 tagCount = n,
             }
@@ -1486,8 +1528,7 @@ local function _span(rec, slot)
     return first, stop - 1
 end
 
--- Walk FacetDB: visitorFn(axisName, tagStr, itemID) per (axis x tag x item).
--- _visitRecordTags extracted so the outer loop is a flat axis x item double-loop.
+-- One item's tags: visitorFn(axisName, tagStr, itemID) per (axis x tag).
 local function _visitRecordTags(axisVocab, axisName, itemID, rec, slot, visitorFn)
     local first, last = _span(rec, slot)
     for p = first, last do
@@ -1496,23 +1537,31 @@ local function _visitRecordTags(axisVocab, axisName, itemID, rec, slot, visitorF
     end
 end
 
+local function _visitRecord(vocab, itemID, rec, visitorFn)
+    for axisName, slot in pairs(_axisSlots()) do
+        local axisVocab = vocab[axisName]
+        if axisVocab then _visitRecordTags(axisVocab, axisName, itemID, rec, slot, visitorFn) end
+    end
+end
+
+-- Walk the catalog's items that FacetDB tags: visitorFn(axisName, tagStr, itemID)
+-- per (axis x tag x item). The catalog's only: FacetDB also tags items the catalog
+-- doesn't have, and counting those put wall-art at 156 against 133 in the catalog
+-- (test audit B9, 2026-10-31) -- a count the list it opens never shows.
 local function _walkFacetDB(visitorFn)
     local vocab = HDG.StaticData.Facets:GetVocab()
     local db    = HDG.StaticData.Facets:GetAll()
-    for axisName, slot in pairs(_axisSlots()) do
-        local axisVocab = vocab[axisName]
-        if axisVocab then
-            for itemID, rec in pairs(db) do
-                _visitRecordTags(axisVocab, axisName, itemID, rec, slot, visitorFn)
-            end
-        end
+    for itemID in pairs(HDG.HousingCatalogObserver.byItemID) do
+        local rec = db[itemID]
+        if rec then _visitRecord(vocab, itemID, rec, visitorFn) end   -- exception(nullable): FacetDB tags most catalog items, not all
     end
 end
 
 local _EMPTY = {}
 
--- Reverse facet index, [axis][tagStr] = { itemID, ... }, built in ONE FacetDB
--- walk; tag tallies are #index[axis][tag]. A memo, so a close lets it go with the
+-- Reverse facet index over the catalog's items, [axis][tagStr] = { itemID, ... },
+-- built in ONE walk; tag tallies are #index[axis][tag], so it follows the catalog:
+-- a sweep rebuilds it (catalog tick). A memo, so a close lets it go with the
 -- other memos (InvalidateMemos("*")) and the next Styles visit walks FacetDB
 -- again: as a file local it stayed for the session, 785 KB after one Styles
 -- visit (offline walker, 2026-10-22). The scorer reads each item's ENCODED
@@ -1523,9 +1572,11 @@ Selectors:Register("styles.smartset._facetIndex", {
     memoized = true,
     reads = {
         "session.resolvers.staticData.tick",  -- ADR-003c StaticData marker (sweep rule 4c)
+        "session.resolvers.catalog.tick",
         "session.styles.changeSeq",
     },
     fn = function(state)
+        local _ = state.session.resolvers.catalog.tick   -- the walk reads the observer's byItemID
         local _ = state.session.styles.changeSeq   -- the index's key since ADR-003a: a change rebuilds it
         local index = {}
         _walkFacetDB(function(axisName, tagStr, itemID)
@@ -1966,53 +2017,94 @@ Selectors:Register("styles.import.destinationItems", {
     end,
 })
 
--- previewRows: previewItems int-array -> scrollbox rows with name/icon from catalog.
+-- A Smart Set code hides the destination choice: it always lands in Filtered Sets.
+Selectors:Register("styles.import.choosesDestination", {
+    reads = { "session.ui.styles.import.parseSmartSet" },
+    fn = function(state) return state.session.ui.styles.import.parseSmartSet == nil end,
+})
+
+-- One row per parsed item: name/icon from the catalog, "#id" or "unknown" tail.
+local function _importItemRows(items)
+    local out = {}
+    for _, itemID in ipairs(items) do
+        local row     = HDG.HousingCatalogObserver:GetRow(itemID)
+        local iconTex, iconAtl = HDG.Format.CoerceIconPair(
+            row and row.iconTexture, row and row.iconAtlas)
+        out[#out + 1] = {
+            kind        = "stylesImportPreviewRow",
+            key         = itemID,
+            name        = (row and row.name) or ("Item " .. tostring(itemID)),
+            tail        = row and ("#" .. itemID) or "unknown",
+            iconTexture = iconTex,
+            iconAtlas   = iconAtl,
+        }
+    end
+    return out
+end
+
+-- One row per tag of a Smart Set code: the tag, then its axis and severity.
+local function _importTagRows(rules)
+    local out = {}
+    for axis, tags in pairs(rules) do
+        for tag, sev in pairs(tags) do
+            out[#out + 1] = { kind = "stylesImportPreviewRow", key = "tag:" .. axis .. ":" .. tag,
+                              name = tag, tail = _axisLabel(axis) .. " - " .. _BAND_LABELS[sev] }
+        end
+    end
+    table.sort(out, function(a, b) return a.key < b.key end)
+    return out
+end
+
+-- previewRows: the parsed items as rows with name/icon from the catalog, or a
+-- Smart Set code's tags.
 Selectors:Register("styles.import.previewRows", {
     reads = {
         "session.ui.styles.import.previewItems",
+        "session.ui.styles.import.parseSmartSet",
         "session.resolvers.catalog.tick",
     },
     fn = function(state)
-        local items = state.session.ui.styles.import.previewItems
+        local imp = state.session.ui.styles.import
+        if imp.parseSmartSet then return _importTagRows(imp.parseSmartSet.rules) end
+        local items = imp.previewItems
         if not (items and #items > 0) then return {} end
-        local out = {}
-        for _, itemID in ipairs(items) do
-            local row     = HDG.HousingCatalogObserver:GetRow(itemID)
-            local iconTex, iconAtl = HDG.Format.CoerceIconPair(
-                row and row.iconTexture, row and row.iconAtlas)
-            out[#out + 1] = {
-                kind        = "stylesImportPreviewRow",
-                itemID      = itemID,
-                name        = (row and row.name) or ("Item " .. tostring(itemID)),
-                iconTexture = iconTex,
-                iconAtlas   = iconAtl,
-                isKnown     = row ~= nil,
-            }
-        end
-        return out
+        return _importItemRows(items)
     end,
 })
 
 Selectors:Register("styles.import.canCommit", {
-    reads = { "session.ui.styles.import.previewItems" },
+    reads = { "session.ui.styles.import.previewItems", "session.ui.styles.import.parseSmartSet" },
     fn = function(state)
-        local items = state.session.ui.styles.import.previewItems
+        local imp = state.session.ui.styles.import
+        if imp.parseSmartSet then return true end
+        local items = imp.previewItems
         return items and #items > 0 or false
     end,
 })
 
+-- A Smart Set code's status: its tag count, and how many tags this version
+-- doesn't know and dropped (vocabulary drift, shown, never silent).
+local function _smartSetImportStatus(set)
+    if set.dropped > 0 then
+        return HDG.Locale:Get("STY_IMPORT_SMARTSET_DROPPED"):format(set.tagCount, set.dropped)
+    end
+    return HDG.Locale:Get("STY_IMPORT_SMARTSET_STATUS"):format(set.tagCount)
+end
+
 -- statusLabel: shows the current parse state ("No items yet" / "N items
--- parsed" / "Error: <text>"). Drives the import.statusRow binding.
+-- parsed" / "Error: <text>" / a Smart Set's tags). Drives the import.statusRow binding.
 Selectors:Register("styles.import.statusLabel", {
     reads = {
         "session.ui.styles.import.previewItems",
         "session.ui.styles.import.parseError",
         "session.ui.styles.import.parseUnmatched",
+        "session.ui.styles.import.parseSmartSet",
         "session.ui.styles.import.urlText",
     },
     fn = function(state)
         local s = state.session.ui.styles.import
         if s.parseError then return "Error: " .. tostring(s.parseError) end
+        if s.parseSmartSet then return _smartSetImportStatus(s.parseSmartSet) end
         if s.previewItems and #s.previewItems > 0 then
             local matched   = #s.previewItems
             local unmatched = s.parseUnmatched or 0

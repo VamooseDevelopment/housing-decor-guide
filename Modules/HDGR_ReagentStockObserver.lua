@@ -27,8 +27,7 @@ local RS = HDG.ReagentStockObserver
 -- Sourced from the recipes.db selector, not the raw HDGR_DecorDB table, so 12.1
 -- capture corrections in account.recipeCapture are covered. Unioned with
 -- quality-variant siblings because a recipe names one tier and the player may
--- hold another. Rebuilt only when the merged db table identity changes -- the
--- same lazy-rebuild bargain as StaticData's _ensureReagentUsers.
+-- hold another. Rebuilt only when the merged db table identity changes.
 local _idsCache, _idsSource
 
 local function _collectReagentIDs(db)

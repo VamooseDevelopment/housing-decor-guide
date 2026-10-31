@@ -27,6 +27,14 @@ function F.FriendlyDate(d)
     return tostring(d)
 end
 
+-- An icon inline in text, cropped as HDG crops its icon textures (ICON_CROP).
+local CROP_PX = {}
+for i, f in ipairs(HDG.Constants.ICON_CROP) do CROP_PX[i] = math.floor(f * 64 + 0.5) end
+
+function F.IconMarkup(icon, size)
+    return ("|T%s:%d:%d:0:0:64:64:%d:%d:%d:%d|t"):format(icon, size, size, CROP_PX[1], CROP_PX[2], CROP_PX[3], CROP_PX[4])
+end
+
 -- Returns "" for zero/nil. FormatGoldZero is the zero-visible variant (column-aligned tables).
 --   FormatAmount(n)              -> "1,234"  (commas, suppress zero)
 --   FormatCurrency(amount, cid)  -> "1,234 <icon>"
@@ -132,6 +140,25 @@ end
 function F.FormatGoldZero(copper)
     if not copper or copper <= 0 then return "0 " .. HDG.Constants.COIN_ATLAS end
     return F.FormatGold(copper)
+end
+
+-- An amount nobody can price is "?", the Mogul and Goblin tables' mark for unknown,
+-- never FormatGoldZero's "0 <coin>": a zero reads as a real price (owner ruling
+-- 2026-10-31). nil = unknown; anything else formats as FormatGoldZero does.
+function F.FormatGoldOrUnknown(copper)
+    if copper == nil then return "?" end  -- exception(nullable): an unpriced sale, mat or total
+    return F.FormatGoldZero(copper)
+end
+
+-- A profit or net, signed: "+<gold>" a gain, "-<gold>" a loss, "0 <coin>" break-even,
+-- "?" when a price in it is unknown. Every profit and net cell paints through this:
+-- FormatGoldZero shows anything below zero as 0, which hid losses (owner ruling
+-- 2026-10-31, negative everywhere).
+function F.FormatGoldSigned(copper)
+    if copper == nil then return "?" end  -- exception(nullable): an unpriced sale or mat
+    if copper < 0 then return "-" .. F.FormatGoldZero(-copper) end
+    if copper > 0 then return "+" .. F.FormatGoldZero(copper) end
+    return F.FormatGoldZero(0)
 end
 
 -- Relative-time label from a PRE-COMPUTED elapsed-seconds value (impure subtraction stays at call site).

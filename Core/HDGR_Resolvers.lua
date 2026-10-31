@@ -69,7 +69,8 @@ end
 --   facade  -- selector-visible access pattern(s) the sweep enforces the tick
 --              read against. String module name, list of module names, or
 --              { module=, method= } for method-scoped facades (one module
---              hosting two resolvers, e.g. QuestNameResolver:IsComplete).
+--              hosting two resolvers, e.g. QuestNameResolver:IsComplete), or a
+--              list of those (two methods on one tick: questStatus).
 --   requires -- OPTIONAL extra read paths the facade's output depends on
 --              (state-resident inputs, e.g. prices' account.prices caches).
 --   actions -- list of bump-action specs (see registerBumpAction).

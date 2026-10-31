@@ -151,6 +151,15 @@ R.EssenceBadge = function()
 end
 R.LumberAutoShow       = { title = "locale:TIP_LUMBER_AUTO_SHOW_TITLE",      body = "locale:TIP_LUMBER_AUTO_SHOW_BODY" }
 R.LumberGoal           = { title = "locale:TIP_LUMBER_GOAL_TITLE",           body = "locale:TIP_LUMBER_GOAL_BODY" }
+-- The fit verdict in full. Blizzard's reasons are whole sentences, and joined on
+-- the verdict's one line they ran off the panel with nothing to hover
+-- (CombatWombatt23, Discord 2026-10-31). One reason per line; no tooltip while
+-- the blueprint fits or its contents haven't arrived.
+function R.BlueprintVerdict()
+    local b = HDG.Selectors:Call("blueprints.budgetFit", HDG.Store:GetState(), {})
+    if #b.blockingReasons == 0 then return nil end
+    return { title = "locale:TIP_BP_VERDICT_TITLE", extraLines = b.blockingReasons, anchor = "ANCHOR_TOP" }
+end
 R.BlueprintMeterRoom        = { title = "locale:TIP_BP_METER_ROOM",         anchor = "ANCHOR_TOP" }
 R.BlueprintMeterInterior    = { title = "locale:TIP_BP_METER_INTERIOR",     anchor = "ANCHOR_TOP" }
 R.BlueprintMeterExterior    = { title = "locale:TIP_BP_METER_EXTERIOR",     anchor = "ANCHOR_TOP" }
@@ -335,6 +344,20 @@ R.AcqPreset_recipes     = { title = "locale:TIP_ACQ_PRESET_REC_TITLE",  body = "
 R.AcqPreset_neighborhood = { title = "locale:TIP_ACQ_PRESET_NBH_TITLE", body = "locale:TIP_ACQ_PRESET_NBH_BODY", anchor = "ANCHOR_BOTTOM" }
 R.AcqPreset_ungated      = { title = "locale:TIP_ACQ_PRESET_UNG_TITLE", body = "locale:TIP_ACQ_PRESET_UNG_BODY", anchor = "ANCHOR_BOTTOM" }
 R.AcqMissingToggle      = { title = "locale:TIP_ACQ_MISSING_TITLE",     body = "locale:TIP_ACQ_MISSING_BODY",     anchor = "ANCHOR_BOTTOM" }
+
+-- ===== Decor Quests preset strip and tracker ===============================
+-- One recipe per preset chip, named "DqPreset_" .. p.value (the LayoutConfig loop key).
+R.DqPreset_todo     = { title = "locale:TIP_DQ_PRESET_TODO_TITLE",     body = "locale:TIP_DQ_PRESET_TODO_BODY",     anchor = "ANCHOR_BOTTOM" }
+R.DqPreset_progress = { title = "locale:TIP_DQ_PRESET_PROGRESS_TITLE", body = "locale:TIP_DQ_PRESET_PROGRESS_BODY", anchor = "ANCHOR_BOTTOM" }
+R.DqPreset_here     = { title = "locale:TIP_DQ_PRESET_HERE_TITLE",     body = "locale:TIP_DQ_PRESET_HERE_BODY",     anchor = "ANCHOR_BOTTOM" }
+R.DqPreset_done     = { title = "locale:TIP_DQ_PRESET_DONE_TITLE",     body = "locale:TIP_DQ_PRESET_DONE_BODY",     anchor = "ANCHOR_BOTTOM" }
+R.DqPreset_all      = { title = "locale:TIP_DQ_PRESET_ALL_TITLE",      body = "locale:TIP_DQ_PRESET_ALL_BODY",      anchor = "ANCHOR_BOTTOM" }
+R.DqHideCollected   = { title = "locale:TIP_DQ_HIDE_COLLECTED_TITLE",  body = "locale:TIP_DQ_HIDE_COLLECTED_BODY",  anchor = "ANCHOR_BOTTOM" }
+R.DqTrackerExpand   = { title = "locale:TIP_DQ_TRK_EXPAND_TITLE",      body = "locale:TIP_DQ_TRK_EXPAND_BODY",      anchor = "ANCHOR_BOTTOM" }
+R.DqTrackerClose    = { title = "locale:TIP_DQ_TRK_CLOSE_TITLE",       anchor = "ANCHOR_BOTTOM" }
+R.DqTrackerOpen     = { title = "locale:TIP_DQ_TRK_OPEN_TITLE",        anchor = "ANCHOR_TOP" }
+R.DqTrackerStop     = { title = "locale:TIP_DQ_TRK_STOP_TITLE",        anchor = "ANCHOR_TOP" }
+R.DqTrackerDone     = { title = "locale:TIP_DQ_TRK_DONE_TITLE",        anchor = "ANCHOR_TOP" }
 -- Current zone: names the zones a click sets, or why the button is greyed.
 function R.AcqCurrentZone()
     local state = HDG.Store:GetState()
@@ -360,6 +383,7 @@ end
 -- the item lands, because it keeps the vendor.
 R.CartAdd       = { title = "locale:TIP_CART_ADD_TITLE", body = "locale:TIP_CART_ADD_BODY",        anchor = "ANCHOR_TOP" }
 R.CartAddVendor = { title = "locale:TIP_CART_ADD_TITLE", body = "locale:TIP_CART_ADD_VENDOR_BODY", anchor = "ANCHOR_TOP" }
+R.DecorQuestSteps = { title = "locale:DQ_QUEST_STEPS_BTN", body = "locale:TIP_DQ_QUEST_STEPS_BODY", anchor = "ANCHOR_TOP" }
 
 -- ===== Decor browser controls ===============================================
 R.DecorDestroy      = { title = "locale:TIP_DECOR_DESTROY_TITLE",       body = "locale:TIP_DECOR_DESTROY_BODY",       anchor = "ANCHOR_TOP" }
@@ -545,19 +569,23 @@ local function _appendRecipeDecorStatus(extras, itemID)
     end
 end
 
--- Recipe knowledge status, from recipes.knowledge. For alt-known recipes, NAME the alt:
--- Mogul resolves the chars from per-char knownRecipes (keyed by spellID, NOT the recipe
--- key) with the same predicate recipes.knowledge uses (not you, not hidden), so a
--- recipe in `alts` always has at least one name.
+-- Recipe knowledge status, from recipes.knowledge. For alt-known recipes, NAME the alts:
+-- knowledge.altChars lists them per recipe, by name -- the same list that decided the
+-- recipe is in `alts`, so it always has at least one name.
+local function _altNames(altChars)
+    local names = {}
+    for i, who in ipairs(altChars) do names[i] = who.name end
+    return names
+end
+
 local function _appendRecipeKnowledge(extras, itemID)
     local state     = HDG.Store:GetState()  -- top-level only: hover-time read
     local knowledge = HDG.Selectors:Call("recipes.knowledge", state)
     if knowledge.mine[itemID] then
         extras[#extras + 1] = { text = "Recipe: Known", r = 0.45, g = 0.82, b = 0.45 }
     elseif knowledge.alts[itemID] then
-        local spellID = HDG.Selectors:Call("recipes.db", state)[itemID].spellID
         extras[#extras + 1] = {
-            text = "Recipe: Known by " .. table.concat(HDG.Mogul:AltsKnowingSpellID(spellID), ", "),
+            text = "Recipe: Known by " .. table.concat(_altNames(knowledge.altChars[itemID]), ", "),
             r = 0.85, g = 0.72, b = 0.35,
         }
     else
@@ -632,7 +660,8 @@ end
 -- every row, which is how this line silently showed nothing at all.
 local function _appendRecipeSource(extras, itemID)
     if not itemID then return end   -- exception(nullable): header rows carry no recipe
-    local sources = HDG.ProfessionScanner:GetRecipeSourceForItem(itemID)
+    local recipes = HDG.Selectors:Call("recipes.db", HDG.Store:GetState())   -- seed + the player's capture
+    local sources = HDG.ProfessionScanner:GetRecipeSourceForItem(itemID, recipes)
     if not sources then return end  -- exception(nullable): ~1 recipe in 20 has no acquisition text
     for _, src in ipairs(sources) do
         -- The game labels one source kind "Recipe", and this tooltip already
@@ -730,19 +759,22 @@ local WARBAND_ICON = "|A:warbands-icon:14:14|a "
 function R.CharacterRoster(itemID)
     if not itemID then return {}, 0 end
     local map = HDG.Selectors:Call("characters.reagentStock", HDG.Store:GetState(), {})
-    local byName, order, total = {}, {}, 0
+    -- Merged per character (the quality tiers of one reagent add up), keyed by
+    -- charKey: keyed by name, an Alice on another realm folded into yours, and the
+    -- Lumber hover, which lists alts only, lost her (test audit B1, 2026-10-31).
+    local byChar, order, total = {}, {}, 0
     local function absorb(id)
         local entry = map[id]   -- exception(nullable): most items are held by nobody
         if not entry then return end
         total = total + entry.total
         for _, row in ipairs(entry.perChar) do
-            local seen = byName[row.name]
+            local seen = byChar[row.charKey]
             if seen then
                 seen.count = seen.count + row.count
             else
-                byName[row.name] = { name = row.name, classFile = row.classFile,
-                                     count = row.count, isCurrent = row.isCurrent }
-                order[#order + 1] = byName[row.name]
+                byChar[row.charKey] = { name = row.name, classFile = row.classFile,
+                                        count = row.count, isCurrent = row.isCurrent }
+                order[#order + 1] = byChar[row.charKey]
             end
         end
     end

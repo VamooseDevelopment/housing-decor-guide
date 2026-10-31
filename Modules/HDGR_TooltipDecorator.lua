@@ -22,17 +22,18 @@ local function ACCENT_PREFIX()
 end
 
 -- Decor catalog line. row.vendors[1].name = first vendor (empty if none).
--- Expansion via GetExpansionForItem(dataTagsByID walk). nil = skip line.
+-- Expansion via GetExpansionForItem; a decor the catalog tags with no expansion
+-- (the plain interior walls and doorways) still gets the line, without it.
 local function decorLine(itemID)
     local row = HDG.HousingCatalogObserver:GetRow(itemID)
     if not row then return nil end
     local exp = HDG.HousingCatalogObserver:GetExpansionForItem(itemID)
-    if not exp then return nil end
+    local head = exp and ("Decor (" .. exp .. ")") or "Decor"   -- exception(nullable): a decor tagged with no expansion
     local src = (row.vendors and row.vendors[1] and row.vendors[1].name) or ""
     if src ~= "" then
-        return string.format("%sDecor (%s) - %s", ACCENT_PREFIX(), exp, src)
+        return string.format("%s%s - %s", ACCENT_PREFIX(), head, src)
     end
-    return string.format("%sDecor (%s)", ACCENT_PREFIX(), exp)
+    return ACCENT_PREFIX() .. head
 end
 
 -- Queue presence line. Walks queue once; first match wins.
@@ -51,13 +52,13 @@ end
 
 -- Reagent-usage line. Shows count of housing-decor recipes using this item,
 -- regardless of whether learned (flags useful bag reagents before recipe known).
--- Counted live from DecorDB's reagent lists (ReagentsDB has no usedIn field).
+-- Counted from recipes.reagentUsers (shipped recipes plus the player's own scans).
 local function reagentLine(itemID)
-    local R = HDG.StaticData.Recipes
+    local byReagent = HDG.Selectors:Call("recipes.reagentUsers", HDG.Store:GetState(), {})
     local seen, n = {}, 0
     local function count(id)
-        local users = R:RecipesUsingReagent(id)
-        if not users then return end
+        local users = byReagent[id]
+        if not users then return end  -- exception(nullable): most items are no decor reagent
         for _, r in ipairs(users) do
             if not seen[r] then seen[r] = true; n = n + 1 end
         end

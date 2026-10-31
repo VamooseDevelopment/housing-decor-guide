@@ -357,6 +357,22 @@ HDGR_DecorDB = {
             [173170] = { name = "Essence of Rebirth", qty = 2 },
         },
     },
+    [1316323] = { -- Venthyr Alchemy Rack
+        name = "Venthyr Alchemy Rack",
+        spellID = 1316323,
+        itemID = 284552,
+        decorID = 28566,
+        profession = "Alchemy",
+        category = "House Decor",
+        expansion = "Shadowlands Alchemy",
+        expansionID = 2750,
+        reagents = {
+            [171289] = { name = "Ground Widowbloom", qty = 5 },
+            [171292] = { name = "Ground Nightshade", qty = 5 },
+            [180732] = { name = "Rune Etched Vial", qty = 1 },
+            [251772] = { name = "Arden Lumber", qty = 5 },
+        },
+    },
     -- EXPANSION: Dragon Isles Alchemy
     [56145] = { -- Dragon's Elixir Bottle
         name = "Dragon's Elixir Bottle",

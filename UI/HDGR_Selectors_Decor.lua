@@ -78,6 +78,8 @@ local function _decorRowPasses(item, f)
     if not f.matchTag(id) then return false end
     if f.onlyUncollected and f.isCollected(id) then return false end
     if f.onlyStored and not f.isStored(id) then return false end
+    -- Hide PvP decor spares the Destroy list: it lists what you own so you can destroy it.
+    if not f.onlyStored and f.isHiddenPvp(id) then return false end
     return true
 end
 
@@ -116,6 +118,9 @@ local function _stampDecorRow(item, f)
     row.isCollected      = f.isCollected(id)
     row.inStoredMode     = f.onlyStored == true
     row.destroyableCount = f.destroyableCount(id)
+    -- Outside the Stored view, every copy owned (the tooltip's "Owned: N"; owner 10-30: a decor
+    -- that is only placed read blank). The Stored view counts storage, all Destroy can act on.
+    row.shownCount       = row.inStoredMode and row.destroyableCount or HDG.HousingCatalogObserver:OwnedTotal(id)
     return row
 end
 
@@ -123,7 +128,7 @@ end
 -- pinned yet, or a row that joined the list after the pin -- a new search).
 local function _sortCount(row, pinned)
     local c = pinned and pinned[row.variantKey]   -- exception(nullable): no pin, or a row the pin never saw
-    if c == nil then c = row.destroyableCount or 0 end   -- exception(boundary): sparse struct field
+    if c == nil then c = row.destroyableCount end
     return c
 end
 
@@ -143,6 +148,7 @@ local function _stampVariantRow(stamped, item, dv)
     row.dyeColorsByChannel = dv.dyeColorsByChannel
     row.numStored          = dv.numStored
     row.destroyableCount   = dv.numStored
+    row.shownCount         = dv.numStored   -- a stack's copies in storage: the catalog doesn't split placed by dye
     row.entryID            = dv.entryID   -- per-variant destroy identity (else destroy hits the base stack)
     return row
 end
@@ -156,7 +162,7 @@ local function _emitDecorRows(out, item, stamped, activeTag)
     -- Base row = the undyed (vid=0) variant. In Stored view, suppress it when the item
     -- has dyed stacks but zero undyed copies (Blizzard's showQuantity > 0) -- else the
     -- undyed slot renders a phantom count that can't be destroyed.
-    local hideEmptyUndyed = hasDyed and stamped.inStoredMode and (stamped.destroyableCount or 0) <= 0
+    local hideEmptyUndyed = hasDyed and stamped.inStoredMode and stamped.destroyableCount <= 0
     if not (activeTag == "Dyed" and hasDyed) and not hideEmptyUndyed then
         out[#out + 1] = stamped
     end
@@ -175,6 +181,8 @@ Selectors:Register("decor.matchingRows", {
     -- Memoized: decor.headerLabel calls through decor.items for "shown N", which
     -- would double-walk ~2000 items per dispatch without caching.
     memoized = true,
+    -- The rows' owned count is the catalog observer's own OwnedTotal (review L1, 10-31).
+    reads = { "session.resolvers.catalog.tick" },
     calls = {
         "decor.allItems",
         "decor.filterQuery",
@@ -190,6 +198,7 @@ Selectors:Register("decor.matchingRows", {
         -- direct calls must still be declared.
         "decor.isFavorite",
         "decor.craftableState",
+        "decor.isHiddenPvp",
         -- decor.selectedItemID retired: selection highlight owned by
         -- SelectionBehaviorMixin; clicks no longer invalidate the items list.
     },
@@ -207,7 +216,8 @@ Selectors:Register("decor.matchingRows", {
             isFavorite       = Selectors:Call("decor.isFavorite",       state, ctx),
             craftableState   = Selectors:Call("decor.craftableState",   state, ctx),
             destroyableCount = Selectors:Call("decor.destroyableCount", state, ctx),
-            needle           = q ~= "" and q:lower() or nil,
+            isHiddenPvp      = Selectors:Call("decor.isHiddenPvp",      state, ctx),
+            needle          = q ~= "" and q:lower() or nil,
         }
 
         local out = {}
@@ -292,7 +302,7 @@ Selectors:Register("decor.destroyTarget", {
                     end
                 end
             end
-            return row.entryID, row.undyedNumStored or row.quantity or 0  -- exception(nullable): undyedNumStored nil for non-customizable decor -> all copies undyed
+            return row.entryID, row.undyedNumStored or row.quantity  -- exception(nullable): undyedNumStored nil for non-customizable decor -> all copies undyed
         end
     end,
 })
@@ -305,21 +315,6 @@ Selectors:Register("decor.destroyProgress", {
         return state.session.destroying   -- exception(nullable): nil = no run
     end,
 })
-
--- The vendor + Map / + Way target: the first vendor with a known location, one your
--- faction can shop at first (yours or neutral), else any with a location (owner
--- 2026-10-15). vendors[1] alone left a mappable second vendor unreachable. nil when
--- no vendor has a location -- the buttons grey and the source line says why.
-local function _mapVendor(vendors, side)
-    local fallback
-    for _, v in ipairs(vendors) do
-        if v.canWaypoint then
-            if v.side == side or v.side == "N" then return v end
-            fallback = fallback or v
-        end
-    end
-    return fallback
-end
 
 Selectors:Register("decor.selectedItem", {
     memoized = true,
@@ -335,7 +330,7 @@ Selectors:Register("decor.selectedItem", {
         -- its own vendor-first sourceType while the bake ran quest-first, so the
         -- detail panel and the tooltip for one piece could name different sources.
         local firstVendor = row.vendors and row.vendors[1]
-        local mapVendor   = row.vendors and _mapVendor(row.vendors, state.session.identity.factionGroup)
+        local mapVendor   = row.vendors and HDG.VendorRank.MapVendor(row.vendors, state.session.identity.factionGroup)
 
         -- Destroy identity: the selected row's own variant (decor.destroyTarget).
         local vEntryID, vDestroyable = Selectors:Call("decor.destroyTarget", state, ctx)(
@@ -360,16 +355,16 @@ Selectors:Register("decor.selectedItem", {
             sourceTags    = row.sourceTags,   -- full baked tag list for the detail chip strip
             canCustomize  = row.canCustomize or false,
             isOwned       = row.isOwned or false,
-            numStored     = row.quantity or 0,  -- exception(boundary): catalog struct field sparse
+            numStored     = row.quantity,
             categoryName             = row.categoryName,
             subcategoryName          = row.subcategoryName,
             isUniqueTrophy           = row.isUniqueTrophy or false,
             isAllowedIndoors         = row.isAllowedIndoors,
             isAllowedOutdoors        = row.isAllowedOutdoors,
             placementCost            = row.placementCost or 0,  -- exception(boundary): catalog struct field sparse
-            numPlaced                = row.numPlaced or 0,  -- exception(boundary): catalog struct field sparse
+            numPlaced                = row.numPlaced,
             destroyableInstanceCount = vDestroyable,
-            firstAcquisitionBonus    = row.firstAcquisitionBonus or 0,  -- exception(boundary): catalog struct field sparse
+            firstAcquisitionBonus    = row.firstAcquisitionBonus,
             dataTagsByID             = row.dataTagsByID,
             entryID                  = vEntryID,
         }
@@ -439,15 +434,21 @@ Selectors:Register("decor.selectedItem.profession", {
 -- -- the same convention decor.selectedItem.profession uses, so an absent
 -- answer reads as absent rather than as an empty row.
 --
+-- "Crafted" is recipes.db's answer: the seed, then the player's own capture for
+-- a recipe the seed doesn't ship (owner ruling 2026-10-31). The row's CRAFTED
+-- headline can't say it: the catalog bake reads the seed only, so a capture-only
+-- piece never gets one. Every seed recipe in the recorded catalog has that
+-- headline (305 of 305), so for them the line shows exactly as before.
+--
 -- session.resolvers.recipeSource.tick is the facade's declared read: without
 -- it, a card opened before the first fill would never repaint with the answer.
 Selectors:Register("decor.selectedItem.recipeSource", {
     reads = {"account.config.scheme", "session.resolvers.recipeSource.tick"},
-    calls = {"decor.selectedItem"},
+    calls = {"decor.selectedItem", "recipes.db"},
     fn = function(state, ctx)
         local v = Selectors:Call("decor.selectedItem", state, ctx)
-        if not v or v.sourceType ~= 6 then return "" end   -- 6 = CRAFTED
-        local sources = HDG.ProfessionScanner:GetRecipeSourceForItem(v.itemID)
+        if not v then return "" end
+        local sources = HDG.ProfessionScanner:GetRecipeSourceForItem(v.itemID, Selectors:Call("recipes.db", state, ctx))
         local best    = HDG.RecipeSourceParse.Best(sources)
         if not best then return "" end
         local where = best.name or ""
@@ -770,25 +771,24 @@ Selectors:Register("decor.isStored", {
         return function(itemID)
             local row = byItemID[itemID]
             -- Stored copies are destroyable (placed ones aren't); unique trophies never are.
-            return (row and (row.quantity or 0) > 0 and not row.isUniqueTrophy) or false  -- exception(boundary): catalog struct field sparse
+            return row.quantity > 0 and not row.isUniqueTrophy
         end
     end,
 })
 
 -- destroyableCount: destroyable copies in storage. Used for row stamping + sort order.
+-- Called for catalog rows only (the list walks byItemID), whose counts the observer fills.
 Selectors:Register("decor.destroyableCount", {
     reads = {"session.resolvers.catalog.tick"},
     fn = function(state, ctx)
         local byItemID = HDG.HousingCatalogObserver.byItemID
         return function(itemID)
             local row = byItemID[itemID]
-            if not row then return 0 end
             -- Undyed row count = the vid=0 variant's real numStored (Blizzard's
             -- GetEntryQuantity), plus remainingRedeemable which redemptions grant as the
-            -- base variant -- NOT the aggregate destroyableInstanceCount. undyedNumStored is
-            -- nil for non-customizable decor (no variant list) -> quantity (all copies undyed).
-            local undyed = row.undyedNumStored or row.quantity or 0
-            return undyed + (row.remainingRedeemable or 0)
+            -- base variant -- NOT the aggregate destroyableInstanceCount.
+            local undyed = row.undyedNumStored or row.quantity   -- exception(nullable): undyedNumStored nil for non-customizable decor -> all copies undyed
+            return undyed + row.remainingRedeemable
         end
     end,
 })
@@ -1197,7 +1197,7 @@ Selectors:Register("decor.matchesTag", {
         if top == "all" then
             if tag == "Favorites" then
                 local isFav = Selectors:Call("decor.isFavorite", state, ctx)
-                return function(itemID) return isFav and isFav(itemID) or false end
+                return isFav
             end
             if tag == "Crafted" then
                 local db = Selectors:Call("recipes.db", state, ctx)
@@ -1208,18 +1208,17 @@ Selectors:Register("decor.matchesTag", {
                 local byItemID = HDG.HousingCatalogObserver.byItemID
                 local isColl   = Selectors:Call("decor.isCollected", state, ctx)
                 return function(itemID)
-                    if isColl and isColl(itemID) then return false end
-                    local row = byItemID[itemID]
-                    return row and (row.firstAcquisitionBonus or 0) > 0 or false  -- exception(boundary): catalog struct field sparse
+                    if isColl(itemID) then return false end
+                    return byItemID[itemID].firstAcquisitionBonus > 0
                 end
             end
             if tag == "Dyed" then
                 local isDyed = Selectors:Call("decor.isDyed", state, ctx)
-                return function(itemID) return isDyed and isDyed(itemID) or false end
+                return isDyed
             end
             if tag == "Dyeable" then
                 local isDyeable = Selectors:Call("decor.isDyeable", state, ctx)
-                return function(itemID) return isDyeable and isDyeable(itemID) or false end
+                return isDyeable
             end
             if _isNewTag(tag) then
                 return Selectors:Call("decor.isNew", state, ctx)
@@ -1227,10 +1226,7 @@ Selectors:Register("decor.matchesTag", {
             if tag == "Placed" then
                 -- Decor currently placed in a house (catalog live numPlaced > 0).
                 local byItemID = HDG.HousingCatalogObserver.byItemID
-                return function(itemID)
-                    local row = byItemID[itemID]
-                    return row and (row.numPlaced or 0) > 0 or false  -- exception(boundary): catalog struct field sparse
-                end
+                return function(itemID) return byItemID[itemID].numPlaced > 0 end
             end
             if tag == "Redeemable" then
                 -- A redeemable token is outstanding AND no copy has been claimed yet
@@ -1238,10 +1234,7 @@ Selectors:Register("decor.matchesTag", {
                 local byItemID = HDG.HousingCatalogObserver.byItemID
                 return function(itemID)
                     local row = byItemID[itemID]
-                    if not row then return false end  -- exception(boundary): catalog struct field sparse
-                    return (row.remainingRedeemable or 0) > 0
-                       and (row.quantity or 0)  == 0
-                       and (row.numPlaced or 0) == 0
+                    return row.remainingRedeemable > 0 and row.quantity == 0 and row.numPlaced == 0
                 end
             end
             -- Unknown sub-tag under 'all' -> no matches.

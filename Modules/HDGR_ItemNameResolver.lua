@@ -114,7 +114,6 @@ function R:OnItemInfoReceived(itemID, success)
     if not (itemID and success) then return end
     self._pending[itemID] = true
     if self._timerScheduled then return end
-    if not (_G.C_Timer and _G.C_Timer.After) then return end
     self._timerScheduled = true
     _G.C_Timer.After(self.BATCH_WINDOW, function() R:Drain() end)
 end

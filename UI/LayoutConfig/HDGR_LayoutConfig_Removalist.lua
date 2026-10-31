@@ -71,8 +71,9 @@ _facingPanel("removalistTgtDiagPanel", "tgtDiag", "Target Facing", "removalist.t
 -- ===== List panel (Phase 1) -- faction dropdown + plot scrollbox ============
 -- Hand-built (not a _scaffoldPanel placeholder): a single Alliance/Horde dropdown
 -- fills the header (no separate title), and a fill body section holds the plot
--- scrollbox bound to removalist.plotListRows. The dropdown dispatches the faction
--- via its declarative setTransient shortcut -- no controller wiring.
+-- scrollbox bound to removalist.plotListRows. The dropdown dispatches
+-- REMOVALIST_SET_FACTION via its declarative dispatch shortcut -- no controller
+-- wiring. Its own action, not setTransient: a switch also clears both plot picks.
 
 LC.panels.removalistListPanel = {
     kind = "panel",
@@ -109,7 +110,7 @@ LC.widgets["removalistListPanel.factionDropdown"] = {
     width = "fill", height = 25, order = 10,
     placeholder     = "locale:REMV_FACTION_PLACEHOLDER",
     binding      = { menu = "removalist.factionMenuItems", current = "removalist.faction" },
-    setTransient = { view = "removalist", key = "faction" },
+    dispatch     = { type = "REMOVALIST_SET_FACTION", payloadKey = "faction" },
 }
 LC.widgets["removalistListPanel.list"] = {
     tooltip = false, kind = "scrollbox", ["in"] = "removalistListPanel.body",

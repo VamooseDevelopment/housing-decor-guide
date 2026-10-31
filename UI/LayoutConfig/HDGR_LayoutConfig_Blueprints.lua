@@ -176,7 +176,7 @@ LC.sections["blueprintsDetailPanel.verdictBand"] = {
     height = 22, order = 8, visible = "blueprints.hasVerdict",
 }
 LC.widgets["blueprintsDetailPanel.verdict"] = {
-    tooltip = false, kind = "label", ["in"] = "blueprintsDetailPanel.verdictBand",
+    tooltip = { recipe = "BlueprintVerdict" }, kind = "label", ["in"] = "blueprintsDetailPanel.verdictBand",
     binding = "blueprints.fitVerdict", font = "body", height = 16, width = "fill", order = 5,
 }
 -- Cost to build, trailing the verdict: "does it fit?" and "can I afford it?" are

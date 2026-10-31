@@ -114,6 +114,15 @@ local PALETTE_KEYS = {
 -- accent_hover removed: surface.hover (accent + 12% alpha) covers hover treatment;
 -- selected-row paint comes from RowChrome. Re-add if a Skinner needs "hover-on-selected".
 
+-- Dim text sits a small step under body text: each scheme's text_dim blended 60% toward its
+-- text, as Aegis does (owner 2026-10-30: dim text is hard to read in game). Text only -- the
+-- strong border and the done fill keep the scheme's own dim.
+local DIM_TOWARD_TEXT = 0.6
+local function _towardText(dim, text)
+    local f = DIM_TOWARD_TEXT
+    return rgba(dim.r + (text.r - dim.r) * f, dim.g + (text.g - dim.g) * f, dim.b + (text.b - dim.b) * f, dim.a)
+end
+
 local function BuildScheme(palette)
     -- Validate every key is present. Missing one is a bug; loud error
     -- beats silent nil during paint.
@@ -123,6 +132,7 @@ local function BuildScheme(palette)
         end
     end
     local C = palette
+    local textDim = _towardText(C.text_dim, C.text)
 
     return {
         -- Propagated so skinners can branch on it (e.g. StatusRail uses panel_footer on light).
@@ -153,9 +163,9 @@ local function BuildScheme(palette)
         text = {
             primary      = C.text,
             heading      = C.text_header,
-            subheading   = C.text_dim,
+            subheading   = textDim,
             muted        = C.text_label,
-            dim          = C.text_dim,
+            dim          = textDim,
             disabled     = C.text_disabled,
             -- text.link / text.link_hover: button label colors (links = buttons in WoW UX).
             -- Separate from semantic.accent so a scheme can remap button color independently.
@@ -250,7 +260,7 @@ local function BuildScheme(palette)
         },
 
         chip = {
-            default = { bg = C.panel_header, border = withAlpha(C.border, 0.65), text = C.text_dim, icon = C.text_dim },
+            default = { bg = C.panel_header, border = withAlpha(C.border, 0.65), text = textDim, icon = textDim },
             new     = { bg = withAlpha(C.warning, 0.18), border = C.warning, text = C.warning, icon = C.warning },
             atlas   = { bg = C.panel_header, border = withAlpha(C.border, 0.65), text = C.text_label, icon = C.text_label },
         },

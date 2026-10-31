@@ -84,20 +84,22 @@ local function _buildVendorItemRecord(itemID, row, npcID, shoppingHash)
                 or shoppingHash["w:" .. itemID] or false
     return {
         itemID         = itemID,
-        goldCost       = row.goldCost,    -- catalog row field
         collected      = owned,
         onShoppingList = onSL,
     }, owned, onSL
 end
 
 -- Walk catalog items for this vendor: build per-item records + tally counts.
-local function _collectVendorItems(ve, npcID, shoppingHash)
+-- By npcID: the augment's vendor name can differ from the catalog's, and a
+-- (name, zone) lookup dropped Rae'ana in two zones (test audit B3, 2026-10-31).
+-- isHiddenPvp: decor.isHiddenPvp -- decor the Hide PvP decor setting leaves out.
+local function _collectVendorItems(npcID, shoppingHash, isHiddenPvp)
     local items, uncoll, coll, slCount = {}, 0, 0, 0
-    local catalogVendor = HDG.HousingCatalogObserver:GetItemsByVendor(ve.name, ve.zone)
-    if not catalogVendor then return items, uncoll, coll, slCount end
-    for _, itemID in ipairs(catalogVendor.items) do
+    local itemIDs = HDG.HousingCatalogObserver:GetItemsByNpc(npcID)
+    if not itemIDs then return items, uncoll, coll, slCount end  -- exception(nullable): an augment vendor the catalog sells nothing at
+    for _, itemID in ipairs(itemIDs) do
         local row = HDG.HousingCatalogObserver:GetRow(itemID)
-        if row then
+        if row and not isHiddenPvp(itemID) then
             local record, owned, onSL = _buildVendorItemRecord(itemID, row, npcID, shoppingHash)
             items[#items + 1] = record
             if owned then coll = coll + 1 else uncoll = uncoll + 1 end
@@ -135,6 +137,7 @@ Selectors:Register("zone.vendorsInZone", {
         "account.activeShoppingListId",
         "account.config.zoneScannerTrackShopping",
     },
+    calls = { "decor.isHiddenPvp" },
     -- The zone alert asks three questions of this list per check, and in a big
     -- decor zone each build was ~245 KB (memory plan 2026-10-22).
     memoized = true,
@@ -159,13 +162,14 @@ Selectors:Register("zone.vendorsInZone", {
         local pTag = state.session.identity.factionGroup
         if pTag == "" then pTag = "N" end
 
+        local isHiddenPvp = Selectors:Call("decor.isHiddenPvp", state, ctx)
         local out = {}
         for _, npcID in ipairs(npcIDsInZone) do
             local ve = HDG.StaticData.VendorAugment:Get(npcID)
             if ve then
                 local vFaction = ve.faction or "N"
                 if vFaction == "N" or vFaction == pTag then
-                    local items, uncoll, coll, slCount = _collectVendorItems(ve, npcID, shoppingHash)
+                    local items, uncoll, coll, slCount = _collectVendorItems(npcID, shoppingHash, isHiddenPvp)
                     if #items > 0 then
                         out[#out + 1] = _buildZoneVendorRecord(
                             ve, npcID, vFaction, items, uncoll, coll, slCount)
@@ -236,7 +240,6 @@ Selectors:Register("zone.entriesByVendor", {
                         kind   = "item",
                         itemID = it.itemID,
                         npcID  = v.npcID,
-                        goldCost = it.goldCost,
                         collected = it.collected,
                         onShoppingList = it.onShoppingList,
                     }
@@ -269,6 +272,22 @@ Selectors:Register("zone.windowRows", {
 
 -- ===== Summary text + alert predicates =====================================
 
+-- Items on the shopping list in this zone, each once (owner ruling 2026-10-31): a
+-- wishlist line matches every vendor selling the item, and in the Waking Shores
+-- Rae'ana and Cataloger Jakes stock the same six pieces.
+local function _distinctListItems(vendors)
+    local seen, n = {}, 0
+    for _, v in ipairs(vendors) do
+        for _, it in ipairs(v.items) do
+            if it.onShoppingList and not seen[it.itemID] then
+                seen[it.itemID] = true
+                n = n + 1
+            end
+        end
+    end
+    return n
+end
+
 Selectors:Register("zone.summary", {
     calls = { "zone.vendorsInZone" },
     fn = function(state, ctx)
@@ -278,10 +297,10 @@ Selectors:Register("zone.summary", {
         -- items) -- NOT every decor vendor in the zone. zone.vendorsInZone returns ALL
         -- zone vendors; `#vendors` over-reports ("4 vendors" when 3 have nothing missing).
         -- Summary is alert-only and fires only when >=1 such vendor exists, so relevant >= 1.
-        local relevant, totalUncoll, totalSL = 0, 0, 0
+        local relevant, totalUncoll = 0, 0
+        local totalSL = _distinctListItems(vendors)
         for _, v in ipairs(vendors) do
             totalUncoll = totalUncoll + v.uncollectedCount
-            totalSL     = totalSL     + v.shoppingListCount
             if v.uncollectedCount > 0 or v.shoppingListCount > 0 then
                 relevant = relevant + 1
             end

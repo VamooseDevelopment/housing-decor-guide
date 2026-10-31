@@ -990,21 +990,19 @@ local function _awaitViewedFloor(target, onArrive)
     local function reassert()
         if not stillWaiting() then return end
         if C_HousingLayout and C_HousingLayout.SetViewedFloor then C_HousingLayout.SetViewedFloor(target) end
-        if C_Timer and C_Timer.After then C_Timer.After(FLOOR_RETRY, reassert) end
+        C_Timer.After(FLOOR_RETRY, reassert)
     end
-    if C_Timer and C_Timer.After then C_Timer.After(FLOOR_RETRY, reassert) end
-    if C_Timer and C_Timer.After then
-        C_Timer.After(FLOOR_ARRIVE_TIMEOUT, function()
-            if not _activeSweep or _activeSweep.cancelled then return end
-            if _activeSweep.awaitSeq ~= seq or not _activeSweep.awaitFn then return end   -- already arrived
-            HDG.Log:Warn("projects_save",
-                ("capture: floor %d never displayed (asked index %d, showing %s) -- capturing anyway")
-                :format(_activeSweep.floor, target, tostring(_viewedFloorNow())))
-            local fn = _activeSweep.awaitFn
-            _activeSweep.awaitTarget, _activeSweep.awaitFn = nil, nil
-            fn()
-        end)
-    end
+    C_Timer.After(FLOOR_RETRY, reassert)
+    C_Timer.After(FLOOR_ARRIVE_TIMEOUT, function()
+        if not _activeSweep or _activeSweep.cancelled then return end
+        if _activeSweep.awaitSeq ~= seq or not _activeSweep.awaitFn then return end   -- already arrived
+        HDG.Log:Warn("projects_save",
+            ("capture: floor %d never displayed (asked index %d, showing %s) -- capturing anyway")
+            :format(_activeSweep.floor, target, tostring(_viewedFloorNow())))
+        local fn = _activeSweep.awaitFn
+        _activeSweep.awaitTarget, _activeSweep.awaitFn = nil, nil
+        fn()
+    end)
 end
 
 -- Called from the floor-changed EVENT while a sweep is running.
@@ -1054,7 +1052,7 @@ local function _stepSweep()
     -- capturing.
     _awaitViewedFloor(target, function()
         HO:_BeginCapture(nextFloor)
-        if C_Timer and C_Timer.After then C_Timer.After(_activeSweep.settleSeconds, _stepSweep) end
+        C_Timer.After(_activeSweep.settleSeconds, _stepSweep)
     end)
 end
 
@@ -1188,19 +1186,17 @@ function HO:CaptureAllFloors()
         maxFloor = maxFloor,
         settleSeconds = 1.5, cancelled = false,
     }
-    if C_Timer and C_Timer.After then
-        C_Timer.After(0.1, function()
-            if not _activeSweep or _activeSweep.cancelled then return end
-            if C_HouseEditor.ActivateHouseEditorMode then C_HouseEditor.ActivateHouseEditorMode(_layoutMode()) end  -- exception(boundary): C_HouseEditor is a Blizzard API namespace; nil in headless tests
-            if C_HousingLayout and C_HousingLayout.SetViewedFloor then C_HousingLayout.SetViewedFloor(_activeSweep.lowest) end
-            -- Floor 1 travels furthest (from wherever the player was standing), so it
-            -- is the floor that most needs the arrival wait, not least.
-            _awaitViewedFloor(_activeSweep.lowest, function()
-                if not self:IsCapturing() then self:_BeginCapture(1) end
-                C_Timer.After(_activeSweep.settleSeconds, _stepSweep)
-            end)
+    C_Timer.After(0.1, function()
+        if not _activeSweep or _activeSweep.cancelled then return end
+        if C_HouseEditor.ActivateHouseEditorMode then C_HouseEditor.ActivateHouseEditorMode(_layoutMode()) end  -- exception(boundary): C_HouseEditor is a Blizzard API namespace; nil in headless tests
+        if C_HousingLayout and C_HousingLayout.SetViewedFloor then C_HousingLayout.SetViewedFloor(_activeSweep.lowest) end
+        -- Floor 1 travels furthest (from wherever the player was standing), so it
+        -- is the floor that most needs the arrival wait, not least.
+        _awaitViewedFloor(_activeSweep.lowest, function()
+            if not self:IsCapturing() then self:_BeginCapture(1) end
+            C_Timer.After(_activeSweep.settleSeconds, _stepSweep)
         end)
-    end
+    end)
     return true
 end
 
@@ -1285,8 +1281,7 @@ HDG.Modules:Declare({
         HOUSING_NUM_DECOR_PLACED_CHANGED     = { handler = "OnHousingBudgetEvent",      debounce = 0.3 },
         HOUSING_LAYOUT_ROOM_RECEIVED         = { handler = "OnHousingBudgetEvent",      debounce = 0.3 },
         HOUSING_LAYOUT_ROOM_REMOVED          = { handler = "OnHousingBudgetEvent",      debounce = 0.3 },
-        HOUSING_LAYOUT_NUM_FLOORS_CHANGED    = { handler = "OnHousingBudgetEvent",      debounce = 0.3 }, -- live 12.0.x
-        HOUSING_LAYOUT_OCCUPIED_FLOOR_RANGE_CHANGED = { handler = "OnHousingBudgetEvent", debounce = 0.3 }, -- 12.1 rename of NUM_FLOORS_CHANGED; invalid name skipped per-client
+        HOUSING_LAYOUT_OCCUPIED_FLOOR_RANGE_CHANGED = { handler = "OnHousingBudgetEvent", debounce = 0.3 }, -- 12.1 rename of HOUSING_LAYOUT_NUM_FLOORS_CHANGED
     },
 
     OnEditorModeChanged = function(self)

@@ -577,10 +577,7 @@ function Controller:_wireMapButtons(rootFrame)
         local state = HDG.Store:GetState()  -- exception(false-positive): top-level controller method (not a row factory)
         HDG.Waypoints:MapAll(HDG.Selectors:Call("recipeSources.mapPlaces", state, {}))
     end)
-    HDG.UI.OnClick(rootFrame, "recipeSourcesListPanel.clearPinsBtn", function()
-        HDG.Waypoints:ClearAllMapPins()
-        HDG.Log:Info("waypoints_user", "Map pins cleared.")
-    end)
+    HDG.UI.OnClick(rootFrame, "recipeSourcesListPanel.clearPinsBtn", function() HDG.Waypoints:ClearAllMapPins() end)
 end
 
 function Controller:_wireFilters(rootFrame)

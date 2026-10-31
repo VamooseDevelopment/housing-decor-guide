@@ -64,11 +64,11 @@ Selectors:Register("goblin.isDetailVisible", {
     end,
 })
 
--- ADR-003a inside-closure read: Mogul's lazy O(1) index (GetDecorByOutputItemID).
+-- ADR-003a inside-closure read: StaticData's lazy O(1) itemID -> DecorDB entry index.
 local function expandedRecipe(state)
     local id = state.session.ui.mogul.goblin.expandedItemID
-    if not id then return nil end
-    return HDG.Mogul:GetDecorByOutputItemID()[id]
+    if not id then return nil end  -- exception(nullable): no row expanded
+    return HDG.StaticData.Recipes:Get(id)
 end
 
 Selectors:Register("goblin.detailTitle", {
@@ -80,30 +80,41 @@ Selectors:Register("goblin.detailTitle", {
     end,
 })
 
--- Per-material breakdown for the expanded recipe. Sorted by total cost DESC (budget driver first).
+-- One reagent of the expanded recipe. An unpriced reagent's cost is unknown (nil, a
+-- "?" on the row), never 0: a zero reads as a real price.
+local function _detailRow(reagentID, info)
+    local price = HDG.PriceSource:GetItemPrice(reagentID)  -- exception(nullable): no price source knows this reagent
+    local owned = HDG.BagObserver:GetCounts()[reagentID]   -- held, as Materials and the plan count it
+    return {
+        kind       = "goblinDetailRow",
+        itemID     = reagentID,
+        name       = _localName(reagentID, info.name),
+        qty        = info.qty,
+        owned      = owned,
+        price      = price,
+        totalCost  = price and price * info.qty,
+        sufficient = owned >= info.qty,
+    }
+end
+
+-- Dearest first; an unpriced reagent can't claim a place by cost, so it sorts last.
+-- Ties (unpriced ones included) by itemID, so the order is the same every paint.
+local function _byDetailCostDesc(a, b)
+    if a.totalCost == b.totalCost then return a.itemID < b.itemID end
+    if a.totalCost == nil or b.totalCost == nil then return b.totalCost == nil end
+    return a.totalCost > b.totalCost
+end
+
+-- Per-material breakdown for the expanded recipe (budget driver first).
 Selectors:Register("goblin.detailRows", {
     reads = {"account.prices", "session.ui.mogul.goblin.expandedItemID",
              "session.resolvers.prices.tick", "session.resolvers.bag.tick", "session.itemNames.names"},
     fn = function(state)
         local r = expandedRecipe(state)
-        if not r or type(r.reagents) ~= "table" then return {} end
+        if not r then return {} end  -- exception(nullable): nothing expanded, or a recipe the DecorDB doesn't carry
         local out = {}
-        for reagentID, info in pairs(r.reagents) do
-            local qty   = info.qty   -- recipe schema guarantees qty per reagent slot
-            local price = HDG.PriceSource:GetItemPrice(reagentID)
-            local owned = HDG.BagObserver:GetTotal(reagentID)
-            out[#out + 1] = {
-                kind       = "goblinDetailRow",
-                itemID     = reagentID,
-                name       = _localName(reagentID, info.name),
-                qty        = qty,
-                owned      = owned,
-                price      = price,
-                totalCost  = (price or 0) * qty,
-                sufficient = owned >= qty,
-            }
-        end
-        table.sort(out, function(a, b) return (a.totalCost or 0) > (b.totalCost or 0) end)
+        for reagentID, info in pairs(r.reagents) do out[#out + 1] = _detailRow(reagentID, info) end
+        table.sort(out, _byDetailCostDesc)
         return out
     end,
 })
@@ -178,20 +189,20 @@ Selectors:Register("mogul.plan", {
         "session.ui.mogul.supplyImpact.smoothPct",
         "session.ui.mogul.supplyImpact.capN",
         "session.ui.mogul.frugal",
-        "account.characters",                    -- alt-hint derivation
         "account.collection.ownedDecorIDs",
-        "session.resolvers.bag.tick",
+        "session.resolvers.bag.tick",            -- lumber and reagents held (BagObserver)
         "session.resolvers.prices.tick",
         "session.itemNames.names",
     },
-    calls = { "recipes.knowledge" },   -- Mogul:Candidates: the known-recipe set
+    calls = { "recipes.knowledge", "recipes.db" },   -- Mogul:Candidates: the known set, each recipe's reagents
     fn = function(state)
         local m = state.session.ui.mogul
         return HDG.Mogul:BuildPlan({
-            mode       = m.mode,
-            viewMode   = m.viewMode,
-            optimizeBy = m.optimizeBy,
-            frugal     = m.frugal == true,
+            mode         = m.mode,
+            viewMode     = m.viewMode,
+            optimizeBy   = m.optimizeBy,
+            frugal       = m.frugal == true,
+            supplyImpact = m.supplyImpact,   -- the planner reads mode / smoothPct / capN
         })
     end,
 })
@@ -199,17 +210,29 @@ Selectors:Register("mogul.plan", {
 -- Plan rows -> scrollbox element list.
 local function expansionShort(display) return HDG.Expansion.GetShort(display) end
 
--- craftableState is decor.craftableState's curried (itemID) -> RECIPE_STATE.
-local function buildPlanRowElement(planRow, viewMode, isRunnerUp, craftableState)
+-- crafts x a per-craft figure; nil when the figure is unknown (an unpriced sale or
+-- mat), so the row paints "?" rather than a total built on a missing price.
+local function _timesCrafts(crafts, perCraft)
+    if perCraft == nil then return nil end
+    return crafts * perCraft
+end
+
+-- The alt to log into for an account-view row this character can't craft: the first
+-- by name of the alts recipes.knowledge lists (the one place "known" is decided).
+-- KnownByAlt comes from knowledge.alts, so its altChars list is never empty.
+local function _bestAltName(r, knownState, view)
+    if view.viewMode ~= "account" or knownState ~= HDG.Constants.RECIPE_STATE.KnownByAlt then
+        return nil
+    end
+    return view.altChars[r.itemID][1].name
+end
+
+-- view = { viewMode, craftableState (decor.craftableState's itemID -> RECIPE_STATE),
+-- altChars (recipes.knowledge) }.
+local function buildPlanRowElement(planRow, isRunnerUp, view)
     local r = planRow.recipe
     local s = planRow.score
-    local knownState = craftableState(r.itemID)
-    local bestAlt
-    if viewMode == "account"
-       and knownState == HDG.Constants.RECIPE_STATE.KnownByAlt then
-        bestAlt = HDG.Mogul:BestAltForSpellID(r.spellID)
-    end
-    local expShort = expansionShort(r.expansion) or ""
+    local knownState = view.craftableState(r.itemID)
     return {
         kind         = "mogulRow",
         spellID      = r.spellID,
@@ -218,74 +241,57 @@ local function buildPlanRowElement(planRow, viewMode, isRunnerUp, craftableState
         name         = _localName(r.itemID, r.name),
         profession   = r.profession,
         expansion    = r.expansion,
-        expShort     = expShort,
+        expShort     = expansionShort(r.expansion) or "",  -- exception(nullable): a captured recipe with no expansion, or one Expansion doesn't list
         crafts       = planRow.crafts,
-        lumberPerCraft = s.bindingLumberQty or 0,  -- exception(boundary): binding qty nil for non-binding recipes
-        lumberTotal  = (planRow.crafts or 0) * s.lumberCost,
+        lumberPerCraft = s.bindingLumberQty,   -- ScoreRecipe: 0 for a lumberless recipe, never nil
+        lumberTotal  = planRow.crafts * s.lumberCost,   -- crafts: the planner's K, or 0 for a runner-up
         salePrice    = s.salePrice,
         revenuePerCraft = s.salePrice,
         netPerCraft     = s.netProfitPerCraft,
-        revenueTotal = (planRow.crafts or 0) * s.salePrice,
-        netTotal     = (planRow.crafts or 0) * s.netProfitPerCraft,
+        revenueTotal = _timesCrafts(planRow.crafts, s.salePrice),
+        netTotal     = _timesCrafts(planRow.crafts, s.netProfitPerCraft),
         knownState   = knownState,
-        bestAlt      = bestAlt,
-        isRunnerUp   = isRunnerUp and true or false,
+        bestAlt      = _bestAltName(r, knownState, view),
+        isRunnerUp   = isRunnerUp,
     }
+end
+
+-- The plan always exists (BuildPlan returns rows, totals, shoppingList and candidates,
+-- each possibly empty); an empty one says so.
+local function _planSectionTitle(plan)
+    if #plan.rows == 0 then return "Plan -- no crafts fit current budget" end
+    return string.format("Plan -- %d crafts, %d lumber used", plan.totals.crafts, plan.totals.lumberUsed)
+end
+
+-- Candidates that scored but weren't planned, in the planner's order.
+local function _runnersUp(plan)
+    local picked, runners = {}, {}
+    for _, row in ipairs(plan.rows) do picked[row.recipe.itemID] = true end
+    for _, score in ipairs(plan.candidates) do
+        if not picked[score.recipe.itemID] then runners[#runners + 1] = score end
+    end
+    return runners
 end
 
 -- Heterogeneous row stream: mogulSection headers + mogulRow entries.
 Selectors:Register("mogul.planRows", {
     reads = { "session.ui.mogul.viewMode" },   -- read directly in fn (also in mogul.plan's closure)
-    calls = {"mogul.plan", "decor.craftableState"},
+    calls = { "mogul.plan", "decor.craftableState", "recipes.knowledge" },
     fn = function(state, ctx)
         local plan = Selectors:Call("mogul.plan", state, ctx)
-        if not plan then return {} end
-        local craftableState = Selectors:Call("decor.craftableState", state, ctx)
-        local viewMode = state.session.ui.mogul.viewMode
-        local totals = plan.totals or {}
-        local hasPlanRows = plan.rows and #plan.rows > 0
-        local out = {}
-
-        -- Plan section header + rows.
-        local planSection
-        if hasPlanRows then
-            planSection = string.format("Plan -- %d crafts, %d lumber used",
-                totals.crafts or 0, totals.lumberUsed or 0)
-        else
-            planSection = "Plan -- no crafts fit current budget"
+        local view = { viewMode       = state.session.ui.mogul.viewMode,
+                       craftableState = Selectors:Call("decor.craftableState", state, ctx),
+                       altChars       = Selectors:Call("recipes.knowledge", state, ctx).altChars }
+        local out = { { kind = "mogulSection", title = _planSectionTitle(plan) } }
+        for _, row in ipairs(plan.rows) do out[#out + 1] = buildPlanRowElement(row, false, view) end
+        local runners = _runnersUp(plan)
+        if #runners == 0 then return out end
+        out[#out + 1] = { kind = "mogulSection",
+                          title = string.format("Runners-up -- did not fit (%d)", #runners) }
+        for _, score in ipairs(runners) do
+            -- crafts=0 (didn't make budget); row factory uses per-craft figures.
+            out[#out + 1] = buildPlanRowElement({ recipe = score.recipe, crafts = 0, score = score }, true, view)
         end
-        out[#out + 1] = { kind = "mogulSection", title = planSection }
-        if hasPlanRows then
-            for _, row in ipairs(plan.rows) do
-                out[#out + 1] = buildPlanRowElement(row, viewMode, false, craftableState)
-            end
-        end
-
-        -- Runners-up: candidates that scored but weren't picked.
-        local picked = {}
-        for _, row in ipairs(plan.rows or {}) do
-            if row.recipe and row.recipe.itemID then
-                picked[row.recipe.itemID] = true
-            end
-        end
-        local runners = {}
-        for _, score in ipairs(plan.candidates or {}) do
-            local rid = score.recipe and score.recipe.itemID
-            if rid and not picked[rid] then runners[#runners + 1] = score end
-        end
-        if #runners > 0 then
-            out[#out + 1] = {
-                kind  = "mogulSection",
-                title = string.format("Runners-up -- did not fit (%d)", #runners),
-            }
-            for _, score in ipairs(runners) do
-                -- crafts=0 (didn't make budget); row factory uses per-craft figures.
-                out[#out + 1] = buildPlanRowElement(
-                    { recipe = score.recipe, crafts = 0, score = score },
-                    viewMode, true, craftableState)
-            end
-        end
-
         return out
     end,
 })
@@ -297,8 +303,8 @@ Selectors:Register("mogul.title", {
         local subView = state.session.ui.mogul.subView
         if subView == "goblin" then return "Goblin" end
         local plan = Selectors:Call("mogul.plan", state, ctx)
-        if not plan or #plan.rows == 0 then return "Mogul" end
-        return string.format("Mogul (%d crafts planned)", plan.totals.crafts or 0)
+        if #plan.rows == 0 then return "Mogul" end
+        return string.format("Mogul (%d crafts planned)", plan.totals.crafts)
     end,
 })
 
@@ -324,52 +330,59 @@ Selectors:Register("goblin.showSourceTSM", {
 -- Column-aligned gold (zero shown as "0 <coin>"); shared formatter.
 local moneyText = HDG.Format.FormatGoldZero
 
+-- Net profit, signed: a plan can lose money once its mats are counted. "?" when a
+-- mat the plan buys has no price (shared formatter: every profit and net cell).
+local signedMoney = HDG.Format.FormatGoldSigned
+
+-- An amount that holds an unpriced part: "?", never "0 <coin>" (shared formatter).
+local moneyOrUnknown = HDG.Format.FormatGoldOrUnknown
+
 Selectors:Register("mogul.totalsLabel", {
     reads = { "session.ui.mogul.mode" },   -- read directly in fn (also in mogul.plan's closure)
     calls = {"mogul.plan"},
     fn = function(state, ctx)
-        local plan = Selectors:Call("mogul.plan", state, ctx)
-        if not plan then return "" end
-        local t = plan.totals
+        local t = Selectors:Call("mogul.plan", state, ctx).totals
         if t.crafts == 0 then
             return "No crafts planned -- no lumber, no learned recipes, or filters too tight."
         end
         local mode = state.session.ui.mogul.mode
         if mode == "collection" then
             return string.format("New appearances: %d  |  Mat cost: %s",
-                t.uniqueDiscoveries or 0, moneyText(t.matSpend or 0))
+                t.uniqueDiscoveries, moneyOrUnknown(t.matSpend))
         end
-        -- Plain text: widget applies Theme:ColorCode at render time.
-        return string.format("Revenue (mats free): +%s     Net profit (mats bought): +%s",
-            moneyText(t.revenue or 0), moneyText(t.netProfit or 0))
+        -- Plain text: widget applies Theme:ColorCode at render time. Revenue counts
+        -- planned crafts only, and the planner never picks one without a sale price.
+        return string.format("Revenue (mats free): +%s     Net profit (mats bought): %s",
+            moneyText(t.revenue), signedMoney(t.netProfit))
     end,
 })
 
 -- ===== Lumber tracker rows =================================================
+-- Lumber the plan uses, per type: crafts x each craft's lumber of that type.
+local function _lumberUsedByTier(plan)
+    local used = {}
+    for _, row in ipairs(plan.rows) do
+        for _, lr in ipairs(row.score.lumberReagents) do
+            used[lr.id] = (used[lr.id] or 0) + row.crafts * lr.qty  -- exception(nullable): accumulator, a type's first use
+        end
+    end
+    return used
+end
+
 -- One row per lumber type; isActive marks tiers the plan consumed.
 Selectors:Register("mogul.lumberRows", {
     reads = {"session.resolvers.bag.tick"},   -- numbers paint via Theme:Register roles -> ApplyAll repaints on scheme swap
     calls = {"mogul.plan"},
     fn = function(state, ctx)
-        local plan = Selectors:Call("mogul.plan", state, ctx)
+        local used = _lumberUsedByTier(Selectors:Call("mogul.plan", state, ctx))
         local out = {}
-        if not (plan and HDG.Constants.LUMBER_DATA) then return out end
-
-        -- Sum per-tier usage from plan rows.
-        local used = {}
-        for _, row in ipairs(plan.rows or {}) do
-            for _, lr in ipairs(row.score and row.score.lumberReagents or {}) do
-                used[lr.id] = (used[lr.id] or 0) + row.crafts * (lr.qty or 0)  -- exception(false-positive): used[] accumulator lazy-init (crafts/lr.qty numeric)
-            end
-        end
-
         for _, l in ipairs(HDG.Constants.LUMBER_DATA) do
             local have = HDG.BagObserver:GetTotal(l.id)
-            local u = used[l.id] or 0  -- exception(boundary): sparse map
+            local u = used[l.id] or 0  -- exception(nullable): a lumber type the plan doesn't use
             out[#out + 1] = {
                 kind      = "mogulLumberRow",
                 id        = l.id,
-                short     = l.shortName or l.name,
+                short     = l.shortName,
                 expansion = l.expansion,
                 have      = have,
                 used      = u,
@@ -388,8 +401,8 @@ Selectors:Register("mogul.lumberHeaderLabel", {
         local rows = Selectors:Call("mogul.lumberRows", state, ctx)
         local used, have = 0, 0
         for _, r in ipairs(rows) do
-            used = used + (r.used or 0)
-            have = have + (r.have or 0)
+            used = used + r.used
+            have = have + r.have
         end
         if used == 0 then
             return string.format("Lumber  -  %d held, none used", have)
@@ -423,10 +436,8 @@ Selectors:Register("mogul.matsRows", {
     reads = {"session.itemNames.names", "session.resolvers.prices.tick"},
     calls = {"mogul.plan"},
     fn = function(state, ctx)
-        local plan = Selectors:Call("mogul.plan", state, ctx)
         local out = {}
-        if not (plan and plan.shoppingList) then return out end
-        for _, mat in ipairs(plan.shoppingList) do
+        for _, mat in ipairs(Selectors:Call("mogul.plan", state, ctx).shoppingList) do
             local name = (HDG.ItemNameResolver:ResolveName(mat.id))
             out[#out + 1] = {
                 kind      = "mogulMatRow",
@@ -515,8 +526,8 @@ Selectors:Register("goblin.rows", {
             local byItem = {}
             for _, r in ipairs(data) do byItem[r.itemID] = r end
             for _, q in ipairs(state.account.craft.queue) do
-                local qr = q.itemID and byItem[q.itemID]
-                if qr and qr.lumberType then
+                local qr = byItem[q.itemID]
+                if qr and qr.lumberType then  -- exception(nullable): a queued recipe with no profit row, or one that uses no lumber
                     queuedLumber[qr.lumberType] = (queuedLumber[qr.lumberType] or 0)
                         + qr.lumberQty * (q.remaining or 0)  -- exception(boundary): queue row from SVars may lack remaining
                 end
@@ -620,7 +631,7 @@ Selectors:Register("goblin.rows", {
             out[i].isTSMActive = isTSMActive
             -- Stamp held + queue-committed lumber so Configure reads ed (not BagObserver mid-paint). per ADR-041.
             out[i].ownedLumber  = HDG.BagObserver:GetTotal(out[i].lumberType)
-            out[i].queuedLumber = queuedLumber[out[i].lumberType] or 0
+            out[i].queuedLumber = queuedLumber[out[i].lumberType] or 0  -- exception(nullable): no queued craft uses this row's lumber
         end
         return out
     end,
@@ -887,8 +898,7 @@ Selectors:Register("goblin.statusLabel", {
 Selectors:Register("mogul.queueAllEnabled", {
     calls = { "mogul.plan" },
     fn = function(state, ctx)
-        local plan = Selectors:Call("mogul.plan", state, ctx)
-        return plan and plan.rows and #plan.rows > 0
+        return #Selectors:Call("mogul.plan", state, ctx).rows > 0
     end,
 })
 
@@ -898,21 +908,18 @@ Selectors:Register("mogul.auctionatorEnabled", {
     calls = { "mogul.plan" },
     fn = function(state, ctx)
         if not state.session.prices.auctionatorLoaded then return false end
-        local plan = Selectors:Call("mogul.plan", state, ctx)
-        return plan and plan.shoppingList and #plan.shoppingList > 0
+        return #Selectors:Call("mogul.plan", state, ctx).shoppingList > 0
     end,
 })
 
 Selectors:Register("mogul.matsTitle", {
     calls = {"mogul.plan"},
     fn = function(state, ctx)
-        local plan = Selectors:Call("mogul.plan", state, ctx)
-        if not plan or not plan.shoppingList or #plan.shoppingList == 0 then
-            return "Reagents to buy: none"
-        end
+        local list = Selectors:Call("mogul.plan", state, ctx).shoppingList
+        if #list == 0 then return "Reagents to buy: none" end
+        -- One unpriced line makes the total unknown (a sum without it reads as the price).
         local total = 0
-        for _, m in ipairs(plan.shoppingList) do total = total + (m.totalCost or 0) end
-        return string.format("Reagents to buy: %d items, total %s",
-            #plan.shoppingList, moneyText(total))
+        for _, m in ipairs(list) do total = total and m.totalCost and total + m.totalCost end
+        return string.format("Reagents to buy: %d items, total %s", #list, moneyOrUnknown(total))
     end,
 })

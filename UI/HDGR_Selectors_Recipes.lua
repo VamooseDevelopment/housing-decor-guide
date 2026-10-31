@@ -140,6 +140,29 @@ Selectors:Register("recipes.spellToItem", {
     end,
 })
 
+-- [reagent itemID] = { decor itemID, ... } over recipes.db (seed + capture): the item
+-- tooltip's "Used in N decor recipes" line and the bag badge. A recipe the player's own
+-- scan added or changed counts, as it does in Materials. Rebuilt only when recipes.db is.
+local function _addReagentUsers(out, itemID, reagents)
+    for reagentID in pairs(reagents) do
+        local users = out[reagentID]
+        if not users then users = {}; out[reagentID] = users end
+        users[#users + 1] = itemID
+    end
+end
+
+Selectors:Register("recipes.reagentUsers", {
+    memoized = true,
+    calls    = { "recipes.db" },
+    fn = function(state, ctx)
+        local out = {}
+        for itemID, r in pairs(Selectors:Call("recipes.db", state, ctx)) do
+            if r.reagents then _addReagentUsers(out, itemID, r.reagents) end  -- exception(nullable): a seed recipe listed without reagents
+        end
+        return out
+    end,
+})
+
 -- One character's decor recipes, from the lists, into a set of crafted itemIDs.
 local function _collectKnownDecor(char, spellToItem, into)
     for _, prof in pairs(char.professions) do

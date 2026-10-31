@@ -22,6 +22,7 @@ HDG.Locale:Register("enUS", {
     COMMON_SAVE            = "Save",
     COMMON_DELETE          = "Delete",
     COMMON_CLEAR           = "Clear",
+    COMMON_MAP             = "Map",
     COMMON_COPY            = "Copy",
     COMMON_ADD             = "Add",
     COMMON_ALL             = "All",
@@ -133,6 +134,34 @@ HDG.Locale:Register("enUS", {
     -- ===== Status rail / general =====
     STATUS_READY           = "Ready",
 
+    -- ===== Waypoints + map pins (Modules/HDGR_Waypoints.lua) =====
+    -- What every Map / Waypoint button says, on the status rail and in chat.
+    WPT_SET                  = "Waypoint set for %s",
+    WPT_SET_TOMTOM           = "TomTom waypoint set for %s",
+    WPT_SET_TOMTOM_BATCH     = "Set %d TomTom waypoints.",
+    WPT_SET_BATCH            = "Waypoint set for %s -- the game tracks one at a time (%d vendors).",   -- a batch of 2+
+    WPT_ARROW_SET            = "Quest arrow set for %s",
+    WPT_SHOWING              = "Showing %s on the map.",
+    WPT_MAPPED               = "Mapped %d vendors.",
+    WPT_MAPPED_ONE           = "Mapped %d vendor.",
+    WPT_MAP_ALL_NONE         = "No vendor in this list has a known location yet.",
+    WPT_PINS_CLEARED         = "Map pins cleared.",
+    WPT_ONLY_ALLIANCE        = "Note: This is an Alliance-only vendor.",
+    WPT_ONLY_HORDE           = "Note: This is a Horde-only vendor.",
+    -- Why a Map or Waypoint did nothing: the obstacle, never the target (every button shares them).
+    WPT_FAIL_COMBAT          = "Can't do that in combat -- try again after the fight.",
+    WPT_FAIL_NO_TOMTOM       = "TomTom is not installed. Set Waypoint Provider to Auto or Blizzard in HDG settings.",
+    WPT_FAIL_UNSUPPORTED_MAP = "The game doesn't allow waypoints in this zone.",
+    WPT_FAIL_NOT_SET         = "The game wouldn't place a waypoint at that spot.",
+    WPT_FAIL_NO_MAP          = "No known location yet.",
+    -- A name when the caller had none: inside a sentence, and as a pin's or TomTom's title.
+    WPT_NAME_VENDOR          = "vendor",
+    WPT_NAME_LAST_VENDOR     = "the last vendor",
+    WPT_PIN_VENDOR           = "Vendor",
+    -- A world-map pin's tooltip.
+    WPT_PIN_STEP             = "Step %d: %s",   -- a Decor Quests step's pin: its number, its name
+    WPT_PIN_CLICK            = "Click to navigate",
+
     -- ===== Errors =====
     ERROR_GENERIC          = "An error occurred",
 
@@ -159,6 +188,8 @@ HDG.Locale:Register("enUS", {
     STY_EXPORT_HDG_HINT             = "HDG code -- for other HDG users and wowhead.com.",
     STY_EXPORT_LOADING              = "Loading your collection...",
     STY_EXPORT_EMPTY                = "Nothing to export yet. Build a shopping list, style, or set first.",
+    STY_EXPORT_GROUP_SMARTSETS      = "FILTERED SETS",
+    STY_EXPORT_SMARTSET_HINT        = "Filtered Set code -- shares its tags; the decor comes from each player's own catalog.",
     STY_SEARCH_STYLES_PLACEHOLDER   = "Search styles...",
     STY_SEARCH_ITEMS_PLACEHOLDER    = "Search items...",
     STY_CURATOR_SOURCE_LABEL        = "VIEWING (SOURCE)",
@@ -205,6 +236,11 @@ HDG.Locale:Register("enUS", {
     STY_IMPORT_DEST_LABEL           = "Import into:",
     STY_IMPORT_TITLE_LABEL          = "Title:",
     STY_IMPORT_TITLE_PLACEHOLDER    = "Name this import",
+    STY_IMPORT_SMARTSET_STATUS      = "Filtered Set, tags: %d -- imports into Filtered Sets.",
+    STY_IMPORT_SMARTSET_DROPPED     = "Filtered Set, tags: %d -- dropped %d this HDG version doesn't know.",
+    STY_IMPORT_SMARTSET_NO_TAGS     = "No tags this HDG version knows (dropped: %d).",
+    STY_IMPORT_SMARTSET_BAD         = "Can't read this Filtered Set code -- it's damaged, or from a newer HDG.",
+    STY_IMPORT_SMARTSET_DONE        = "Imported a Filtered Set (tags: %d) -- find it under Filtered Sets.",
     STY_SMARTSET_NAME_LABEL         = "Name",
     STY_SMARTSET_NAME_PLACEHOLDER   = "Untitled",
     STY_SMARTSET_DESC_LABEL         = "Description",
@@ -350,6 +386,7 @@ HDG.Locale:Register("enUS", {
     TIP_BP_IMPORT_HOUSE_BODY    = "Opens Blizzard's Import Blueprint dialog with this code filled in -- preview the counts there, then confirm to apply it (you must be at your house).\n\n|cffffd200Note:|r this only APPLIES the layout to your house -- it does NOT save it to your catalog. To keep a copy, click Save a Blueprint after applying. Each apply also stores an Automatic Save backup of your previous layout; it does not take one of your 50 blueprint slots.",
     TIP_BP_DELETE_TITLE         = "Delete Blueprint",
     TIP_BP_DELETE_BODY          = "Permanently remove this saved blueprint from your catalog. Auto-backups can't be deleted.",
+    TIP_BP_VERDICT_TITLE        = "Doesn't fit this house",
     TIP_BP_METER_ROOM           = "Room Placement Budget",
     TIP_BP_METER_INTERIOR       = "Interior Decor Placement Budget",
     TIP_BP_METER_EXTERIOR       = "Exterior Decor Placement Budget",
@@ -550,6 +587,7 @@ HDG.Locale:Register("enUS", {
     SHOP_NO_LIST            = "(no list)",
     SHOP_OPEN_BTN           = "Open",
     SHOP_WAYPOINT_ALL       = "Waypoint All",
+    SHOP_ZONE_MAP_TIP       = "Opens the world map with a pin at each vendor in %s.",
     SHOP_NEW_LIST           = "+ New",
     SHOP_RENAME_LIST        = "Rename",
     SHOP_RENAME_PROMPT      = "Rename \"%s\"",
@@ -709,6 +747,217 @@ HDG.Locale:Register("enUS", {
     RS_WAYPOINT             = "Waypoint",
     RS_MAP                  = "Map",
 
+    -- Decor Quests tab (enUS only; the other locales fall back here)
+    DQ_TITLE                = "Decor Quests",
+    DQ_PRESET_TODO          = "To do",
+    DQ_PRESET_PROGRESS      = "In progress",
+    DQ_PRESET_HERE          = "Done (this char)",       -- the preset strip has no wrap: "Done (you)" if it ever overflows
+    DQ_PRESET_DONE          = "Done (warband)",
+    DQ_PRESET_ALL           = "All",
+    DQ_HIDE_COLLECTED       = "Hide collected",
+    DQ_CHIP_COUNT           = "%s  %s",       -- a chip's label and its count (dimmed, the mockup's)
+    DQ_SEARCH_PLACEHOLDER   = "Search decor, chains, givers, zones...",   -- a decor's own quest too, not the steps before it (review F2)
+    DQ_ALL_KINDS            = "All Kinds",
+    DQ_HEAD_KIND            = "Kind",
+    DQ_HEAD_DECOR           = "Decor",
+    DQ_KIND_CHAIN           = "Chain",
+    DQ_KIND_SINGLE          = "Single quest",
+    DQ_KIND_TREASURE        = "Treasure Hunt",
+    DQ_KIND_REPEATABLE      = "Repeatable",
+    DQ_EXP_UNKNOWN          = "Unknown",
+    DQ_GROUP_TREASURE       = "Decor Treasure Hunts",
+    DQ_GROUP_REPEATABLE     = "Repeatable",
+    DQ_GROUP_REPEAT_COUNT   = "%d shown - another copy each time",
+    DQ_GROUP_COUNT          = "%d shown - %d/%d done - %d collected",
+    DQ_GROUP_COUNT_SAME     = "%d shown - %d/%d done",
+    DQ_COUNT                = "%d of your %d collected",
+    DQ_BLANK                = "No decor quests match these filters.",
+    DQ_BLANK_UNDER_ALL      = "No %s decor match '%s' -- %d under %s.",
+    DQ_BLANK_UNDER_ALL_HIDE = "No %s decor match '%s' -- %d under %s with Hide collected off.",
+    DQ_BLANK_HIDDEN         = "No decor match '%s' -- %d hidden by Hide collected.",
+    DQ_ONLY                 = "%s only",      -- who a quest is for: "Alliance only", "Evoker only"
+    DQ_NOT_FOR              = "Not for %s",   -- a class gate holding most classes, by the ones it leaves out
+    DQ_STATE_DONE           = "Done",
+    DQ_STATE_NOT_DONE       = "Not done",
+    DQ_STATE_PROGRESS       = "%d/%d steps",
+    DQ_STATE_STEPS          = "%d steps",
+    DQ_STATE_MISSING        = "Done, not collected",
+    DQ_HAVE_N               = "You have %d",   -- a repeatable's copies: stored + placed
+    DQ_NOT_COLLECTED        = "Not collected",
+    DQ_MISSING_TITLE        = "Quest done, decor not in your collection",
+    DQ_MISSING_WHY          = "The game reads %s done %s, but %s never arrived. Doing the other faction's copy of a quest marks both done, and a faction change keeps them; if the quest is offered again, Track it anyway -- every step can still be picked.",   -- quest, DQ_MISSING_HERE / _WARBAND, decor
+    DQ_MISSING_HERE         = "here",
+    DQ_MISSING_WARBAND      = "by your warband",
+    DQ_MISSING_ALSO_SOLD    = "Also sold by %s (%s).",
+    DQ_MISSING_WAY_TIP      = "Set a waypoint to %s",
+    DQ_MORE_TITLE           = "Unlocked on its vendor",
+    DQ_MORE_SOLD_BY         = "%s (%s) sells more copies.",
+    DQ_ALTS_HEAD            = "Your characters",
+    DQ_ALTS_SUB             = "checked when Decor Quests opens on each one",
+    DQ_ALT_NOW              = "checked now",
+    DQ_ALT_CHECKED          = "checked %s",
+    DQ_ALTS_UNCHECKED       = "Not checked yet: %s - open Decor Quests on each.",
+    DQ_ALTS_AND_MORE        = "%s and %d more",
+    DQ_ALT_NOT_STARTED      = "Not started",
+    DQ_ALT_CANT             = "Can't take it",
+    DQ_QUEST_N              = "Quest #%d",    -- a quest the game has not named yet
+    DQ_SELECT_DECOR         = "Select a decor",
+    DQ_PICK_DECOR           = "Pick a decor on the left to see the quests that lead to it.",
+    DQ_COLLECTED            = "collected",
+    DQ_FIRST_DONE_BY        = ", first done by ",   -- then the character, in their class color
+    DQ_OTHER_QUEST          = "This quest is for %s characters.",
+    DQ_OTHER_BEFORE         = "Every step before it is for %s characters.",
+    DQ_OTHER_QUEST_NOT      = "This quest is not for %s characters.",
+    DQ_OTHER_BEFORE_NOT     = "The steps before it are not for %s characters.",
+    DQ_STEP_IS_DECOR        = "step %d is the decor quest",
+    DQ_LINE_GOES_ON         = "the line goes on to %d, not shown",
+    DQ_WHOLE_ZONE           = "%s is a whole-zone storyline (%d quests) -- not every earlier step may be required.",
+    -- The progress note: where you stand (its lead, in the text colour), then how to use the
+    -- ladder, dim (review C5).
+    DQ_PROGRESS_NOTE        = "%d of %d done - %d to go.",
+    DQ_DONE_HERE            = "Done on this character.",
+    DQ_DONE_WARBAND         = "Done by your warband -- %d of %d done on this character.",
+    DQ_PICK_HINT            = "Click a step to mark it Next.",
+    DQ_WARBAND_MARK         = " - %s = done by your warband",   -- after the progress note; %s = the warband-completed icon
+    DQ_NEXT                 = "Next",
+    DQ_IN_LOG               = "In your log",
+    DQ_LEAD_IN              = "optional lead-in",   -- a breadcrumb step
+    DQ_BOX_HEAD             = "Complete these (%d-%d)",   -- over an any-order group's steps: first, last
+    DQ_REWARDS              = "Rewards %s",
+    DQ_REWARDS_COLLECTED    = "Rewards %s - collected",
+    DQ_FOLD_DONE            = "Steps %d-%d done (%d)",
+    DQ_FOLD_TODO            = "Steps %d-%d not done (%d)",
+    DQ_FOLD_WARBAND         = "Steps %d-%d done by your warband (%d)",
+    DQ_THE_QUEST            = "The quest",
+    DQ_TREASURE_NOTE        = "A neighborhood treasure hunt -- one quest, no chain.",
+    DQ_REPEAT_NOTE          = "A repeatable quest: each time you do it, another copy.",
+    DQ_REPEAT_MISSIVE_NOTE  = "A repeatable quest: each time you do it, another copy. A Scouting Missive starts it -- buy one for each go from Sergeant Crowler in your garrison, 200 Garrison Resources.",
+    DQ_REPEAT_DAILY_NOTE    = "A repeatable quest: each time you do it, another copy. It may not be up today -- some givers offer one of several dailies a day; if it isn't offered, check back after the daily reset.",
+    DQ_PROV_CHAIN           = "QuestLine %d - quest index from game build %s",
+    -- By Chain
+    DQ_BY_DECOR             = "By Decor",
+    DQ_BY_CHAIN             = "By Chain",
+    DQ_SELECT_CHAIN         = "Select a chain",
+    DQ_PICK_CHAIN           = "Pick a chain on the left to see the quests that lead to it.",
+    DQ_GROUP_SINGLE         = "Single quests",
+    DQ_GROUP_CHAIN          = "1 chain",
+    DQ_GROUP_CHAINS         = "%d chains",
+    DQ_GROUP_NO_CHAIN       = "%d - no chain",
+    DQ_UNIT_STEPS           = "steps",
+    DQ_UNIT_CHAPTERS        = "chapters",
+    DQ_CHAIN_PROGRESS       = "%d/%d %s",     -- done/total, then steps or chapters
+    DQ_CHAIN_COUNT          = "%d %s",
+    DQ_CHAIN_DECOR          = "%d decor",
+    DQ_CHAIN_WHERE          = "%d decor - %s",   -- %s = the zone, or "campaign"
+    DQ_WHERE_CAMPAIGN       = "campaign",
+    DQ_CHAIN_DECOR_HEAD     = "%d decor from this chain",
+    DQ_CHAIN_LAST_STEP      = "%d steps to the last one",
+    DQ_STEP_N               = "step %d",
+    DQ_NEXT_STEP_OF         = "step %d of %d",   -- the detail's Next block, beside Next
+    DQ_QUEST_STEPS_BTN      = "Quest steps",     -- Decor's and Find Decor's way into Decor Quests
+    TIP_DQ_QUEST_STEPS_BODY = "Open this decor in Decor Quests: its steps and where each starts.",
+    DQ_CAMPAIGN_DECOR_HEAD  = "%d decor from this campaign",
+    DQ_EACH_ENDS_CHAPTER    = "each one ends a chapter",
+    DQ_CHAPTER_STEPS        = "%s - %d/%d steps",   -- the chapter, then this character's steps
+    DQ_CAMPAIGN_SHAPE       = "%d chapters - %d decor",
+    DQ_N_COLLECTED          = "%d collected",
+    DQ_CAMPAIGN_NONE_SIDE   = "%s: the %s chapters reward no decor.",   -- "Alliance only", this character's side ("Horde")
+    DQ_CAMPAIGN_NONE_HERE   = "%s: this character's chapters reward no decor.",   -- %s = "Alliance only"; an unaligned character
+    DQ_CAMPAIGN_GATE_GARRISON = "The game hands out the chapters one at a time, in an order it picks, so a chapter's decor can take weeks to come up.",
+    DQ_CHAPTERS             = "Chapters",
+    DQ_ANY_ORDER            = "any order",
+    DQ_IN_ORDER             = "in order",
+    DQ_CHAPTERS_DONE        = "%d/%d chapters done",
+    DQ_FRACTION             = "%d/%d",
+    DQ_GIVER                = "from %s",
+    DQ_UNLOCKED_BY          = "Unlocked by %s",           -- a done decor's header: the quest that unlocked it
+    DQ_TRACK                = "Track",
+    DQ_TRACKING             = "Tracking",
+    DQ_TRACK_TIP            = "Follow this in the Quest Tracker",
+    DQ_TRACK_STOP_TIP       = "Stop tracking",
+    DQ_TRACK_AGAIN_TIP      = "Follow it again in the Quest Tracker, from the first step",
+    DQ_TRACK_CAMP_TIP       = "Follow the %s - the tracker takes whichever chapter the game offers",
+    DQ_TRACK_CHAPTER_TIP    = "Follow this chapter in the Quest Tracker",
+    DQ_TRACK_CHAPTER_LABEL  = "Track this chapter",
+    DQ_GOT_TIP              = "Collected on your account",   -- a list row's check: collected, the quest not done
+    DQ_STEP_TIP             = "Head for this step",
+    DQ_STEP_TIP_AGAIN       = "Done -- head for it again",
+    DQ_STEP_TIP_WARBAND     = "Done by your warband -- head for it",
+    DQ_CHAPTER_SHOW_TIP     = "Show this chapter's quests",
+    DQ_CHAPTER_HIDE_TIP     = "Hide this chapter's quests",
+    DQ_WAY_TIP              = "Set a waypoint to where %s starts",
+    DQ_ARROW_TIP            = "Point the quest arrow at %s",
+    DQ_MAP                  = "Map",
+    DQ_MAP_TIP              = "Set a waypoint to where %s starts and show it on the world map",
+    DQ_STEP_ARROW           = "Arrow",   -- the same once the quest is in the log: Blizzard's quest arrow
+
+    -- Decor Quests: the Quest Tracker (a floating window)
+    DQ_TRACKER_TITLE        = "Quest Tracker",
+    DQ_TRACKER_EMPTY        = "Nothing tracked yet. Pick Track on a decor or a chain.",
+    DQ_TRK_DONE_OF          = "%d/%d done",
+    DQ_TRK_CHAPTERS_OF      = "%d/%d chapters",
+    DQ_TRK_AGAIN_OF         = "again %d/%d",   -- the step to head for, of a ladder done before
+    DQ_TRK_DONE_HERE        = "done on this character",   -- a lone quest tracked again
+    DQ_TRK_KIND_DAILY       = "Daily",
+    DQ_TRK_HAVE             = "%s - you have %d",   -- a repeatable: its kind, the copies you own
+    DQ_TRK_HAVE_SHORT       = "have %d",            -- the Compact header's count for a repeatable
+    DQ_TRK_STEP             = "Next: %s",
+    DQ_TRK_IN_LOG           = "Next: %s - in your log",
+    DQ_TRK_READY            = "Next: %s - ready to turn in",   -- in the log, objectives done
+    -- The tracker's place line, Wowhead's Start / End: who starts the step and who takes it back,
+    -- each after a gold "!" or "?" (the selector's, owner 10-30).
+    DQ_TRK_GIVER            = "%s",
+    DQ_TRK_GIVER_FOLLOWS    = "%s (follows you)",   -- an escort: no fixed spot
+    DQ_TRK_GIVER_MISSIVE    = "Scouting Missive (%s)",   -- a garrison missive quest: its seller
+    DQ_TRK_STARTS_AT        = "%s",                 -- an object
+    DQ_TRK_STARTS_ITEM      = "%s (an item)",
+    DQ_TRK_STARTS_MAP       = "the Scouting Map",
+    DQ_TRK_STARTS_OWN       = "offered on its own",
+    DQ_TRK_START_REACH      = "on arrival",         -- the game hands it out in the zone the line names (ruling C)
+    DQ_TRK_TURN_IN_TO       = "%s",
+    DQ_TRK_TURN_IN_FOLLOWS  = "%s (follows you)",
+    DQ_TRK_TURN_IN_AT       = "%s",                 -- an object
+    DQ_TRK_ENDS_TRACKER     = "from your quest tracker",
+    DQ_TRK_DAILY            = "A daily -- may not be up today",
+    DQ_TRK_MISSIVE          = "Buy a Scouting Missive from Sergeant Crowler: 200 Garrison Resources",
+    DQ_TRK_COMPLETE_THESE   = "Complete these:",      -- before the rest of the step's any-order group, not done yet
+    DQ_TRK_REST_IN_LOG      = "%s (in your log)",     -- one of those already in the quest log
+    DQ_TURN_IN_TO           = "turn in to %s",                 -- the NPC who takes the quest back
+    DQ_TURN_IN_FOLLOWS      = "turn in to %s, who follows you", -- an escort or companion takes it back
+    DQ_TURN_IN_AT           = "turn in at %s",                 -- an object takes it back
+    DQ_ENDS_TRACKER         = "complete it from your quest tracker", -- nobody takes it back: the tracker's popup
+    DQ_TRK_MORE_THEN        = "%d more, then %s",
+    DQ_TRK_IS_DECOR_QUEST   = "This is the decor quest.",
+    DQ_TRK_CHAPTER_DONE     = "Chapter done",
+    DQ_TRK_CHAPTER_DONE_SUB = "%s is finished.",
+    DQ_TRK_COLLECTED        = "Collected!",
+    DQ_TRK_COLLECTED_SUB    = "%s is yours.",
+    DQ_TRK_ZONE_MORE_1      = "In %s: 1 more decor quest starts here",
+    DQ_TRK_ZONE_MORE        = "In %s: %d more decor quests start here",
+    DQ_TRK_ZONE_AND_MORE    = "and %d more",
+    DQ_TRK_QUEST_DONE       = "Quest done",
+    DQ_TRK_NOT_OWNED        = "%s isn't in your collection yet.",
+    DQ_TRK_SOLD_BY          = "%s (%s) sells it.",
+    DQ_TRK_OTHER            = "This character can't take it. Stop tracking, or track it on a character who can.",
+    DQ_TRK_NO_CHAPTER       = "No chapter on offer",
+    DQ_TRK_WAIT             = "The game offers the next chapter, in an order it picks; the tracker picks it up when you accept its first quest.",
+    DQ_TRK_STILL_TO_COME    = "Still to come: %s. %d chapters not started.",
+    DQ_TRK_ALL_YOURS        = "All %d decor are yours",
+    -- A step's way there (the tab's Wpt, the detail's Waypoint, the tracker's Map): Waypoint,
+    -- Quest arrow (Blizzard's); a greyed one keeps its name and its tip says why.
+    DQ_TRK_WAY_ARROW        = "Quest arrow",
+    DQ_TRK_WAY              = "Waypoint",
+    DQ_TRK_NO_SPOT          = "No spot is known for where %s starts.",
+    DQ_TRK_GIVEN_REACH      = "%s is given when you reach %s.",
+    DQ_TRK_VENDOR_TIP       = "Set a waypoint to %s and show it on the world map",   -- a done decor's vendor
+    DQ_TRK_OPEN             = "Details",
+    DQ_TRK_STOP             = "Stop tracking",
+    DQ_TRK_CLOSE            = "Close",   -- once it has ended: stops tracking
+    DQ_STEP_PINS_CLEARED    = "Decor Quests step pins cleared from the map.",
+    DQ_TRK_DISC_TIP         = "%d. %s",
+    DQ_TRK_DISC_PICK        = "Click to head for it",
+    DQ_TRK_BOX_TIP          = "Complete these",   -- over an any-order box's steps in the strip
+
     -- HouseTab tab
     HT_PICKER_TITLE         = "Customize Dashboard",
     HT_BLANK_DASHBOARD      = "Your dashboard fills in as HDG captures your house data -- visit your house or open the Housing Catalog to get started.",
@@ -808,6 +1057,24 @@ HDG.Locale:Register("enUS", {
     TIP_ACQ_PRESET_END_BODY = "Shows vendors whose items unlock through the housing Endeavor system.",
     TIP_ACQ_PRESET_QST_TITLE = "Quest-gated decor",
     TIP_ACQ_PRESET_QST_BODY = "Shows only vendors whose items require completing a quest first.",
+    TIP_DQ_PRESET_TODO_TITLE     = "To do",
+    TIP_DQ_PRESET_TODO_BODY      = "Decor whose quest no character has done yet, and decor whose quest is done but isn't in your collection.",
+    TIP_DQ_PRESET_PROGRESS_TITLE = "In progress",
+    TIP_DQ_PRESET_PROGRESS_BODY  = "This character has done a step toward the decor, or has one in the quest log.",
+    TIP_DQ_PRESET_HERE_TITLE     = "Done on this character",
+    TIP_DQ_PRESET_HERE_BODY      = "This character did the decor quest, and the decor is in your collection.",
+    TIP_DQ_PRESET_DONE_TITLE     = "Done by your warband",
+    TIP_DQ_PRESET_DONE_BODY      = "Any of your characters did the decor quest, and the decor is in your collection.",
+    TIP_DQ_PRESET_ALL_TITLE      = "All",
+    TIP_DQ_PRESET_ALL_BODY       = "Every decor a quest rewards, other factions' included.",
+    TIP_DQ_HIDE_COLLECTED_TITLE  = "Hide collected",
+    TIP_DQ_HIDE_COLLECTED_BODY   = "Leaves out decor in your collection -- works with the chip above.",
+    TIP_DQ_TRK_EXPAND_TITLE      = "Next steps",
+    TIP_DQ_TRK_EXPAND_BODY       = "Show or hide the steps after the one to head for. With Compact picked in Settings, it opens the full tracker and folds it back.",
+    TIP_DQ_TRK_CLOSE_TITLE       = "Close the tracker",
+    TIP_DQ_TRK_OPEN_TITLE        = "Show this in Decor Quests",
+    TIP_DQ_TRK_STOP_TITLE        = "Stop following this and close the tracker",
+    TIP_DQ_TRK_DONE_TITLE        = "Done: stop following this and close the tracker",
     TIP_ACQ_PRESET_REC_TITLE = "Recipe vendors",
     TIP_ACQ_PRESET_REC_BODY = "Shows only vendors that sell at least one decor recipe scroll.",
     TIP_ACQ_PRESET_NBH_TITLE = "Sold in the neighborhood",
@@ -909,5 +1176,5 @@ HDG.Locale:Register("enUS", {
     TIP_WARN_HARD_RESET_TITLE = "|cffff6060Hard reset all data|r",
     TIP_WARN_HARD_RESET_BODY = "Wipes ALL HDG data: SavedVariables, queue, alts. Click once to arm, a second time within 5 seconds to confirm. Requires /reload.",
     TIP_WARN_CLEAR_PINS_TITLE = "|cffff6060Clear all map pins|r",
-    TIP_WARN_CLEAR_PINS_BODY = "Removes every HDG pin from the world map. Pinned again on next refresh.",
+    TIP_WARN_CLEAR_PINS_BODY = "Removes every HDG pin from the world map.",
 })

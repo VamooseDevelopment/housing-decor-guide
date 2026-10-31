@@ -1,8 +1,10 @@
 -- HDG.SessionIdentity
 -- ============================================================================
--- Populates session.identity = { name, realm, class, classFile, charKey }
--- once per session (identity is stable until /reload). All consumers read
--- state.session.identity; none call UnitName/GetRealmName/UnitClass directly.
+-- Populates session.identity = { name, realm, class, classFile, factionGroup,
+-- raceID, classID, charKey } once per session (identity is stable until /reload).
+-- All consumers read state.session.identity; none call UnitName/GetRealmName/
+-- UnitClass/UnitRace directly. Owns C_CreatureInfo too: the names of races and
+-- classes other than the player's, for Decor Quests' "Evoker only".
 --
 -- Why onEnable not PLAYER_LOGIN: PLAYER_LOGIN is owned by Init.lua's bootstrap;
 -- onEnable runs after it drains, guaranteeing UnitName + UnitClass resolve.
@@ -30,9 +32,22 @@ function HDG.SessionIdentity.GetIdentity(state)
     return id
 end
 
+-- A class or race in the client's language, by ID. Synchronous DB2 data; nil for
+-- an ID the client does not know.
+function HDG.SessionIdentity.ClassName(classID)
+    local info = C_CreatureInfo.GetClassInfo(classID)
+    return info and info.className   -- exception(boundary): GetClassInfo is nil for an unknown classID
+end
+
+function HDG.SessionIdentity.RaceName(raceID)
+    local info = C_CreatureInfo.GetRaceInfo(raceID)
+    return info and info.raceName   -- exception(boundary): GetRaceInfo is nil for an unknown raceID
+end
+
 HDG.Modules:Declare({
     name = "SessionIdentity",
     dependencies = {},
+    ownsBlizzardNamespaces = { "C_CreatureInfo" },
     onEnable = function(self)
         local name, realm = _G.UnitName("player")
         if not name then
@@ -48,7 +63,8 @@ HDG.Modules:Declare({
         if not realm or realm == "" then
             realm = _G.GetRealmName() or ""
         end
-        local class, classFile = _G.UnitClass("player")
+        local class, classFile, classID = _G.UnitClass("player")
+        local _, _, raceID = _G.UnitRace("player")
         -- factionGroup: normalize UnitFactionGroup -> "A"/"H"/"N" to match
         -- HDGR_VendorDB row[6] convention. Stamped once; selectors read
         -- state.session.identity.factionGroup (never call UnitFactionGroup).
@@ -63,6 +79,8 @@ HDG.Modules:Declare({
                 class        = class     or "",
                 classFile    = classFile or "",
                 factionGroup = factionTag,
+                raceID       = raceID  or 0,   -- exception(boundary): UnitRace may return nothing
+                classID      = classID or 0,   -- exception(boundary): UnitClass may return nothing
             },
         })
     end,

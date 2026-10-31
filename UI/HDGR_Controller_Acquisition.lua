@@ -3,6 +3,9 @@
 -- Acquisition tab: search + filter wire-up, vendor/item row kinds, map pins.
 -- Refresh auto-selects first vendor when selection falls outside filtered set;
 -- _autoSelectPending guards re-entrancy across flush cycles.
+-- Click and tooltip handlers are module-level and read what the paint stamped on
+-- the frame (row._ed, a button's _vendor): rows repaint on every scroll, and a
+-- closure per paint was garbage each time.
 
 HDG = HDG or {}
 HDG.AcquisitionController = HDG.AcquisitionController or {}
@@ -28,8 +31,19 @@ local function FindFirstVendorForItem(itemID)
     return HDG.StaticData.VendorAugment:ResolveName(v.name, v.zone)
 end
 
--- ===== Source-type chip palette + helpers =================================
+-- ===== Shared row helpers: chip palette, shift-link, envelope ===============
 local _gateChips = HDG.UI.GateChips
+
+-- Shift-click links the item in chat (active editbox, or opens chat), as on the
+-- Decor browser's rows; true when it did, and the click does nothing else.
+local function _linkedOnShift(itemID)
+    if not IsShiftKeyDown() then return false end
+    HDG.UI.LinkItem(itemID)
+    return true
+end
+
+-- A pooled row keeps no envelope once released.
+local function _clearRowEd(row) row._ed = nil end
 
 -- itemRow factory: canonical layout/paint/wire split.
 local function _layoutItemRow(row)
@@ -50,6 +64,17 @@ local function _layoutItemRow(row)
     row._metaFs = meta
 end
 
+-- The right-hand caption (meta / cost) sits left of the chips strip, or at the
+-- row's edge when no chip shows.
+local function _anchorLeftOfChips(row, fs)
+    fs:ClearAllPoints()
+    if row._chipsFs:GetText() and row._chipsFs:GetText() ~= "" then
+        fs:SetPoint("RIGHT", row._chipsFs, "LEFT", -8, 0)
+    else
+        fs:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+    end
+end
+
 local function _paintItemRow(row, ed)
     row._nameFs:SetText(HDG.Theme:CollectionLabel(ed.isCollected, ed.name))
     -- Meta: expansion + profession when present ("Midnight Inscription").
@@ -61,35 +86,27 @@ local function _paintItemRow(row, ed)
     row._metaFs:SetText(meta)
     row._chipsFs:SetText(_gateChips(ed.itemID, ed.questDone, ed.achEarned, ed.repMet))
 
-    -- Re-anchor: chips right-edge fixed; meta sits left of chips (with extra
-    -- padding when chips are empty), name fills the rest.
-    row._metaFs:ClearAllPoints()
-    if row._chipsFs:GetText() and row._chipsFs:GetText() ~= "" then
-        row._metaFs:SetPoint("RIGHT", row._chipsFs, "LEFT", -8, 0)
-    else
-        row._metaFs:SetPoint("RIGHT", row, "RIGHT", -4, 0)
-    end
+    -- Re-anchor: chips right-edge fixed; meta sits left of chips, name fills the rest.
+    _anchorLeftOfChips(row, row._metaFs)
     row._nameFs:ClearAllPoints()
     row._nameFs:SetPoint("LEFT",  row,         "LEFT",  4, 0)
     row._nameFs:SetPoint("RIGHT", row._metaFs, "LEFT",  -8, 0)
 end
 
+-- A plain click selects the item and its primary vendor.
+local function _onItemRowClick(self)
+    local itemID = self._ed.itemID
+    if _linkedOnShift(itemID) then return end
+    CH.Mechanics.SetUITransientView("acquisition", "selectedItemID", itemID)
+    local npcID = FindFirstVendorForItem(itemID)
+    if npcID then
+        CH.Mechanics.SetUITransientView("acquisition", "selectedNpcID", npcID)
+    end
+end
+
 local function _wireItemRow(row, ed)
-    local itemID = ed.itemID
-    row:SetScript("OnClick", function()
-        if not itemID then return end
-        -- Shift-click links the item in chat (active editbox, or opens chat);
-        -- mirrors the Decor browser row. A plain click selects.
-        if IsShiftKeyDown() then
-            HDG.UI.LinkItem(itemID)
-            return
-        end
-        CH.Mechanics.SetUITransientView("acquisition", "selectedItemID", itemID)
-        local npcID = FindFirstVendorForItem(itemID)
-        if npcID then
-            CH.Mechanics.SetUITransientView("acquisition", "selectedNpcID", npcID)
-        end
-    end)
+    row._ed = ed
+    row:SetScript("OnClick", _onItemRowClick)
 end
 
 HDG.Rows:Register("itemRow", {
@@ -102,8 +119,9 @@ HDG.Rows:Register("itemRow", {
         selectable = true,
         wire       = _wireItemRow,
         resetText  = { "_nameFs", "_metaFs" },
+        reset      = _clearRowEd,
     }),
-    key     = function(ed) return tostring(ed and ed.itemID or "?") end,
+    key     = function(ed) return tostring(ed.itemID) end,   -- acq.items keeps one row per item
 })
 
 -- ===== Vendor row factory: name + zone/faction/expansion meta =================
@@ -122,12 +140,14 @@ local function _paintAcqVendorRow(row, ed)
     row._metaFs:SetText(table.concat(parts, "  -  "))
 end
 
+local function _onAcqVendorRowClick(self)
+    local ed = self._ed
+    CH.Mechanics.SelectVendor(ed.npcID, ed.name, ed.catalogZone)   -- catalogZone is byVendor key; display zone may differ
+end
+
 local function _wireAcqVendorRow(row, ed)
-    local npcID = ed.npcID
-    local vname, vzone = ed.name, ed.catalogZone or ed.zone   -- catalogZone is byVendor key; display zone may differ
-    row:SetScript("OnClick", function()
-        CH.Mechanics.SelectVendor(npcID, vname, vzone)
-    end)
+    row._ed = ed
+    row:SetScript("OnClick", _onAcqVendorRowClick)
 end
 
 HDG.Rows:Register("acqVendorRow", {
@@ -141,20 +161,18 @@ HDG.Rows:Register("acqVendorRow", {
         clicks     = "LeftButtonUp",
         wire       = _wireAcqVendorRow,
         resetText  = { "_nameFs", "_metaFs" },
+        reset      = _clearRowEd,
     }),
+    -- npcID alone is not unique (~9 vendors appear in multiple zones; one npcID per
+    -- zone pair), so the catalog's zone joins it: one row per byVendor (name, zone).
     key     = function(ed)
-        -- npcID alone is not unique (~9 vendors appear in multiple zones; one npcID per zone pair).
-        -- Meta-groupings ("Draenor World Vendors") have no npcID; fall back to (name, zone).
-        if not ed then return "avr_nil" end
-        local zoneKey = tostring(ed.catalogZone or ed.zone or "?")
-        if ed.npcID then return "avr_" .. tostring(ed.npcID) .. "_" .. zoneKey end
-        return "avr_name_" .. tostring(ed.name or "?") .. "_" .. zoneKey
+        if ed.npcID then return "avr_" .. ed.npcID .. "_" .. ed.catalogZone end
+        -- exception(nullable): meta-groupings ("Draenor World Vendors") and names VendorAugment cannot resolve have no npcID
+        return "avr_name_" .. ed.name .. "_" .. ed.catalogZone
     end,
 })
 
 -- ===== Cost / placement / chip helpers ===================================
-local _formatGold = HDG.Format.FormatGold
-
 local function _placementLabel(ed)
     if ed.isAllowedIndoors and ed.isAllowedOutdoors then return "Indoor / Outdoor" end
     if ed.isAllowedIndoors then return "Indoor" end
@@ -189,53 +207,50 @@ local function _layoutAcqItemRow(row)
     row._nameFs = name
 end
 
-local function _paintAcqItemRow(row, ed)
-    row._chipsFs:SetText(_gateChips(ed.itemID, ed.questDone, ed.achEarned, ed.repMet))
-    row._costFs:ClearAllPoints()
-    if row._chipsFs:GetText() and row._chipsFs:GetText() ~= "" then
-        row._costFs:SetPoint("RIGHT", row._chipsFs, "LEFT", -8, 0)
-    else
-        row._costFs:SetPoint("RIGHT", row, "RIGHT", -4, 0)
-    end
+-- Vendor-items list rows: cost left of the chips, the name between icon and cost.
+local function _anchorCostAndName(row)
+    _anchorLeftOfChips(row, row._costFs)
     row._nameFs:ClearAllPoints()
     row._nameFs:SetPoint("LEFT",  row._iconTex, "RIGHT", 6, 0)
     row._nameFs:SetPoint("RIGHT", row._costFs,  "LEFT",  -8, 0)
+end
 
-    if ed.iconTexture and row._iconTex.SetTexture then
-        row._iconTex:SetTexture(ed.iconTexture)
-    elseif ed.iconAtlas and row._iconTex.SetAtlas then
-        row._iconTex:SetAtlas(ed.iconAtlas)
+-- The item's texture, else its atlas, else the "?" placeholder.
+local function _paintItemIcon(tex, ed)
+    if ed.iconTexture then
+        tex:SetTexture(ed.iconTexture)
+    elseif ed.iconAtlas then
+        tex:SetAtlas(ed.iconAtlas)
     else
-        row._iconTex:SetTexture(HDG.Constants.PLACEHOLDER_ICON)   -- "?" fallback
+        tex:SetTexture(HDG.Constants.PLACEHOLDER_ICON)
     end
+end
 
+local function _paintAcqItemRow(row, ed)
+    row._chipsFs:SetText(_gateChips(ed.itemID, ed.questDone, ed.achEarned, ed.repMet))
+    _anchorCostAndName(row)
+    _paintItemIcon(row._iconTex, ed)
     row._nameFs:SetText(HDG.Theme:CollectionLabel(ed.isCollected, ed.name))
 
-    local parts = {}
-    local goldStr = _formatGold(ed.goldCost)
-    if goldStr ~= "" then parts[#parts+1] = goldStr end
-    -- Currency cost: a multi-option item (coupons OR gold) carries this row's
-    -- specific option in costLineVariant (listRows expanded it); otherwise fall
-    -- back to the baked single line (ed.costLine). Both render inline |T:14:14|t icons.
-    local currStr = ed.costLineVariant or ed.costLine
-    if currStr ~= "" then parts[#parts+1] = currStr end
-    row._costFs:SetText(table.concat(parts, " + "))
+    -- The price, gold and currencies alike, from the catalog's cost line: a
+    -- multi-option item (coupons OR gold) carries this row's own option in
+    -- costLineVariant (listRows expanded it), any other item its one costLine.
+    row._costFs:SetText(ed.costLineVariant or ed.costLine)
+end
+
+-- A plain click selects the item; a recipe row selects its recipe too.
+local function _onAcqItemRowClick(self)
+    local ed = self._ed
+    local itemID = ed.itemID
+    if _linkedOnShift(itemID) then return end
+    CH.Mechanics.SetUITransientView("acquisition", "selectedItemID", itemID)
+    CH.Mechanics.SetUITransientView("acquisition", "selectedRecipeItemID",
+        ed.kind == "recipe" and itemID or nil)
 end
 
 local function _wireAcqItemRow(row, ed)
-    local itemID = ed.itemID
-    local isRecipe = ed.kind == "recipe"
-    row:SetScript("OnClick", function()
-        if not itemID then return end
-        -- Shift-click links the item in chat, as on Shop by Item's rows.
-        if IsShiftKeyDown() then
-            HDG.UI.LinkItem(itemID)
-            return
-        end
-        CH.Mechanics.SetUITransientView("acquisition", "selectedItemID", itemID)
-        CH.Mechanics.SetUITransientView("acquisition", "selectedRecipeItemID",
-            isRecipe and itemID or nil)
-    end)
+    row._ed = ed
+    row:SetScript("OnClick", _onAcqItemRowClick)
 end
 
 -- Recipe rows are interleaved into the vendor item LIST (ed.kind == "recipe"),
@@ -249,11 +264,7 @@ local function _paintRecipeListRow(row, ed)
         row._iconTex:SetTexture(HDG.Constants.PLACEHOLDER_ICON)
     end
     row._chipsFs:SetText("")
-    row._costFs:ClearAllPoints()
-    row._costFs:SetPoint("RIGHT", row, "RIGHT", -4, 0)
-    row._nameFs:ClearAllPoints()
-    row._nameFs:SetPoint("LEFT",  row._iconTex, "RIGHT", 6, 0)
-    row._nameFs:SetPoint("RIGHT", row._costFs,  "LEFT",  -8, 0)
+    _anchorCostAndName(row)
     row._nameFs:SetText(HDG.Theme:CollectionLabel(ed.isKnown, ed.name))
     row._costFs:SetText(ed.costText)
 end
@@ -273,6 +284,7 @@ local function _acqItemListRowFactory(template)
         Reset = function(row)
             HDG.UI.ClearRowText(row, "_nameFs", "_costFs")
             row:SetScript("OnClick", nil)
+            _clearRowEd(row)
         end,
     }
 end
@@ -282,24 +294,22 @@ HDG.Rows:Register("acqVendorItemListRow", {
     factory = _acqItemListRowFactory,
     -- variantIndex disambiguates multi-payment-option items (same itemID, distinct rows).
     key     = function(ed)
-        return "vil_" .. tostring(ed and ed.itemID or "?")
-            .. (ed and ed.variantIndex and ("_" .. ed.variantIndex) or "")
+        if ed.variantIndex then return "vil_" .. ed.itemID .. "_" .. ed.variantIndex end
+        -- exception(nullable): only acq.selected.listRows' per-option copies carry variantIndex
+        return "vil_" .. ed.itemID
     end,
 })
 
 -- ===== Item-view vendor row: name | zone/faction/cost | [Map] [Wpt] =========
--- _itemVendorRowFactory: canonical layout/paint/wire split.
-local function _buildRowBtn(parent, text)
-    return HDG.UI.RowButton(parent, text)
-end
+-- acqItemVendorRow factory: canonical layout/paint/wire split.
 
 -- First-paint laydown: chrome + Wpt/Map buttons + name/meta.
 local function _layoutItemVendorRow(row)
-    local wptBtn = _buildRowBtn(row, "Wpt")
+    local wptBtn = HDG.UI.RowButton(row, "Wpt")
     wptBtn:SetPoint("RIGHT", row, "RIGHT", -4, 0)
     row._wptBtn = wptBtn
 
-    local mapBtn = _buildRowBtn(row, "Map")
+    local mapBtn = HDG.UI.RowButton(row, "Map")
     mapBtn:SetPoint("RIGHT", wptBtn, "LEFT", -4, 0)
     row._mapBtn = mapBtn
 
@@ -327,36 +337,38 @@ local function _paintItemVendorRow(row, ed)
     row._metaFs:SetText(table.concat(parts, "  -  "))
 end
 
--- Wire Wpt / Map buttons + row click. All close over the per-paint envelope.
--- Wpt/Map are greyed (not hidden) without a location, and their tooltip says why:
--- a live-looking button that did nothing was the 2026-10-15 report.
-local function _wireItemVendorRowClicks(row, ed)
-    local vName      = ed.name
-    local vMapID     = ed.mapID
-    local vX, vY     = ed.x, ed.y
-    local factionRaw = ed.factionRaw
-    local npcID      = ed.npcID
-    local tipVendor  = { name = ed.name, zone = ed.zone, mapID = ed.mapID, x = ed.x, y = ed.y }
+-- Wpt / Map read the vendor row stamped on them each paint, the row click its _ed:
+-- one handler and tip each, not four closures per row per paint. Wpt/Map are greyed
+-- (not hidden) without a location, and their tooltip says why: a live-looking button
+-- that did nothing was the 2026-10-15 report.
+local function _onVendorWaypoint(self) HDG.UI.WaypointToVendor(self._vendor) end
+local function _onVendorMap(self) HDG.UI.ShowVendorOnMap(self._vendor) end
+local function _vendorWayTip(self) return HDG.TooltipRecipes.VendorNavTip(self._vendor, "VENDOR_WAY_TIP") end
+local function _vendorMapTip(self) return HDG.TooltipRecipes.VendorNavTip(self._vendor, "VENDOR_MAP_TIP") end
 
+-- A vendor whose name resolved to no npcID has nothing to select.
+local function _onItemVendorRowClick(self)
+    local npcID = self._ed.npcID
+    if npcID then
+        CH.Mechanics.SetUITransientView("acquisition", "selectedNpcID", npcID)
+    end
+end
+
+local function _wireItemVendorRowClicks(row, ed)
+    row._ed, row._wptBtn._vendor, row._mapBtn._vendor = ed, ed, ed
     HDG.UI.SetEnabledLook(row._wptBtn, ed.mappable)
     HDG.UI.SetEnabledLook(row._mapBtn, ed.mappable)
-    HDG.TooltipEngine:Attach(row._wptBtn, function()
-        return HDG.TooltipRecipes.VendorNavTip(tipVendor, "VENDOR_WAY_TIP")
-    end)
-    HDG.TooltipEngine:Attach(row._mapBtn, function()
-        return HDG.TooltipRecipes.VendorNavTip(tipVendor, "VENDOR_MAP_TIP")
-    end)
-    row._wptBtn:SetScript("OnClick", function()
-        HDG.Waypoints:Set(vMapID, vX, vY, vName, factionRaw)
-    end)
-    row._mapBtn:SetScript("OnClick", function()
-        HDG.Waypoints:ShowOnMap(vMapID, vX, vY, vName)
-    end)
-    row:SetScript("OnClick", function()
-        if npcID then
-            CH.Mechanics.SetUITransientView("acquisition", "selectedNpcID", npcID)
-        end
-    end)
+    HDG.TooltipEngine:Attach(row._wptBtn, _vendorWayTip)
+    HDG.TooltipEngine:Attach(row._mapBtn, _vendorMapTip)
+    row._wptBtn:SetScript("OnClick", _onVendorWaypoint)
+    row._mapBtn:SetScript("OnClick", _onVendorMap)
+    row:SetScript("OnClick", _onItemVendorRowClick)
+end
+
+local function _resetItemVendorRow(row)
+    row._wptBtn:SetScript("OnClick", nil)
+    row._mapBtn:SetScript("OnClick", nil)
+    row._ed, row._wptBtn._vendor, row._mapBtn._vendor = nil, nil, nil
 end
 
 HDG.Rows:Register("acqItemVendorRow", {
@@ -369,16 +381,14 @@ HDG.Rows:Register("acqItemVendorRow", {
         selectable = true,
         wire       = _wireItemVendorRowClicks,
         resetText  = { "_nameFs", "_metaFs" },
-        reset      = function(row)
-            row._wptBtn:SetScript("OnClick", nil)
-            row._mapBtn:SetScript("OnClick", nil)
-        end,
+        reset      = _resetItemVendorRow,
     }),
-    -- Key by npcID; fall back to name@zone when the vendor name didn't resolve to
-    -- an npcID (else two distinct unresolved vendors both key "ivr_?" -> collision).
+    -- Key by npcID; name@zone when the vendor's name resolved to none (two unresolved
+    -- vendors would otherwise share one key).
     key     = function(ed)
-        if not ed then return "ivr_?" end
-        return "ivr_" .. tostring(ed.npcID or ((ed.name or "?") .. "@" .. (ed.zone or "?")))
+        if ed.npcID then return "ivr_" .. ed.npcID end
+        -- exception(nullable): a catalog vendor name VendorAugment cannot resolve has no npcID
+        return "ivr_" .. ed.name .. "@" .. ed.zone
     end,
 })
 
@@ -386,23 +396,36 @@ HDG.Rows:Register("acqItemVendorRow", {
 -- Vendor-detail item tile. Standard anatomy + storage badge + hover tooltip.
 -- Click dispatches selectedItemID.
 --
--- Tooltip def is MODULE-LEVEL + reads per-init stamps on the cell (cell._tip*).
--- TE:Attach is idempotent on pooled cells (the `_hdgrTooltipAttached` guard hooks
--- OnEnter exactly once, ever), so a per-init CLOSURE captured by Attach would
--- freeze on the FIRST item a pooled cell displayed -- the stale-tooltip-on-
--- vendor-switch bug. Stable def + per-init stamp is the same pattern the row
--- factories use (self._itemID).
+-- Tooltip def and click are MODULE-LEVEL and read per-init stamps on the cell
+-- (cell._tip*, cell._ed), as the row factories read row._ed: the cell is pooled
+-- and re-initialized per item, so a closure per init would be garbage each time.
+-- The name in Blizzard's gold, the rest tooltip white (TooltipEngine.COLOR: HDG
+-- never re-skins GameTooltip, so a scheme colour could vanish on its background).
 local function _acqTileDef(self_)
-    if not self_._tipName then return nil end   -- exception(nullable): cell not yet painted
-    local th    = HDG.Theme:GetColor("text.heading")
-    local td    = HDG.Theme:GetColor("text.dim")
-    local money = HDG.Theme:GetColor("semantic.warning")
-    local lines = { { text = self_._tipName, r = th.r, g = th.g, b = th.b } }
-    if self_._tipCost  ~= "" then lines[#lines+1] = { text = self_._tipCost,  r = money.r, g = money.g, b = money.b } end
-    if self_._tipPlace ~= "" then lines[#lines+1] = { text = self_._tipPlace, r = td.r, g = td.g, b = td.b } end
-    lines[#lines+1] = { text = "Stored: " .. self_._tipStored, r = td.r, g = td.g, b = td.b }
-    lines[#lines+1] = { text = "Placed: " .. self_._tipPlaced, r = td.r, g = td.g, b = td.b }
+    local gold  = HDG.TooltipEngine.COLOR.NORMAL
+    local lines = { { text = self_._tipName, r = gold.r, g = gold.g, b = gold.b } }
+    if self_._tipCost  ~= "" then lines[#lines+1] = "Cost: " .. self_._tipCost end
+    if self_._tipPlace ~= "" then lines[#lines+1] = self_._tipPlace end
+    lines[#lines+1] = "Stored: " .. self_._tipStored
+    lines[#lines+1] = "Placed: " .. self_._tipPlaced
     return { anchor = "ANCHOR_RIGHT", extraLines = lines }
+end
+
+-- The tooltip's per-init stamps, read by _acqTileDef.
+local function _stampTileTip(cell, ed)
+    cell._tipName   = ed.name
+    cell._tipCost   = ed.costText
+    cell._tipPlace  = _placementLabel(ed)
+    cell._tipStored = ed.numStored
+    cell._tipPlaced = ed.numPlaced
+end
+
+-- Click selects the stamped item; leave drops the hover fill.
+local function _onTileClick(self)
+    CH.Mechanics.SetUITransientView("acquisition", "selectedItemID", self._ed.itemID)
+end
+local function _onTileLeave(self)
+    self.hoverBg:Hide()
 end
 
 HDG.CardGrid:RegisterCellKind("acqVendorItemTile", {
@@ -421,174 +444,154 @@ HDG.CardGrid:RegisterCellKind("acqVendorItemTile", {
             HDG.CardGrid:PaintBadge(cell, nil)
         end
 
-        if cell.label then cell.label:Hide() end
+        cell.label:Hide()
         cell:RegisterForClicks("LeftButtonUp")
-        local itemID = ed.itemID
-        -- Per-init tooltip stamps (read by the module-level _acqTileDef). MUST be
-        -- re-stamped every init: the cell is pooled + TE:Attach hooks OnEnter once.
-        cell._tipName   = ed.name
-        cell._tipCost   = _formatGold(ed.goldCost)
-        cell._tipPlace  = _placementLabel(ed)
-        cell._tipStored = ed.numStored      -- exception(boundary): Blizz C_HousingCatalog struct
-        cell._tipPlaced = ed.numPlaced or 0  -- exception(boundary): Blizz C_HousingCatalog struct
-
-        cell:SetScript("OnClick", function()
-            if not itemID then return end
-            CH.Mechanics.SetUITransientView("acquisition", "selectedItemID", itemID)
-        end)
-        cell:SetScript("OnLeave", function(self_)
-            if self_.hoverBg then self_.hoverBg:Hide() end
-        end)
+        -- Per-init stamps (read by the module-level _acqTileDef / _onTileClick). MUST
+        -- be re-stamped every init: the cell is pooled + TE:Attach hooks OnEnter once.
+        cell._ed = ed
+        _stampTileTip(cell, ed)
+        cell:SetScript("OnClick", _onTileClick)
+        cell:SetScript("OnLeave", _onTileLeave)
         HDG.TooltipEngine:Attach(cell, _acqTileDef)
     end,
 })
 
 -- ===== Controller lifecycle ==================================================
 
--- Filter tag chips: click clears the axis. TAG_RESETS keys from LayoutConfig._activeFilterTags (SSoT).
-function AcquisitionController:_wireFilterTags(rootFrame)
-    local searchBoxRef = HDG.UI.W(rootFrame, "acquisitionListPanel.search")
-    local TAG_RESETS = {
-        search    = function()
-            CH.Mechanics.SetUITransientView("acquisition", "searchQuery", "")
-            if searchBoxRef and searchBoxRef.SetText then searchBoxRef:SetText("") end
-        end,
-        -- Multi-select axes: dispatch the toggle with value "all" -> reducer clears the set.
-        faction   = function() HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.ACQ_TOGGLE_FACTION,   payload = { faction   = "all" } }) end,
-        expansion = function() HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.ACQ_TOGGLE_EXPANSION, payload = { expansion = "all" } }) end,
-        zone      = function() HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.ACQ_TOGGLE_ZONE,      payload = { zone      = "all" } }) end,
-        rep       = function() HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.ACQ_TOGGLE_REP,       payload = { rep       = "all" } }) end,
-        -- Preset: re-dispatching the active value toggles it off (reducer contract).
-        preset    = function()
-            local current = HDG.Selectors:Call("acq.preset", HDG.Store:GetState(), {})  -- exception(false-positive): top-level controller method (not a row factory)
-            if current then
-                HDG.Store:Dispatch({
-                    type    = HDG.Constants.ACTIONS.ACQ_SET_PRESET,
-                    payload = { value = current },
-                })
-            end
-        end,
-        source    = function() HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.ACQ_TOGGLE_SOURCE, payload = { source = "all" } }) end,
-        currency  = function() HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.ACQ_TOGGLE_CURRENCY, payload = { currency = "all" } }) end,
-        -- Missing tag is only visible when missingOnly is true, so a toggle
-        -- dispatch clears it back off.
-        missing   = function() HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.ACQ_TOGGLE_MISSING }) end,
-    }
-    for _, tag in ipairs(HDG.LayoutConfig._activeFilterTags or {}) do
-        local reset = TAG_RESETS[tag.axis]
-        if reset then
-            HDG.UI.OnClick(rootFrame, "acquisitionListPanel.tag_" .. tag.axis, reset)
-        end
+-- Missing is orthogonal to the source chips (ANDs with them). Its tag shows only
+-- while it is on, so the tag clears it with the same toggle.
+local function _toggleMissing() CH.Mechanics.DispatchNamed("ACQ_TOGGLE_MISSING") end
+
+-- A multi-select axis tag: the toggle with "all" clears the set (reducer contract).
+local function _clearAxis(action, key)
+    return function() CH.Mechanics.DispatchNamed(action, { [key] = "all" }) end
+end
+
+-- The preset tag: re-dispatching the active preset toggles it off (reducer contract).
+local function _clearPreset()
+    local current = HDG.Selectors:Call("acq.preset", HDG.Store:GetState(), {})  -- exception(false-positive): top-level controller click, not a row factory
+    if current then CH.Mechanics.DispatchNamed("ACQ_SET_PRESET", { value = current }) end
+end
+
+-- Current zone: the Zone filter, set once to where the player stands. Enabled
+-- only when acq.currentZones holds a zone, so the set is never empty here.
+local function _filterToCurrentZone()
+    local zones = HDG.Selectors:Call("acq.currentZones", HDG.Store:GetState(), {})  -- exception(false-positive): top-level controller click, not a row factory
+    CH.Mechanics.DispatchNamed("ACQ_SET_ZONE_FILTER", { zones = zones })
+end
+
+-- The list's header: active-filter chips overflow horizontally (the layout engine
+-- has no flow/wrap), so clip the list panel -- chips cut off at its edge instead of
+-- bleeding into the detail panel; dropdown popups are top-level frames, never
+-- clipped. Search dispatches every keystroke (acq.filterQuery feeds the lists), as
+-- on Decor. Preset chips: SSoT ACQ_PRESETS; the reducer toggles a re-click off.
+function AcquisitionController:_wireListChrome(rootFrame)
+    rootFrame.panels.acquisitionListPanel:SetClipsChildren(true)
+    HDG.UI.WireSearchBox(rootFrame, "acquisitionListPanel.search", "acquisition", "searchQuery")
+    for _, p in ipairs(HDG.Constants.ACQ_PRESETS) do
+        HDG.UI.OnClick(rootFrame, "acquisitionListPanel.preset_" .. p.value, function()
+            CH.Mechanics.DispatchNamed("ACQ_SET_PRESET", { value = p.value })
+        end)
     end
 end
 
--- Waypoint button: HDG.Waypoints:Set (TomTom per the provider setting, else
--- Blizzard's super-tracked waypoint). Enabled only with a location
--- (acq.selectedVendorMappable), so the selected vendor is mapped at click time.
-function AcquisitionController:_wireWaypointButton(rootFrame)
-    HDG.UI.OnClick(rootFrame, "acquisitionDetailPanel.waypointBtn", function()
-        local state  = HDG.Store:GetState()  -- exception(false-positive): top-level controller method (not a row factory)
-        local vendor = HDG.Selectors:Call("acq.selectedVendor", state, {})
-        HDG.Waypoints:Set(vendor.mapID, vendor.x, vendor.y, vendor.name, vendor.factionRaw)
+-- Missing, Current zone, the Advanced filters toggle (its `visible` binding
+-- cascades to the children), and Reset: an atomic clear of every filter axis. The
+-- search editbox is user-driven, so Reset blanks it explicitly.
+function AcquisitionController:_wireFilters(rootFrame)
+    HDG.UI.OnClick(rootFrame, "acquisitionListPanel.missingToggle", _toggleMissing)
+    HDG.UI.OnClick(rootFrame, "acquisitionListPanel.currentZone", _filterToCurrentZone)
+    HDG.UI.OnClick(rootFrame, "acquisitionListPanel.advancedToggle", function()
+        CH.Mechanics.DispatchNamed("ACQ_TOGGLE_ADVANCED_FILTERS")
     end)
+    HDG.UI.OnClick(rootFrame, "acquisitionListPanel.resetFilters", function()
+        CH.Mechanics.DispatchNamed("UI_FILTER_RESET", { tab = "acquisition" })
+        HDG.UI.W(rootFrame, "acquisitionListPanel.search"):SetText("")
+    end)
+end
+
+-- Filter tag chips: a click clears its axis. The tags are LayoutConfig._activeFilterTags
+-- (the SSoT); one without a reset here is an error at Wire, not a dead chip.
+function AcquisitionController:_wireFilterTags(rootFrame)
+    local searchBox = HDG.UI.W(rootFrame, "acquisitionListPanel.search")
+    local TAG_RESETS = {
+        search    = function()
+            CH.Mechanics.SetUITransientView("acquisition", "searchQuery", "")
+            searchBox:SetText("")
+        end,
+        faction   = _clearAxis("ACQ_TOGGLE_FACTION",   "faction"),
+        expansion = _clearAxis("ACQ_TOGGLE_EXPANSION", "expansion"),
+        zone      = _clearAxis("ACQ_TOGGLE_ZONE",      "zone"),
+        rep       = _clearAxis("ACQ_TOGGLE_REP",       "rep"),
+        source    = _clearAxis("ACQ_TOGGLE_SOURCE",    "source"),
+        currency  = _clearAxis("ACQ_TOGGLE_CURRENCY",  "currency"),
+        preset    = _clearPreset,
+        missing   = _toggleMissing,
+    }
+    for _, tag in ipairs(HDG.LayoutConfig._activeFilterTags) do
+        local reset = TAG_RESETS[tag.axis] or error(("_wireFilterTags: no reset for the %q tag"):format(tag.axis))
+        HDG.UI.OnClick(rootFrame, "acquisitionListPanel.tag_" .. tag.axis, reset)
+    end
+end
+
+-- The item and recipe lists highlight selectedItemID; recipe rows also stamp
+-- selectedRecipeItemID (the acqVendorItemListRow factory).
+local function _isSelectedItem(ed, id) return id ~= nil and ed.itemID == id end
+
+-- Same identity rule as acq.selectedVendor and the auto-select guard in Refresh:
+-- npcID when set; for npcID-less vendors (catalog-only NPCs, the synthetic World
+-- Vendors groupings) the (name, zone) SelectVendor stamps. A bare `ed.npcID == id`
+-- with a nil id matched the FIRST npcID-less row -- a wrong highlight, and a wrong scroll.
+local function _isSelectedVendor(ed, id)
+    if id ~= nil then return ed.npcID == id end
+    local ui = HDG.Store:GetState().session.ui.acquisition  -- exception(false-positive): top-level controller read, not a row factory
+    if ui.selectedVendorName == nil then return false end
+    return ed.npcID == nil and ed.name == ui.selectedVendorName
+        and ed.catalogZone == ui.selectedVendorZone
+end
+
+-- Selection highlight follows state on the three scroll lists.
+function AcquisitionController:_wireLists(rootFrame)
+    HDG.UI.W(rootFrame, "acquisitionListPanel.itemList"):WireStoreSelectionSync(
+        "session.ui.acquisition.selectedItemID", _isSelectedItem)
+    HDG.UI.W(rootFrame, "acquisitionListPanel.recipeList"):WireStoreSelectionSync(
+        "session.ui.acquisition.selectedItemID", _isSelectedItem)
+    HDG.UI.W(rootFrame, "acquisitionListPanel.vendorList"):WireStoreSelectionSync(
+        "session.ui.acquisition.selectedNpcID", _isSelectedVendor)
+end
+
+-- Map All: pin every filtered vendor with a location, open the map once
+-- (HDG.Waypoints:MapAll). The X beside it takes every HDG pin off the map.
+function AcquisitionController:_wireMapButtons(rootFrame)
+    HDG.UI.OnClick(rootFrame, "acquisitionListPanel.mapAllBtn", function()
+        local state = HDG.Store:GetState()  -- exception(false-positive): top-level controller method (not a row factory)
+        HDG.Waypoints:MapAll(HDG.Selectors:Call("acq.vendors", state, {}))
+    end)
+    HDG.UI.OnClick(rootFrame, "acquisitionListPanel.clearPinsBtn", function() HDG.Waypoints:ClearAllMapPins() end)
+end
+
+local function _selectedVendor()
+    return HDG.Selectors:Call("acq.selectedVendor", HDG.Store:GetState(), {})  -- exception(false-positive): top-level controller click, not a row factory
+end
+
+-- Waypoint and Show on Map for the selected vendor, enabled only with a location
+-- (acq.selectedVendorMappable).
+function AcquisitionController:_wireVendorNav(rootFrame)
+    HDG.UI.WireVendorNav(rootFrame, "acquisitionDetailPanel.waypointBtn",
+        "acquisitionDetailPanel.showOnMapBtn", _selectedVendor)
 end
 
 -- Wowhead URL: pops the shared slimline copy field under the clicked logo.
+local function _copyUrlFrom(selectorName)
+    return function(btn)
+        local url = HDG.Selectors:Call(selectorName, HDG.Store:GetState(), {})  -- exception(false-positive): top-level controller click, not a row factory
+        HDG.UI:UrlCopyPopup():ShowAt(btn, url)
+    end
+end
+
 function AcquisitionController:_wireWowheadButtons(rootFrame)
-    HDG.UI.OnClick(rootFrame, "acquisitionDetailPanel.wowheadBtn", function(btn)
-        local state = HDG.Store:GetState()  -- exception(false-positive): top-level controller method (not a row factory)
-        local url   = HDG.Selectors:Call("acq.selected.wowheadUrl", state, {})
-        HDG.UI:UrlCopyPopup():ShowAt(btn, url)
-    end)
-    HDG.UI.OnClick(rootFrame, "acquisitionDetailPanel.itemWowheadBtn", function(btn)
-        local state = HDG.Store:GetState()  -- exception(false-positive): top-level controller method (not a row factory)
-        local url   = HDG.Selectors:Call("acq.selectedItem.wowheadUrl", state, {})
-        HDG.UI:UrlCopyPopup():ShowAt(btn, url)
-    end)
-end
-
--- |Hhdgrach:<itemID>|h click/hover: reads achievementID from the baked catalog row
--- (HousingCatalogObserver bakes it via _bakeItemAugmentBackfill). No render-time lookup.
-local function _achievementForItem(itemID)
-    if not itemID then return nil, nil end
-    local row = HDG.HousingCatalogObserver:GetRow(itemID)
-    if not row then return nil, nil end
-    return row.achievementID, row.achievement
-end
-
-local function _parseAchLink(link)
-    local kind, payload = strsplit(":", link or "", 2)
-    if kind ~= "hdgrach" or not payload or payload == "" then return nil end
-    return tonumber(payload)
-end
-
-function AcquisitionController:_wireAchievementHyperlinks(rootFrame)
-    local sourceLine = HDG.UI.W(rootFrame, "acquisitionDetailPanel.itemInfoSource")
-    local hyperHost  = sourceLine and sourceLine.GetParent and sourceLine:GetParent()
-    if not (hyperHost and hyperHost.SetHyperlinksEnabled) then return end
-    hyperHost:EnableMouse(true)
-    hyperHost:SetHyperlinksEnabled(true)
-    hyperHost:SetScript("OnHyperlinkClick", function(_, link)
-        local achID = _achievementForItem(_parseAchLink(link))
-        if not achID then return end
-        -- ShowUIPanel refuses insecure callers in combat (CheckProtectedFunctionsAllowed)
-        -- and blames the addon by name in the red error. Same guard the mapAllBtn uses.
-        if InCombatLockdown() then return end
-        ShowAchievementFrameForAchievement(achID)  -- canonical Blizzard path (same as SetItemRef)
-    end)
-    hyperHost:SetScript("OnHyperlinkEnter", function(self, link)
-        local _, achName = _achievementForItem(_parseAchLink(link))
-        if not achName then return end
-        HDG.TooltipEngine:Show(self, {
-            anchor     = "ANCHOR_CURSOR",
-            extraLines = {
-                { text = achName,                             r = 1,   g = 0.82, b = 0   },
-                { text = "Click to open Achievement window", r = 0.7, g = 0.7,  b = 0.7 },
-            },
-        })
-    end)
-    hyperHost:SetScript("OnHyperlinkLeave", function() HDG.TooltipEngine:Hide() end)
-end
-
--- |Hhdgrdecor:<itemID>|h on the selected item's name (acq.selectedItem.name):
--- click opens the item's Decor entry, where + Cart, notes and the model live.
-local function _parseDecorLink(link)
-    local kind, payload = strsplit(":", link or "", 2)
-    if kind ~= "hdgrdecor" or not payload or payload == "" then return nil end
-    return tonumber(payload)
-end
-
-function AcquisitionController:_wireDecorHyperlink(rootFrame)
-    local nameLabel = HDG.UI.W(rootFrame, "acquisitionDetailPanel.selectedName")
-    local hyperHost = nameLabel and nameLabel.GetParent and nameLabel:GetParent()
-    if not (hyperHost and hyperHost.SetHyperlinksEnabled) then return end  -- exception(false-positive): mock-fidelity guard (mirrors the hdgrach wiring above)
-    hyperHost:EnableMouse(true)
-    hyperHost:SetHyperlinksEnabled(true)
-    hyperHost:SetScript("OnHyperlinkClick", function(_, link)
-        local itemID = _parseDecorLink(link)
-        if not itemID then return end
-        CH.Mechanics.JumpToDecor(itemID)
-    end)
-    hyperHost:SetScript("OnHyperlinkEnter", function(self, link)
-        if not _parseDecorLink(link) then return end
-        HDG.TooltipEngine:Show(self, {
-            anchor     = "ANCHOR_CURSOR",
-            extraLines = {
-                { text = HDG.Locale:Get("ACQ_DECOR_LINK_HINT"), r = 0.7, g = 0.7, b = 0.7 },
-            },
-        })
-    end)
-    hyperHost:SetScript("OnHyperlinkLeave", function() HDG.TooltipEngine:Hide() end)
-end
-
--- Show-on-map: open the world map at the vendor with HDG's pin (HDG.Waypoints, which
--- reports the result). Enabled only with a location, like the Waypoint button.
-function AcquisitionController:_wireShowOnMap(rootFrame)
-    HDG.UI.OnClick(rootFrame, "acquisitionDetailPanel.showOnMapBtn", function()
-        local state  = HDG.Store:GetState()  -- exception(false-positive): top-level controller method (not a row factory)
-        local vendor = HDG.Selectors:Call("acq.selectedVendor", state, {})
-        HDG.Waypoints:ShowOnMap(vendor.mapID, vendor.x, vendor.y, vendor.name)
-    end)
+    HDG.UI.OnClick(rootFrame, "acquisitionDetailPanel.wowheadBtn", _copyUrlFrom("acq.selected.wowheadUrl"))
+    HDG.UI.OnClick(rootFrame, "acquisitionDetailPanel.itemWowheadBtn", _copyUrlFrom("acq.selectedItem.wowheadUrl"))
 end
 
 -- Vendor note: per-keystroke dispatch. Race guard: _lastBoundNpcID tracks which vendor's
@@ -601,160 +604,149 @@ function AcquisitionController:_wireVendorNoteBox(rootFrame)
         "npcID", "VENDOR_NOTE_CLEAR", "VENDOR_NOTE_SET")
 end
 
-function AcquisitionController:Wire(rootFrame)
-    -- Active-filter chips overflow horizontally (the layout engine has no flow/wrap),
-    -- so clip the list panel: chips cut off at its edge instead of bleeding into the
-    -- detail panel. Dropdown popups are top-level frames -> clipping never hides them.
-    local listPanel = rootFrame.panels and rootFrame.panels["acquisitionListPanel"]
-    if listPanel and listPanel.SetClipsChildren then  -- exception(false-positive): mock rootFrame may lack panels / Frame methods
-        listPanel:SetClipsChildren(true)
-    end
-
-    local itemList = HDG.UI.W(rootFrame, "acquisitionListPanel.itemList")
-    if itemList and itemList.WireStoreSelectionSync then
-        itemList:WireStoreSelectionSync("session.ui.acquisition.selectedItemID",
-            function(ed, id) return id ~= nil and ed.itemID == id end)
-    end
-
-    -- Find Decor + Recipes scroll list (shares acq.list cell). Recipe rows wire
-    -- selectedRecipeItemID via the acqVendorItemListRow factory; this syncs the
-    -- highlight to selectedItemID like the item list.
-    local recipeList = HDG.UI.W(rootFrame, "acquisitionListPanel.recipeList")
-    if recipeList and recipeList.WireStoreSelectionSync then
-        recipeList:WireStoreSelectionSync("session.ui.acquisition.selectedItemID",
-            function(ed, id) return id ~= nil and ed.itemID == id end)
-    end
-
-    local vendorList = HDG.UI.W(rootFrame, "acquisitionListPanel.vendorList")
-    if vendorList and vendorList.WireStoreSelectionSync then
-        -- Same identity rule as acq.selectedVendor and the auto-select guard in
-        -- Refresh: npcID when set; for npcID-less vendors (catalog-only NPCs,
-        -- the synthetic World Vendors groupings) the (name, zone) SelectVendor
-        -- stamps. A bare `ed.npcID == id` with a nil id matched the FIRST
-        -- npcID-less row -- a wrong highlight, and now a wrong scroll.
-        vendorList:WireStoreSelectionSync("session.ui.acquisition.selectedNpcID",
-            function(ed, id)
-                if id ~= nil then return ed.npcID == id end
-                local ui = HDG.Store:GetState().session.ui.acquisition  -- exception(false-positive): top-level controller read, not a row factory
-                if ui.selectedVendorName == nil then return false end
-                return ed.npcID == nil and ed.name == ui.selectedVendorName
-                    and (ed.catalogZone or ed.zone) == ui.selectedVendorZone  -- exception(nullable): catalogZone is the catalog's zone when known, zone the augment's
-            end)
-    end
-
-    -- Search editbox: every keystroke dispatches. Filters acq.vendors via
-    -- the acq.filterQuery selector chain. Same pattern as Decor's search.
-    HDG.UI.WireSearchBox(rootFrame, "acquisitionListPanel.search", "acquisition", "searchQuery")
-
-    -- Preset chips (SSoT: ACQ_PRESETS; reducer handles toggle-off on re-click).
-    for _, p in ipairs(HDG.Constants.ACQ_PRESETS or {}) do
-        local captured = p.value
-        HDG.UI.OnClick(rootFrame, "acquisitionListPanel.preset_" .. captured, function()
-            HDG.Store:Dispatch({
-                type    = HDG.Constants.ACTIONS.ACQ_SET_PRESET,
-                payload = { value = captured },
-            })
-        end)
-    end
-
-    -- Missing toggle: orthogonal to source chips; ANDs with active source filter.
-    HDG.UI.OnClick(rootFrame, "acquisitionListPanel.missingToggle", function()
-        HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.ACQ_TOGGLE_MISSING })
-    end)
-
-    -- Current zone: the Zone filter, set once to where the player stands. Enabled
-    -- only when acq.currentZones holds a zone, so the set is never empty here.
-    HDG.UI.OnClick(rootFrame, "acquisitionListPanel.currentZone", function()
-        local zones = HDG.Selectors:Call("acq.currentZones", HDG.Store:GetState(), {})  -- exception(false-positive): top-level controller method (not a row factory)
-        HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.ACQ_SET_ZONE_FILTER, payload = { zones = zones } })
-    end)
-
-    -- Advanced filters toggle: flips the open flag; `visible` binding cascades to children.
-    HDG.UI.OnClick(rootFrame, "acquisitionListPanel.advancedToggle", function()
-        HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.ACQ_TOGGLE_ADVANCED_FILTERS })
-    end)
-
-    -- Reset: atomic clear of all filter axes. Search editbox is user-driven, blank explicitly.
-    HDG.UI.OnClick(rootFrame, "acquisitionListPanel.resetFilters", function()
-        HDG.Store:Dispatch({
-            type    = HDG.Constants.ACTIONS.UI_FILTER_RESET,
-            payload = { tab = "acquisition" },
-        })
-        local searchBox = HDG.UI.W(rootFrame, "acquisitionListPanel.search")
-        if searchBox and searchBox.SetText then searchBox:SetText("") end
-    end)
-
-    self:_wireFilterTags(rootFrame)
-    self:_wireWaypointButton(rootFrame)
-    self:_wireWowheadButtons(rootFrame)
-
-    -- Item-view "Add to Cart": no npcID; Shopping selector groups these into "(any vendor)".
-    HDG.UI.OnClick(rootFrame, "acquisitionDetailPanel.itemInfoCartBtn", function()
-        local state = HDG.Store:GetState()  -- exception(false-positive): top-level controller method (not a row factory)
-        local item  = HDG.Selectors:Call("acq.selectedItem", state, {})
-        if not item then return end
-        if state.account.activeShoppingListId == "" then
-            HDG.Log:Warn("shopping",
-                "No active shopping list -- open the Shopping tab to create one (item cart)")
-            return
-        end
-        HDG.Store:Dispatch({
-            type    = HDG.Constants.ACTIONS.SHOPPING_ITEM_ADD,
-            payload = { itemID = item.itemID, qty = 1 },
-        })
-        HDG.Log:Success("shopping",
-            (item.name or "Item") .. " added to shopping list")
-    end)
-
-    self:_wireAchievementHyperlinks(rootFrame)
-    self:_wireDecorHyperlink(rootFrame)
-
-    -- Items grid/list toggle (account-persisted).
+-- The vendor's items as a grid or a list (account-persisted).
+function AcquisitionController:_wireItemsView(rootFrame)
     HDG.UI.OnClick(rootFrame, "acquisitionDetailPanel.itemsViewGridBtn", function()
-        HDG.Store:Dispatch({
-            type    = HDG.Constants.ACTIONS.ACQ_SET_ITEMS_VIEW_MODE,
-            payload = { mode = "grid" },
-        })
+        CH.Mechanics.DispatchNamed("ACQ_SET_ITEMS_VIEW_MODE", { mode = "grid" })
     end)
     HDG.UI.OnClick(rootFrame, "acquisitionDetailPanel.itemsViewListBtn", function()
-        HDG.Store:Dispatch({
-            type    = HDG.Constants.ACTIONS.ACQ_SET_ITEMS_VIEW_MODE,
-            payload = { mode = "list" },
-        })
+        CH.Mechanics.DispatchNamed("ACQ_SET_ITEMS_VIEW_MODE", { mode = "list" })
     end)
+end
 
-    self:_wireShowOnMap(rootFrame)
+-- Add to Cart: the selected item onto the active shopping list. The item view's
+-- carries no npcID (the Shopping selector groups those into "(any vendor)"); the
+-- vendor view's is vendor-scoped.
+local function _addSelectedItemToCart(vendorScoped)
+    local state = HDG.Store:GetState()  -- exception(false-positive): top-level controller click, not a row factory
+    local item  = HDG.Selectors:Call("acq.selectedItem", state, {})
+    if not item then return end  -- exception(nullable): no item selected, or its catalog row not loaded
+    if vendorScoped then
+        CH.Mechanics.AddToShoppingList(item.itemID, HDG.Selectors:Call("acq.selectedNpcID", state, {}), "vendor cart")
+    else
+        CH.Mechanics.AddToShoppingList(item.itemID, nil, "item cart")
+    end
+end
+
+function AcquisitionController:_wireCart(rootFrame)
+    HDG.UI.OnClick(rootFrame, "acquisitionDetailPanel.itemInfoCartBtn", function() _addSelectedItemToCart(false) end)
+    HDG.UI.OnClick(rootFrame, "acquisitionDetailPanel.selectedAddToCartBtn", function() _addSelectedItemToCart(true) end)
+end
+
+-- Item-view Quest steps: Decor Quests on the item (decorQuests.findShow), shown only for a
+-- decor a quest gives (decorQuests.findHasSteps).
+function AcquisitionController:_wireQuestSteps(rootFrame)
+    HDG.UI.OnClick(rootFrame, "acquisitionDetailPanel.itemQuestStepsBtn", function()
+        CH.Mechanics.JumpToDecorQuests(HDG.Selectors:Call("decorQuests.findShow", HDG.Store:GetState(), {}))  -- exception(false-positive): top-level controller click, not a row factory
+    end)
+end
+
+-- |H<kind>:<itemID>|h in a label: the itemID, or nil for any other link.
+local function _linkItemID(link, kind)
+    local linkKind, payload = strsplit(":", link or "", 2)
+    if linkKind ~= kind or not payload or payload == "" then return nil end
+    return tonumber(payload)
+end
+
+-- |Hhdgrach:<itemID>|h on the source line: the achievement baked on the catalog row
+-- (HousingCatalogObserver's _bakeItemAugmentBackfill). No render-time lookup.
+local function _achievementForLink(link)
+    local itemID = _linkItemID(link, "hdgrach")
+    if not itemID then return nil, nil end
+    local row = HDG.HousingCatalogObserver:GetRow(itemID)
+    if not row then return nil, nil end
+    return row.achievementID, row.achievement
+end
+
+local function _onAchievementLinkClick(_, link)
+    local achID = _achievementForLink(link)
+    if not achID then return end
+    -- ShowUIPanel refuses insecure callers in combat (CheckProtectedFunctionsAllowed)
+    -- and blames the addon by name in the red error. Same guard the mapAllBtn uses.
+    if InCombatLockdown() then return end
+    ShowAchievementFrameForAchievement(achID)  -- canonical Blizzard path (same as SetItemRef)
+end
+
+-- The achievement's name in Blizzard's gold, then the click hint the way every HDG
+-- tooltip draws one (TooltipEngine.AppendClickHints).
+local ACHIEVEMENT_LINK_HINTS = { leftText = "Open the Achievement window" }
+
+local function _onAchievementLinkEnter(self, link)
+    local _, achName = _achievementForLink(link)
+    if not achName then return end
+    local gold  = HDG.TooltipEngine.COLOR.NORMAL
+    local lines = { { text = achName, r = gold.r, g = gold.g, b = gold.b } }
+    HDG.TooltipEngine.AppendClickHints(lines, ACHIEVEMENT_LINK_HINTS)
+    HDG.TooltipEngine:Show(self, { anchor = "ANCHOR_CURSOR", extraLines = lines })
+end
+
+function AcquisitionController:_wireAchievementHyperlinks(rootFrame)
+    HDG.UI.WireHyperlinkHost(rootFrame, "acquisitionDetailPanel.itemInfoSource",
+        _onAchievementLinkClick, _onAchievementLinkEnter)
+end
+
+-- |Hhdgrdecor:<itemID>|h on the selected item's name (acq.selectedItem.name):
+-- click opens the item's Decor entry, where + Cart, notes and the model live.
+local function _onDecorLinkClick(_, link)
+    local itemID = _linkItemID(link, "hdgrdecor")
+    if not itemID then return end
+    CH.Mechanics.JumpToDecor(itemID)
+end
+
+local DECOR_LINK_HINTS = { leftText = "locale:ACQ_DECOR_LINK_HINT" }
+
+local function _onDecorLinkEnter(self, link)
+    if not _linkItemID(link, "hdgrdecor") then return end
+    local lines = {}
+    HDG.TooltipEngine.AppendClickHints(lines, DECOR_LINK_HINTS)
+    HDG.TooltipEngine:Show(self, { anchor = "ANCHOR_CURSOR", extraLines = lines })
+end
+
+function AcquisitionController:_wireDecorHyperlink(rootFrame)
+    HDG.UI.WireHyperlinkHost(rootFrame, "acquisitionDetailPanel.selectedName", _onDecorLinkClick, _onDecorLinkEnter)
+end
+
+function AcquisitionController:Wire(rootFrame)
+    -- List panel
+    self:_wireListChrome(rootFrame)
+    self:_wireLists(rootFrame)
+    self:_wireFilters(rootFrame)
+    self:_wireFilterTags(rootFrame)
+    self:_wireMapButtons(rootFrame)
+    -- Detail panel: vendor view, then item view
+    self:_wireVendorNav(rootFrame)
+    self:_wireWowheadButtons(rootFrame)
     self:_wireVendorNoteBox(rootFrame)
+    self:_wireItemsView(rootFrame)
+    self:_wireCart(rootFrame)
+    self:_wireQuestSteps(rootFrame)
+    self:_wireAchievementHyperlinks(rootFrame)
+    self:_wireDecorHyperlink(rootFrame)
+end
 
-    -- Vendor-view "Add to Cart": includes npcID (vendor-scoped).
-    HDG.UI.OnClick(rootFrame, "acquisitionDetailPanel.selectedAddToCartBtn", function()
-        local state = HDG.Store:GetState()  -- exception(false-positive): top-level controller method (not a row factory)
-        local item  = HDG.Selectors:Call("acq.selectedItem",   state, {})
-        local npcID = HDG.Selectors:Call("acq.selectedNpcID",  state, {})
-        if not item then return end
-        if state.account.activeShoppingListId == "" then
-            HDG.Log:Warn("shopping",
-                "No active shopping list -- open the Shopping tab to create one (vendor cart)")
-            return
+-- Search box reconcile: state is the SSoT (JumpToVendor clears searchQuery from
+-- another window); never clobber mid-typing.
+local function _reconcileSearchBox(rootFrame, query)
+    local sb = HDG.UI.W(rootFrame, "acquisitionListPanel.search")
+    if not sb:HasFocus() and sb:GetText() ~= query then sb:SetText(query) end
+end
+
+-- A selection is "still listed" if it matches a listed vendor by npcID
+-- (authoritative when set) OR, for npcID-less vendors, by the (name, zone) the row
+-- click stamps. Catalog-only NPCs absent from VendorAugment and synthetic "World
+-- Vendors" groupings have npcID == nil; matching them on npcID alone never
+-- converges -- auto-select would re-stamp nil every pass, re-triggering Refresh ->
+-- Notify -> Refresh until "script ran too long".
+local function _selectionListed(vendors, acqUI)
+    local curID, curName, curZone = acqUI.selectedNpcID, acqUI.selectedVendorName, acqUI.selectedVendorZone
+    if not (curID or curName) then return false end
+    for _, v in ipairs(vendors) do
+        if (curID and v.npcID == curID)
+        or (not curID and v.name == curName and v.catalogZone == curZone) then
+            return true
         end
-        HDG.Store:Dispatch({
-            type    = HDG.Constants.ACTIONS.SHOPPING_ITEM_ADD,
-            payload = { itemID = item.itemID, npcID = npcID, qty = 1 },
-        })
-        HDG.Log:Success("shopping",
-            (item.name or "Item") .. " added to shopping list")
-    end)
-
-    -- Map All: pin every filtered vendor with a location, open the map once (HDG.Waypoints:MapAll).
-    HDG.UI.OnClick(rootFrame, "acquisitionListPanel.mapAllBtn", function()
-        local state = HDG.Store:GetState()  -- exception(false-positive): top-level controller method (not a row factory)
-        HDG.Waypoints:MapAll(HDG.Selectors:Call("acq.vendors", state, {}))
-    end)
-
-    HDG.UI.OnClick(rootFrame, "acquisitionListPanel.clearPinsBtn", function()
-        HDG.Waypoints:ClearAllMapPins()
-        HDG.Log:Info("waypoints_user", "Map pins cleared.")
-    end)
+    end
+    return false
 end
 
 function AcquisitionController:Refresh(rootFrame, ctx)
@@ -765,34 +757,13 @@ function AcquisitionController:Refresh(rootFrame, ctx)
     end
     local state = HDG.Store:GetState()  -- exception(false-positive): top-level controller method (not a row factory)
     local acqUI = state.session.ui.acquisition
-    -- Search box reconcile: state is the SSoT (JumpToVendor clears searchQuery
-    -- from another window); never clobber mid-typing.
-    local sb = HDG.UI.W(rootFrame, "acquisitionListPanel.search")
-    if sb and not sb:HasFocus() and sb:GetText() ~= (acqUI.searchQuery or "") then
-        sb:SetText(acqUI.searchQuery or "")
-    end
+    _reconcileSearchBox(rootFrame, acqUI.searchQuery)
     if acqUI.viewMode ~= "vendor" then return end
     local vendors = HDG.Selectors:Call("acq.vendors", state, {})
-    if #vendors == 0 then return end
-    -- A selection is "still present" if it matches a visible vendor by npcID
-    -- (authoritative when set) OR, for npcID-less vendors, by the (name, zone)
-    -- the row click stamps. Catalog-only NPCs absent from VendorAugment and
-    -- synthetic "World Vendors" groupings have npcID == nil; matching them on
-    -- npcID alone never converges -- auto-select would re-stamp nil every pass,
-    -- re-triggering Refresh -> Notify -> Refresh until "script ran too long".
-    local curID, curName, curZone = acqUI.selectedNpcID, acqUI.selectedVendorName, acqUI.selectedVendorZone
-    if curID or curName then
-        for _, v in ipairs(vendors) do
-            if (curID and v.npcID == curID)
-            or (not curID and curName and v.name == curName and (v.catalogZone or v.zone) == curZone) then
-                return
-            end
-        end
-    end
+    if #vendors == 0 or _selectionListed(vendors, acqUI) then return end
     local first = vendors[1]
-    if not first then return end
     _autoSelectPending = true
-    CH.Mechanics.SelectVendor(first.npcID, first.name, first.catalogZone or first.zone)
+    CH.Mechanics.SelectVendor(first.npcID, first.name, first.catalogZone)
 end
 
 HDG.Controllers:Register("acquisition", AcquisitionController)

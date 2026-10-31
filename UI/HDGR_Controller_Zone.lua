@@ -64,6 +64,7 @@ end
 local function _ensureVendorChrome(row)
     if row._zoneVendorChromeBuilt then return end
     row._zonePinBtn = HDG.UI.RowPinButton(row)
+    row._zoneMapBtn = HDG.UI.RowMapButton(row, row._zonePinBtn)
     row._zoneVendorChromeBuilt = true
 end
 
@@ -76,6 +77,7 @@ local function _hideAllChrome(row)
     end
     if row._zoneVendorChromeBuilt then
         row._zonePinBtn:Hide()
+        row._zoneMapBtn:Hide()
     end
     if row._nameLinkBtn then row._nameLinkBtn:Hide() end
 end
@@ -92,20 +94,27 @@ local function _showItemChrome(row, ed)
     if ed.onShoppingList then row._cartMark:Show() end
 end
 
--- The vendor pin = the Waypoint action (HDG.Waypoints:Set, which reports). Greyed with a
--- why-tooltip when the vendor has no location yet, never a click that does nothing.
+-- The vendor pin = the Waypoint action (HDG.Waypoints:Set, which reports), Map beside it
+-- (HDG.Waypoints:ShowOnMap). Greyed with a why-tooltip when the vendor has no location yet,
+-- never a click that does nothing.
+-- The pin and Map read the vendor row stamped on them each paint ({ name, zone, mapID, x, y }):
+-- one handler and tip each, not two closures per row per paint (review P7).
+local function _onVendorWaypoint(self) local v = self._vendor; HDG.Waypoints:Set(v.mapID, v.x, v.y, v.name) end
+local function _onVendorMap(self) local v = self._vendor; HDG.Waypoints:ShowOnMap(v.mapID, v.x, v.y, v.name) end
+local function _vendorWayTip(self) return HDG.TooltipRecipes.VendorNavTip(self._vendor, "VENDOR_WAY_TIP") end
+local function _vendorMapTip(self) return HDG.TooltipRecipes.VendorNavTip(self._vendor, "VENDOR_MAP_TIP") end
+
 local function _showVendorPin(row, ed)
     _ensureVendorChrome(row)
-    local mapID, x, y, name = ed.mapID, ed.x, ed.y, ed.name
-    local tipVendor = { name = name, zone = ed.zone, mapID = mapID, x = x, y = y }
+    row._zonePinBtn._vendor, row._zoneMapBtn._vendor = ed, ed
     HDG.UI.SetEnabledLook(row._zonePinBtn, ed.mappable)
-    HDG.TooltipEngine:Attach(row._zonePinBtn, function()
-        return HDG.TooltipRecipes.VendorNavTip(tipVendor, "VENDOR_WAY_TIP")
-    end)
-    row._zonePinBtn:SetScript("OnClick", function()
-        HDG.Waypoints:Set(mapID, x, y, name)
-    end)
+    HDG.UI.SetEnabledLook(row._zoneMapBtn, ed.mappable)
+    HDG.TooltipEngine:Attach(row._zonePinBtn, _vendorWayTip)
+    HDG.TooltipEngine:Attach(row._zoneMapBtn, _vendorMapTip)
+    row._zonePinBtn:SetScript("OnClick", _onVendorWaypoint)
+    row._zoneMapBtn:SetScript("OnClick", _onVendorMap)
     row._zonePinBtn:Show()
+    row._zoneMapBtn:Show()
 end
 
 -- Lazy chrome: name (left, body) + right caption stat. One-time per pooled row.
@@ -134,9 +143,10 @@ end
 -- Vendor header row: "+/- name" left, "(N unc / M wish)" right, toggles collapse.
 local function _paintZoneVendor(row, ed)
     row:SetHeight(22)
+    _ensureVendorChrome(row)
+    row._rightFs:SetPoint("RIGHT", row._zoneMapBtn, "LEFT", -4, 0)
     row._nameFs:SetPoint("LEFT", row, "LEFT", 8, 0)
-    row._nameFs:SetPoint("RIGHT", row, "RIGHT", -120, 0)
-    row._rightFs:SetPoint("RIGHT", row, "RIGHT", -22, 0)
+    row._nameFs:SetPoint("RIGHT", row._rightFs, "LEFT", -6, 0)
     row._nameFs:SetText(HDG.UI.CollapsePrefix(ed.collapsed) .. ed.name)
     -- "3 unc / 1 wish" -- skip the slash + wish part when no SL hits.
     local parts = { tostring(ed.uncollectedCount) .. " unc" }
@@ -164,9 +174,8 @@ local function _paintZoneItem(row, ed)
     -- 320px-wide popup: tight anchor budget. Name starts after
     -- the icon (LEFT 44 = LEFT 24 indent + 16 icon + 4 gap),
     -- right-capped at -50 to leave room for the 2 mini-markers
-    -- (collMark + cartMark, each 12 wide). Gold cost omitted in
-    -- compact mode -- too noisy at 280 content px; user gets
-    -- gold in the tooltip when they need it.
+    -- (collMark + cartMark, each 12 wide). No cost in compact
+    -- mode -- too noisy at 280 content px.
     row._nameFs:SetPoint("LEFT", row, "LEFT", 44, 0)
     row._nameFs:SetPoint("RIGHT", row, "RIGHT", -50, 0)
     row._rightFs:SetPoint("RIGHT", row, "RIGHT", -50, 0)

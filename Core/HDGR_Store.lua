@@ -99,6 +99,13 @@ local function NewConfig()
         autoDepositLumber      = false,
         -- hideInCombat: auto-hide all HDG windows on entering combat (restore on exit).
         hideInCombat           = true,
+        -- hidePvpDecor: leave PvP decor (Constants.PVP_COST_KEYS) out of the Decor,
+        -- Acquire and Zone Scanner lists (Interface > Lists). Off: everything shows.
+        hidePvpDecor           = false,
+        -- decorQuestTrackerStyle: "full" | "compact" -- the Quest Tracker's look (Interface >
+        -- Quest Tracker, owner 10-30). Compact: the name and count, the step to head for and
+        -- its place line, no strip and no buttons; its arrow opens Full.
+        decorQuestTrackerStyle = "full",
         -- showCompartment: gate the AddonCompartment click/enter handlers.
         -- NOTE: the TOC AddonCompartmentFunc directive always registers the
         -- icon in Blizzard's compartment drawer; this flag only disables the
@@ -144,6 +151,11 @@ local function NewAccountUI()
         -- when a zone-entry alert fires AND zoneScannerPopup is true. Persists
         -- across /reload so users who keep it open get it back automatically.
         zonePopupShown = false,
+        -- Decor Quests' tracker pop-up (Tools > Quest Tracker, or Track on a decor or a
+        -- chain). shown[charKey] persists like zonePopupShown, per character as what it
+        -- follows is (owner R2, 10-29); expanded lists the next steps under the strip;
+        -- pos = where the player dragged it ({} = the default spot).
+        decorQuestTracker = { shown = {}, expanded = false, pos = {} },
         -- Per-tab persistent UI bits. Promoted from session.ui when the
         -- user's expectation is that the setting survives /reload.
         acquisition     = {
@@ -435,7 +447,9 @@ local function NewStylesSessionUI()
             rules          = {},     -- { [axis] = { [tag] = severity } }
             dirty          = false,
         },
-        import     = { urlText = "", parseError = nil, previewItems = nil, destination = "style" },
+        -- parseSmartSet: a parsed Smart Set code's { rules, tagCount, dropped, description? };
+        -- nil for every other parse (Parsers result field smartSet).
+        import     = { urlText = "", parseError = nil, previewItems = nil, destination = "style", parseSmartSet = nil },
         export     = { selectedKey = nil, format = "hdg", search = "" },  -- format: "hdg"|"dd2"
     }
 end
@@ -485,6 +499,30 @@ local function NewRecipeSourcesSessionUI()
         collapsed          = {},            -- [groupKey] = true (RS_TOGGLE_GROUP)
         selectedItemID     = nil,           -- By Recipe selection (crafted itemID)
         selectedTeacherKey = nil,           -- By Teacher selection (rs teacher key)
+    }
+end
+
+-- Decor Quests tab session UI. expFilter / kindFilter are flat multi-select SETs
+-- (empty = all), as Recipe Sources' are; DQ_TOGGLE_FILTER flips one member. The tab
+-- opens By Decor on To do with the Decor Treasure Hunts group folded (the mockup).
+-- picks and openFolds belong to the ladder: the quest the player chose to head for, per
+-- ladder (DQ_PICK_STEP; a pick on what the tracker follows is saved with it instead, in
+-- account.decorQuests.tracked), and the folded runs of steps they opened (DQ_OPEN_FOLD).
+-- selected is one key for both lists, so a view switch keeps it: "d:<decorID>" (a
+-- decor, either list), "L:<lineID>" or "camp:<id>" (a chain or a campaign, By Chain).
+local function NewDecorQuestsSessionUI()
+    return {
+        viewMode        = "decor",          -- "decor" (By Decor) | "chain" (By Chain)
+        preset          = "todo",           -- DQ_PRESETS value
+        searchQuery     = "",
+        expFilter       = {},               -- [expansion display name | "?"] = true
+        kindFilter      = {},               -- ["chain" | "single" | "treasure"] = true
+        hideCollected   = false,
+        collapsed       = { treasure = true },   -- [group key] = true (DQ_TOGGLE_GROUP)
+        openFolds       = {},               -- [fold key] = true (DQ_OPEN_FOLD)
+        openChapters    = {},               -- [chapter lineID] = true (DQ_TOGGLE_CHAPTER)
+        picks           = {},               -- ["d:<decorID>" | "k:<lineID>"] = questID (DQ_PICK_STEP)
+        selected        = nil,              -- row key: "d:<decorID>" | "L:<lineID>" | "camp:<id>"
     }
 end
 
@@ -714,6 +752,7 @@ local function NewSessionUI()
         mogul        = NewMogulSessionUI(),
         styles       = NewStylesSessionUI(),
         recipeSources = NewRecipeSourcesSessionUI(),
+        decorQuests  = NewDecorQuestsSessionUI(),
         companion    = NewCompanionSessionUI(),
         houseTab     = NewHouseTabSessionUI(),
         shoppingList = NewShoppingSessionUI(),
@@ -765,6 +804,10 @@ local function NewLumberSession()
         activeFarmingID = nil,   -- lumberID currently being farmed
         blips           = {},    -- recent gather events (ring buffer)
         tick            = 0,     -- species-E clock; see comment above
+        -- GetTime() at the last session start, harvest or heartbeat, stamped by the
+        -- observer: blip ages and the session's duration read it, so the selectors
+        -- stay pure. nil until the first session start; nothing reads it before.
+        now             = nil,
     }
 end
 
@@ -823,6 +866,8 @@ local function NewIdentitySession()
         class        = "",     -- localized class name (e.g. "Warrior")
         classFile    = "",     -- enUS class token (e.g. "WARRIOR")
         factionGroup = "",     -- "A" / "H" / "N" -- matches HDGR_VendorDB row[6]
+        raceID       = 0,      -- UnitRace's raceID; 0 = not stamped yet
+        classID      = 0,      -- UnitClass's classID; 0 = not stamped yet
     }
 end
 
@@ -954,6 +999,22 @@ end
 --     } } }
 local function NewCharacters()
     return {}
+end
+
+-- Decor Quests, account side. Quests are per character, so both maps are keyed by charKey.
+--   tracked[charKey] = { key, rows, picks }  what the tracker follows: "d:<decorID>" (a
+--       decor), "k:<lineID>" (a campaign chapter) or "camp:<id>" (a campaign: it follows the
+--       chapter the player is on); rows = the decor it covers, as the catalog rows' fields
+--       the models read plus a vendor (the tracker builds from these, the catalog loading
+--       only with the main window); and the quest it heads for on each ladder it has shown,
+--       picks["d:<decorID>" | "k:<lineID>"] = questID. Saved, so a /reload keeps the tracker on
+--       its step; only the player, or a turn-in of that step, moves it (ruling 10-26).
+--   alts[charKey] = { name, classFile, at, progress }  what the last scan on that
+--       character read (DQ_ALT_SCANNED): progress packs " decorID=d" per decor it finished,
+--       " decorID=done/steps" per decor it has started and " decorID=x" per decor it can't
+--       take, space-bounded so one match finds a decor; at = when (time()).
+local function NewDecorQuestsAccount()
+    return { tracked = {}, alts = {} }
 end
 
 -- Defaults for session.ui.decor.filters. Single source of truth referenced
@@ -1172,6 +1233,7 @@ local function NewDefaultState()
             vendorNotes          = NewVendorNotes(),
             craft                = NewCraft(),        -- queue + history
             characters           = NewCharacters(),   -- alts roster
+            decorQuests          = NewDecorQuestsAccount(),   -- Decor Quests: tracked target + alt scans
             prices               = NewPrices(),       -- price cache
             collections          = {},                -- Styles / Snapshots / Shopping / etc., keyed by "<type>:<id>" (crates retired in v7)
             collectionSeq        = 0,                 -- monotonic counter -> collision-free smartset ids + "<Char> Style N" labels
@@ -1386,6 +1448,28 @@ local function MigrateLearnedStateToV9(state)
     if state.account.schemaVersion < 9 then state.account.schemaVersion = 9 end
 end
 
+-- schemaVersion 9 -> 10 (2026-10-29): a Decor Quests pick is the quest picked. The test
+-- zip (3.40.0-test-decorquests) saved the tracker's picks as places in the ladder, which
+-- slid onto another quest when a lead-in dropped out (review B1); a saved place can't be
+-- told from a quest ID (some steps' IDs are under 300), so they go and each ladder heads
+-- for its natural Next. Version-gated: a v10 pick is a number too.
+local function MigrateDecorQuestPicksToV10(state)
+    if state.account.schemaVersion >= 10 then return end
+    for _, t in pairs(state.account.decorQuests.tracked) do t.picks = {} end
+    state.account.schemaVersion = 10
+end
+
+-- The tracker's shown flag went per character (owner R2, 10-29). The account-wide one
+-- the test zip saved carries over to every character tracking something, so a tracker
+-- that was up stays up where it has something to show. Gated on the data shape.
+local function MigrateTrackerShownPerCharacter(state)
+    local t = state.account.ui.decorQuestTracker
+    if type(t.shown) ~= "boolean" then return end   -- exception(boundary): SV migration -- the test zip saved one flag
+    local was = t.shown
+    t.shown = {}
+    for charKey in pairs(state.account.decorQuests.tracked) do t.shown[charKey] = was end
+end
+
 -- Recipes profession filters saved on a non-enUS client before the filter joined by
 -- professionID hold localized names ("Schneiderei"), and recipe rows carry English ones,
 -- so the saved choice matched nothing. Each is re-keyed to its English name, in place.
@@ -1469,6 +1553,7 @@ local function EnsureStateShape(state)
         end
     end
     state.account.questCompletions = state.account.questCompletions or {}   -- exception(boundary): SV migration
+    state.account.decorQuests = state.account.decorQuests or NewDecorQuestsAccount()   -- exception(boundary): SV migration -- added with the Decor Quests tracker (3.41)
     state.account.houseCapacityCache = state.account.houseCapacityCache or false   -- exception(boundary): SV migration -- buy-picker storage fallback added post-3.12
     -- Lumber tracker config + per-char sessions. Config key-by-key from NewLumberConfig
     -- so new defaults flow to existing users (SV migration).
@@ -1522,6 +1607,8 @@ local function EnsureStateShape(state)
     state.account.ui.recipes.professionFilterByChar  = state.account.ui.recipes.professionFilterByChar or {}
     CanonProfessionFilterKeys(state.account.ui.recipes.professionFilterByChar)
     MigrateLearnedStateToV9(state)   -- after the furnishings step, whose failure path stamps 8
+    MigrateDecorQuestPicksToV10(state)   -- after V9, which stamps 9
+    MigrateTrackerShownPerCharacter(state)
     EnsureSession(state)
 end
 
@@ -1651,11 +1738,7 @@ function HDG.Store:_Notify(actionType, invalidation, action)
         end
     end
 
-    if C_Timer and C_Timer.After then
-        C_Timer.After(0, flush)
-    else
-        flush()
-    end
+    C_Timer.After(0, flush)
 end
 
 -- Synchronous flush. Used at PLAYER_LOGOUT where the deferred C_Timer.After
@@ -1823,11 +1906,6 @@ end
 -- Coalesced save: dispatches within a frame share one write.
 function HDG.Store:QueueSave()
     if self._saveTimer then return end
-    if not (C_Timer and C_Timer.NewTimer) then
-        -- Outside WoW (tests). Flush immediately.
-        self:Flush()
-        return
-    end
     self._saveTimer = C_Timer.NewTimer(self._saveDelay, function()
         self._saveTimer = nil
         self:Flush()
@@ -2040,6 +2118,21 @@ HDG.Actions:Register{ name = "REMOVALIST_SET_PLOT",
         elseif payload.role == "target" then r.targetPlot = payload.plot end
     end }
 
+HDG.Actions:Register{ name = "REMOVALIST_SET_FACTION",
+    persists = false, combatUnsafe = false,
+            invalidates = { "session.ui.removalist.faction",
+                            "session.ui.removalist.sourcePlot", "session.ui.removalist.targetPlot" },
+    reduce = function(state, payload)
+        -- A plot number names a different plot on the other faction's map, with its
+        -- own letter, so picks kept across a switch read as a wrong move and a wrong
+        -- turn. A switch clears both (owner ruling 2026-10-31); re-picking the same
+        -- faction is no switch and keeps them. The letter filter stays: both maps
+        -- use the same A-D letters.
+        local r = state.session.ui.removalist
+        if payload.faction ~= r.faction then r.sourcePlot, r.targetPlot = nil, nil end
+        r.faction = payload.faction
+    end }
+
 HDG.Actions:Register{ name = "MAIN_WINDOW_TOGGLE",
     persists = true,  combatUnsafe = false,
             invalidates = { "account.ui.mainWindowShown" },
@@ -2091,6 +2184,8 @@ HDG.Actions:Register{ name = "HARD_RESET",
         -- this) was removed. Folding backfills into the factories is the real fix
         -- (see TODO: factory completeness).
         EnsureStateShape(state)
+        -- The lumber session records just went; an active session would point at none.
+        state.session.lumber.activeFarmingID = nil
         -- Fresh SV root: drops profiles + characterSpecific too ("wipes ALL HDG
         -- data"). Seed the active/default profile buckets and the char bucket so
         -- Config reads stay valid until the reload HDG:HardReset runs next.
@@ -2627,7 +2722,8 @@ HDG.Actions:Register{ name = "CRAFT_QUEUE_DECREMENT",
 
 HDG.Actions:Register{ name = "CRAFT_HISTORY_PUSH",
     persists = true, combatUnsafe = false,
-            invalidates = { "account.craft.history.entries", "session.styles.changeSeq" },
+            invalidates = { "account.craft.history.entries", "account.craft.history.nextID",
+                            "session.styles.changeSeq" },
     reduce = function(state, payload)
         -- Reviewer C2: `completed` flag defends against phantom history
         -- entries when the matching DECREMENT was a no-op (post-removal
@@ -2889,12 +2985,19 @@ HDG.Actions:Register{ name = "CHARACTER_REAGENT_BANK_UPDATED",
         _reduceReagentStock(state, payload, "bank", "bankAt")
     end }
 
+-- The character's Decor Quests scan and tracker go with it: the alts block lists scans.
 HDG.Actions:Register{ name = "CHARACTER_DELETED",
     persists = true, combatUnsafe = false,
-            invalidates = function(action) return { HDG.Paths.Join("account.characters", action.payload and action.payload.charKey) } end,
+            invalidates = function(action)
+                return { HDG.Paths.Join("account.characters", action.payload and action.payload.charKey),
+                         "account.decorQuests.alts", "account.decorQuests.tracked" }
+            end,
     reduce = function(state, payload)
         if payload.charKey then
             state.account.characters[payload.charKey] = nil
+            local dq = state.account.decorQuests
+            if dq.alts[payload.charKey] ~= nil then dq.alts[payload.charKey] = nil end         -- an absent key stays absent (Lua 5.1)
+            if dq.tracked[payload.charKey] ~= nil then dq.tracked[payload.charKey] = nil end
         end
     end }
 
@@ -3224,6 +3327,8 @@ HDG.Actions:Register{ name = "SESSION_IDENTITY_SET",
         id.class        = payload.class
         id.classFile    = payload.classFile
         id.factionGroup = payload.factionGroup or ""  -- exception(boundary): SESSION_IDENTITY_SET payload may omit factionGroup
+        id.raceID       = payload.raceID or 0         -- exception(boundary): SESSION_IDENTITY_SET payload may omit raceID
+        id.classID      = payload.classID or 0        -- exception(boundary): SESSION_IDENTITY_SET payload may omit classID
         id.charKey      = id.name .. "-" .. id.realm
     end }
 
@@ -3253,6 +3358,159 @@ HDG.Actions:Register{ name = "RS_TOGGLE_GROUP",
     invalidates = { "session.ui.recipeSources.collapsed" },
     reduce = function(state, payload)
         _toggleSetMember(state.session.ui.recipeSources.collapsed, payload.key)
+    end }
+
+-- Decor Quests filter axis -> its session.ui.decorQuests set.
+local DQ_FILTER_SETS = { exp = "expFilter", kind = "kindFilter" }
+
+HDG.Actions:Register{ name = "DQ_TOGGLE_FILTER",
+    persists = false, combatUnsafe = false,
+    invalidates = function(action)
+        local out = {}
+        for axis in pairs(action.payload) do
+            out[#out + 1] = HDG.Paths.Join("session.ui.decorQuests", DQ_FILTER_SETS[axis])
+        end
+        return out
+    end,
+    reduce = function(state, payload)
+        -- The payload's key is the axis; an unknown axis has no set and errors here.
+        local ui = state.session.ui.decorQuests
+        for axis, value in pairs(payload) do
+            _acqToggleFilter(ui[DQ_FILTER_SETS[axis]], value)
+        end
+    end }
+
+HDG.Actions:Register{ name = "DQ_TOGGLE_GROUP",
+    persists = false, combatUnsafe = false, retainsScroll = true,   -- a fold is clicked mid-list
+    invalidates = { "session.ui.decorQuests.collapsed" },
+    reduce = function(state, payload)
+        _toggleSetMember(state.session.ui.decorQuests.collapsed, payload.key)
+    end }
+
+-- A ladder's folded run of steps, opened. Folds open only: the mockup has no re-fold.
+HDG.Actions:Register{ name = "DQ_OPEN_FOLD",
+    persists = false, combatUnsafe = false,
+    invalidates = { "session.ui.decorQuests.openFolds" },
+    reduce = function(state, payload)
+        state.session.ui.decorQuests.openFolds[payload.key] = true
+    end }
+
+-- A campaign card's chapter, opened to its quests or shut again.
+HDG.Actions:Register{ name = "DQ_TOGGLE_CHAPTER",
+    persists = false, combatUnsafe = false, retainsScroll = true,   -- a chapter is clicked mid-card
+    invalidates = { "session.ui.decorQuests.openChapters" },
+    reduce = function(state, payload)
+        _toggleSetMember(state.session.ui.decorQuests.openChapters, payload.lineID)
+    end }
+
+-- The step the player picked to head for (any step, done ones too: ruling 10-26) on a
+-- ladder: a decor's ("d:<decorID>") or a campaign chapter's ("k:<lineID>"), as the quest
+-- picked -- never its place, which slides when a lead-in drops out (review B1). A pick on
+-- what the tracker follows (payload.tracked) is saved with it, so the tracker and the
+-- ladder agree and a /reload keeps it; any other pick lasts the session. quest nil goes
+-- back to the step after the last done one (a turn-in of the tracker's last step).
+HDG.Actions:Register{ name = "DQ_PICK_STEP",
+    persists = true, combatUnsafe = false, retainsScroll = true,   -- a step is clicked mid-ladder
+    invalidates = function(action)
+        if action.payload.tracked then return { "account.decorQuests.tracked" } end
+        return { "session.ui.decorQuests.picks" }
+    end,
+    reduce = function(state, payload)
+        if payload.tracked then
+            state.account.decorQuests.tracked[state.session.identity.charKey].picks[payload.key] = payload.quest
+        else
+            state.session.ui.decorQuests.picks[payload.key] = payload.quest
+        end
+    end }
+
+-- Track on a decor, a chapter or a campaign: the tracker follows it, from quest (the step
+-- its ladder heads for; the first on a done one, which is followed again from the start;
+-- nil for a campaign), and pops up. rows = the decor it saves (the tracker builds from
+-- these, not the catalog). Tracking stops through DQ_TRACK_STOP, from the tab too.
+HDG.Actions:Register{ name = "DQ_TRACK",
+    persists = true, combatUnsafe = false, retainsScroll = true,   -- Track sits mid-detail
+    invalidates = { "account.decorQuests.tracked", "account.ui.decorQuestTracker.shown",
+                    "session.ui.decorQuests.picks" },
+    reduce = function(state, payload)
+        local charKey = state.session.identity.charKey
+        state.account.decorQuests.tracked[charKey] = { key = payload.key, rows = payload.rows,
+            picks = payload.quest and { [payload.key] = payload.quest } or {} }   -- exception(optional): a campaign starts on no step
+        state.account.ui.decorQuestTracker.shown[charKey] = true
+        -- The ladder's session pick moved into the tracker (payload.step): left behind, it
+        -- would come back once tracking stops.
+        local picks = state.session.ui.decorQuests.picks
+        if picks[payload.key] ~= nil then picks[payload.key] = nil end   -- an absent key stays absent (Lua 5.1)
+    end }
+
+-- Stop tracking, the tracker's or the tab's Tracking: nothing tracked, and the tracker
+-- closes (owner 10-28; from the tab too, R1 10-29).
+HDG.Actions:Register{ name = "DQ_TRACK_STOP",
+    persists = true, combatUnsafe = false, retainsScroll = true,
+    invalidates = { "account.decorQuests.tracked", "account.ui.decorQuestTracker.shown" },
+    reduce = function(state)
+        local charKey = state.session.identity.charKey
+        state.account.decorQuests.tracked[charKey] = nil
+        state.account.ui.decorQuestTracker.shown[charKey] = false
+    end }
+
+-- Tools > Quest Tracker and the tracker's close, on this character: payload.visible sets
+-- it, no payload flips it.
+HDG.Actions:Register{ name = "DQ_TRACKER_TOGGLE",
+    persists = true, combatUnsafe = false,
+    invalidates = { "account.ui.decorQuestTracker.shown" },
+    reduce = function(state, payload)
+        local shown, charKey = state.account.ui.decorQuestTracker.shown, state.session.identity.charKey
+        if payload and payload.visible ~= nil then   -- exception(optional): the launcher sends no payload
+            shown[charKey] = payload.visible
+        else
+            shown[charKey] = not shown[charKey]
+        end
+    end }
+
+-- The arrow toggles; payload.expanded sets it (picking Compact folds the tracker, review L6).
+HDG.Actions:Register{ name = "DQ_TRACKER_EXPAND",
+    persists = true, combatUnsafe = false,
+    invalidates = { "account.ui.decorQuestTracker.expanded" },
+    reduce = function(state, payload)
+        if payload and payload.expanded ~= nil then   -- exception(optional): the arrow sends no payload
+            state.account.ui.decorQuestTracker.expanded = payload.expanded
+        else
+            _toggleBool(state.account.ui.decorQuestTracker, "expanded")
+        end
+    end }
+
+HDG.Actions:Register{ name = "DQ_TRACKER_POSITION_SET",
+    persists = true, combatUnsafe = false,
+    invalidates = { "account.ui.decorQuestTracker.pos" },
+    reduce = function(state, payload)
+        state.account.ui.decorQuestTracker.pos = { x = payload.x, y = payload.y }
+    end }
+
+-- The tracker's Open in HDG, and the Quest steps buttons of Decor and Find Decor: the tab on
+-- what it follows, every filter cleared so the row is listed (Mech.JumpToVendor's lesson),
+-- its group unfolded and, for a chapter, its quests open. The window and the tab are the
+-- caller's (Mech.JumpToDecorQuests).
+HDG.Actions:Register{ name = "DQ_SHOW",
+    persists = false, combatUnsafe = false,
+    -- selected by name too: the list scrolls to a selected row on its exact path (review B4)
+    invalidates = { "session.ui.decorQuests", "session.ui.decorQuests.selected" },
+    reduce = function(state, payload)
+        local dq = state.session.ui.decorQuests
+        dq.viewMode, dq.preset, dq.searchQuery, dq.hideCollected = payload.viewMode, "all", "", false
+        dq.expFilter, dq.kindFilter = {}, {}
+        if dq.collapsed[payload.group] then dq.collapsed[payload.group] = nil end   -- exception(nullable): a group the player never folded
+        dq.selected = payload.selected
+        if payload.chapter then dq.openChapters[payload.chapter] = true end   -- exception(optional): only a chapter opens one
+    end }
+
+-- What a character has done of each decor, read when Decor Quests opens on it
+-- (DecorQuestWatcher): the other characters' alts block shows it.
+HDG.Actions:Register{ name = "DQ_ALT_SCANNED",
+    persists = true, combatUnsafe = false,
+    invalidates = { "account.decorQuests.alts" },
+    reduce = function(state, payload)
+        state.account.decorQuests.alts[payload.charKey] = { name = payload.name, classFile = payload.classFile,
+                                                             at = payload.at, progress = payload.progress }
     end }
 
 HDG.Actions:Register{ name = "ALTS_SET_CHARS_POPULATION",
@@ -3609,6 +3867,7 @@ HDG.Actions:Register{ name = "QUEST_COMPLETION_RECORDED",
 HDG.Actions:Register{ name = "PRICES_DIRECT_SCAN_STARTED",
     persists = true, combatUnsafe = false,
             invalidates = { "session.prices.scanning", "session.prices.scanTotal",
+                            "session.prices.scanFound",
                             "account.prices.directCache", "account.prices.directQtyCache",
                             "account.prices.directCacheTime" },
     reduce = function(state, payload)
@@ -3651,7 +3910,7 @@ HDG.Actions:Register{ name = "PRICES_DIRECT_SCAN_COMPLETED",
     persists = true,  combatUnsafe = false,
             invalidates = { "account.prices.directCache", "account.prices.directQtyCache",
                             "account.prices.directCacheTime",
-                            "session.prices.scanning" },
+                            "session.prices.scanning", "session.prices.scanFound", "session.prices.scanTotal" },
     reduce = function(state, payload)
         local cache = state.account.prices.directCache
         local qty   = state.account.prices.directQtyCache
@@ -4082,7 +4341,12 @@ HDG.Actions:Register{ name = "STYLES_SMARTSET_BEGIN",
 
 HDG.Actions:Register{ name = "STYLES_SMARTSET_SET_FIELD",
     persists = false, combatUnsafe = false, 
-    invalidates = function(action) return { HDG.Paths.Join("session.ui.styles.smartset.draft", action.payload and action.payload.field) } end,
+    invalidates = function(action)
+        local field = action.payload and action.payload.field
+        local out = { HDG.Paths.Join("session.ui.styles.smartset.draft", field), "session.ui.styles.smartset.dirty" }
+        if field == "description" then out[#out + 1] = "session.ui.styles.smartset.draft.descAuto" end
+        return out
+    end,
     reduce = function(state, payload)
         local s = state.session.ui.styles.smartset
         if payload.field then
@@ -4147,6 +4411,26 @@ HDG.Actions:Register{ name = "STYLES_SMARTSET_CLEAR_ALL",
         s.dirty = true
     end }
 
+-- Write one Smart Set record: the builder's Save and Styles Import. A nil id mints
+-- a monotonic, collision-free "smartset:<N>" (feedback_no_random_ids_use_counters),
+-- sharing the counter with the "<Char> Style <N>" name seed. The rules are copied,
+-- so the record never shares a table with session state. Returns the id.
+local function _writeSmartsetRecord(state, id, displayName, description, rules)
+    if not id then
+        state.account.collectionSeq = (state.account.collectionSeq or 0) + 1  -- exception(boundary): pre-counter saved accounts lack collectionSeq
+        id = "smartset:" .. state.account.collectionSeq
+    end
+    local copy = {}
+    for axis, tags in pairs(rules) do
+        copy[axis] = {}
+        for tag, sev in pairs(tags) do copy[axis][tag] = sev end
+    end
+    state.account.collections = state.account.collections or {}  -- exception(boundary): lazily-created collections map
+    state.account.collections[id] = { id = id, type = "smartset", displayName = displayName,
+                                      description = description, rules = copy }
+    return id
+end
+
 HDG.Actions:Register{ name = "STYLES_SMARTSET_SAVE",
     persists = false, combatUnsafe = false, 
     invalidates = { "account.collections",
@@ -4159,28 +4443,8 @@ HDG.Actions:Register{ name = "STYLES_SMARTSET_SAVE",
         -- landing post-save (typically via the footer's onClick chain).
         local s = state.session.ui.styles.smartset
         if s.dirty or not s.draftKey then
-            local id = s.draftKey
-            if not id then
-                -- Monotonic, collision-free id (feedback_no_random_ids_use_counters);
-                -- shares the counter with the "<Char> Style <N>" name seed.
-                state.account.collectionSeq = (state.account.collectionSeq or 0) + 1  -- exception(boundary): pre-counter saved accounts lack collectionSeq
-                id = "smartset:" .. state.account.collectionSeq
-            end
-            state.account.collections = state.account.collections or {}
-            state.account.collections[id] = {
-                id          = id,
-                type        = "smartset",
-                displayName = s.draft.displayName or "Untitled",
-                description = s.draft.description or "",
-                rules       = {},
-            }
-            for axis, tags in pairs(s.rules or {}) do
-                state.account.collections[id].rules[axis] = {}
-                for tag, sev in pairs(tags) do
-                    state.account.collections[id].rules[axis][tag] = sev
-                end
-            end
-            s.draftKey = id
+            s.draftKey = _writeSmartsetRecord(state, s.draftKey,
+                s.draft.displayName or "Untitled", s.draft.description or "", s.rules or {})
             s.dirty    = false
         end
     end }
@@ -4317,6 +4581,7 @@ HDG.Actions:Register{ name = "STYLES_IMPORT_SET_URL",
                                                    "session.ui.styles.import.parseSource",
                                                    "session.ui.styles.import.previewItems",
                                                    "session.ui.styles.import.parseUnmatched",
+                                                   "session.ui.styles.import.parseSmartSet",
                                                    "session.ui.styles.import.parseError" },
     reduce = function(state, payload)
         state.session.ui.styles.import.urlText = payload.text
@@ -4327,6 +4592,7 @@ HDG.Actions:Register{ name = "STYLES_IMPORT_SET_URL",
         state.session.ui.styles.import.parseSource       = nil
         state.session.ui.styles.import.parseDisplayName  = nil
         state.session.ui.styles.import.parseUnmatched    = nil
+        state.session.ui.styles.import.parseSmartSet     = nil
     end }
 
 HDG.Actions:Register{ name = "STYLES_IMPORT_PARSE",
@@ -4335,11 +4601,13 @@ HDG.Actions:Register{ name = "STYLES_IMPORT_PARSE",
                                                    "session.ui.styles.import.parseError",
                                                    "session.ui.styles.import.parseDisplayName",
                                                    "session.ui.styles.import.parseSource",
-                                                   "session.ui.styles.import.parseUnmatched" },
+                                                   "session.ui.styles.import.parseUnmatched",
+                                                   "session.ui.styles.import.parseSmartSet" },
     reduce = function(state, payload)
         -- Delegate to HDG.Parsers (Modules/HDGR_Parsers.lua). Walks the
         -- parser registry; first parser to recognize the pasted text wins.
-        -- Supports: style blobs (HDG:1:), shopping list blobs (HDGVL:1:),
+        -- Supports: shopping list / style share blobs (HDGVL:1:),
+        -- Smart Set tag codes (HDGSS:1: and the old HDG:1: style code, parseSmartSet),
         -- Blizzard |Hitem chat links, URL ?items=NNN query params (wowhead
         -- / housing.wowdb.com / generic), and a fallback digit-run parser
         -- for raw CSVs.
@@ -4355,10 +4623,12 @@ HDG.Actions:Register{ name = "STYLES_IMPORT_PARSE",
             state.session.ui.styles.import.parseSource     = result.source
             state.session.ui.styles.import.parseDisplayName = result.displayName
             state.session.ui.styles.import.parseUnmatched   = result.unmatched
+            state.session.ui.styles.import.parseSmartSet    = result.smartSet
         else
             state.session.ui.styles.import.previewItems = nil
             state.session.ui.styles.import.parseError   = result.error or "Parse failed"
             state.session.ui.styles.import.parseUnmatched = nil
+            state.session.ui.styles.import.parseSmartSet  = nil
         end
     end }
 
@@ -4476,6 +4746,26 @@ HDG.Actions:Register{ name = "STYLES_IMPORT_COMMIT_AS_SET",
         imp.destination                                  = "style"
     end }
 
+-- Commit a parsed Smart Set code as a Smart Set (Filtered Sets) with its tag
+-- rules; the player's own catalog then picks its decor. The title box name wins,
+-- then the "<Char> Style <N>" seed; the code's description, then the one the
+-- builder writes from the signature tags.
+HDG.Actions:Register{ name = "STYLES_IMPORT_COMMIT_AS_SMARTSET",
+    persists = true,  combatUnsafe = false,  -- writes account.collections -> must QueueSave
+    invalidates = { "account.collections", "account.collectionSeq", "session.ui.styles.import" },
+    reduce = function(state, payload)
+        local imp = state.session.ui.styles.import
+        local set = imp.parseSmartSet
+        if not set then return end   -- exception(nullable): nothing parsed yet; a commit no-ops like the sibling commits
+        local name = imp.parseDisplayName or _seededSmartsetName(state.account)  -- exception(nullable): the title box clears to nil; a nameless code takes the seed
+        local desc = set.description or _buildSmartsetAutoDesc(set.rules)  -- exception(boundary): a code's desc= is optional
+        _writeSmartsetRecord(state, nil, name, desc, set.rules)
+        imp.urlText, imp.previewItems, imp.parseError    = "", nil, nil
+        imp.parseSource, imp.parseDisplayName            = nil, nil
+        imp.parseUnmatched, imp.parseSmartSet            = nil, nil
+        imp.destination                                  = "style"
+    end }
+
 HDG.Actions:Register{ name = "STYLES_IMPORT_RESET",
     persists = false, combatUnsafe = false, 
     invalidates = { "session.ui.styles.import" },
@@ -4486,6 +4776,7 @@ HDG.Actions:Register{ name = "STYLES_IMPORT_RESET",
         state.session.ui.styles.import.parseSource       = nil
         state.session.ui.styles.import.parseDisplayName  = nil
         state.session.ui.styles.import.parseUnmatched    = nil
+        state.session.ui.styles.import.parseSmartSet     = nil
         state.session.ui.styles.import.destination       = "style"
     end }
 
@@ -4501,7 +4792,7 @@ HDG.Actions:Register{ name = "STYLES_OPEN_IMPORT",
         local imp = state.session.ui.styles.import
         imp.urlText, imp.previewItems, imp.parseError       = "", nil, nil
         imp.parseSource, imp.parseDisplayName, imp.destination = nil, nil, "style"
-        imp.parseUnmatched = nil
+        imp.parseUnmatched, imp.parseSmartSet = nil, nil
     end }
 
 -- Export sub-view. OPEN sets the persistent top-tab + transient sub-view in one
@@ -4636,7 +4927,7 @@ HDG.Actions:Register{ name = "ZONE_TOGGLE_COLLECTED",
 
 HDG.Actions:Register{ name = "LUMBER_HARVESTED",
     persists = false, combatUnsafe = false,
-            invalidates = { "session.lumber.blips", "session.lumber.tick",
+            invalidates = { "session.lumber.blips", "session.lumber.tick", "session.lumber.now",
                             "account.lumber.sessions" },
     reduce = function(state, payload)
         -- Append blip + bump tick. Coords nil when observer can't resolve position
@@ -4653,28 +4944,27 @@ HDG.Actions:Register{ name = "LUMBER_HARVESTED",
             }
         end
         s.tick = s.tick + 1
+        s.now  = payload.timestamp
         -- Append to the per-char session lastHarvestAt + accumulate count
         -- IF a session is active for this lumberID (otherwise this is a
         -- "between sessions" harvest the observer will start a session on).
+        -- The active session's record exists: SESSION_START writes it with activeFarmingID.
         local activeID = s.activeFarmingID
         if activeID == payload.lumberID then
-            local charKey = state.session.identity.charKey
-            local charSessions = state.account.lumber.sessions[charKey]
-            local session = charSessions and charSessions[activeID]
-            if session then
-                session.lastHarvestAt = payload.timestamp
-            end
+            state.account.lumber.sessions[state.session.identity.charKey][activeID]
+                .lastHarvestAt = payload.timestamp
         end
     end }
 
 HDG.Actions:Register{ name = "LUMBER_SESSION_START",
     persists = true, combatUnsafe = false,
-            invalidates = { "session.lumber.activeFarmingID",
+            invalidates = { "session.lumber.activeFarmingID", "session.lumber.now",
                             "account.lumber.sessions" },
     reduce = function(state, payload)
         -- First harvest after idle window; seeds per-char session record (startCount = bag total at start).
         local s = state.session.lumber
         s.activeFarmingID = payload.lumberID
+        s.now = payload.timestamp
         local charKey = state.session.identity.charKey
         state.account.lumber.sessions[charKey] =
             state.account.lumber.sessions[charKey] or {}
@@ -4695,12 +4985,8 @@ HDG.Actions:Register{ name = "LUMBER_SESSION_END",
         local s = state.session.lumber
         local activeID = s.activeFarmingID
         if activeID then
-            local charKey = state.session.identity.charKey
-            local charSessions = state.account.lumber.sessions[charKey]
-            local session = charSessions and charSessions[activeID]
-            if session then
-                session.finalizedAt = payload.timestamp
-            end
+            state.account.lumber.sessions[state.session.identity.charKey][activeID]
+                .finalizedAt = payload.timestamp
         end
         s.activeFarmingID = nil
     end }
@@ -4747,10 +5033,11 @@ HDG.Actions:Register{ name = "LUMBER_BLIP_GC",
 HDG.Actions:Register{ name = "LUMBER_TICK",
     persists = false, combatUnsafe = false,
             noisy = true,  -- 1s heartbeat while farming; would flood the dispatch log otherwise
-            invalidates = { "session.lumber.tick" },
+            invalidates = { "session.lumber.tick", "session.lumber.now" },
     reduce = function(state, payload)
         -- 1s heartbeat while farming; invalidates duration+rate selectors without a bag-delta.
         state.session.lumber.tick = state.session.lumber.tick + 1
+        state.session.lumber.now  = payload.now
     end }
 
 HDG.Actions:Register{ name = "LUMBER_WINDOW_TOGGLE",
@@ -5685,6 +5972,11 @@ HDG.Actions:Register{ name = "UI_FILTER_RESET",
             rs.preset = "all"
             rs.profFilter, rs.expFilter, rs.srcFilter = {}, {}, {}
             rs.zoneFilter, rs.repFilter, rs.curFilter = {}, {}, {}
+        elseif tab == "decorQuests" then
+            -- The mockup's Reset clears the two filter menus; the preset, Hide
+            -- collected and the search stay as the player set them.
+            local dq = state.session.ui.decorQuests
+            dq.expFilter, dq.kindFilter = {}, {}
         end
     end }
 
@@ -5982,12 +6274,35 @@ HDG.Resolver:Register{ name = "bag", facade = "BagObserver",
           bump = function(cur, payload) return payload.tick or (cur + 1) end },
     } }
 
--- Quest completion. QuestNameResolver:IsComplete reads live quest APIs;
--- bumped on QUEST_TURNED_IN so [QUST] checkmarks repaint live. Method-scoped:
--- IsComplete is the completion facade on the (shared) QuestNameResolver module.
+-- Quest completion. QuestNameResolver:IsComplete (this character) and
+-- IsCompleteOnAccount (the warband) read live quest APIs; bumped on QUEST_TURNED_IN
+-- so [QUST] checkmarks repaint live. Method-scoped: the completion facades on the
+-- (shared) QuestNameResolver module.
 HDG.Resolver:Register{ name = "questStatus",
-    facade = { module = "QuestNameResolver", method = "IsComplete" },
+    facade = { { module = "QuestNameResolver", method = "IsComplete" },
+               { module = "QuestNameResolver", method = "IsCompleteOnAccount" } },
     actions = { { name = "QUEST_STATUS_RESOLVED" } } }
+
+-- Quest log contents. QuestNameResolver:IsOnQuest reads the live log; bumped (debounced)
+-- on QUEST_ACCEPTED / QUEST_REMOVED for Decor Quests' "In your log".
+HDG.Resolver:Register{ name = "questLog",
+    facade = { module = "QuestNameResolver", method = "IsOnQuest" },
+    actions = { { name = "QUEST_LOG_CHANGED" } } }
+
+-- Quest objectives. QuestNameResolver:IsReadyForTurnIn reads the live log; bumped
+-- (debounced) on QUEST_WATCH_UPDATE for the Quest Tracker's "ready to turn in". Its own
+-- tick: an objective ticks over and over while you quest, and only the tracker's rows ask
+-- (on questLog it re-ran the whole tab each time, review section 5).
+HDG.Resolver:Register{ name = "questObjectives",
+    facade = { module = "QuestNameResolver", method = "IsReadyForTurnIn" },
+    actions = { { name = "QUEST_OBJECTIVES_CHANGED" } } }
+
+-- Quest titles. QuestNameResolver:GetTitle reads the game's quest cache and asks
+-- for a cold one; bumped once per batch of arrivals (a long ladder opened cold
+-- brings several batches, hence noisy).
+HDG.Resolver:Register{ name = "questTitles",
+    facade = { module = "QuestNameResolver", method = "GetTitle" },
+    actions = { { name = "QUEST_TITLES_RESOLVED", noisy = true } } }
 
 -- Achievement earned. HDG.AchievementObserver:IsEarned reads the live API;
 -- bumped on ACHIEVEMENT_EARNED so [ACH] checkmarks repaint live. Earned state
@@ -6017,12 +6332,11 @@ HDG.Resolver:Register{ name = "pets", facade = "PetObserver",
     } }
 
 -- Housing catalog. Data lives in HDG.HousingCatalogObserver's module index
--- (byItemID + counts, mutated in place by RemoveRow/PatchCounts). The tick
--- VALUE is the observer's sweep generation, stamped by the load/refresh
--- lifecycle actions; the row-patch signals invalidate the path WITHOUT
--- writing it (bump = false -- path invalidation re-runs subscribed selectors;
--- the generation only advances per completed sweep, preserving the
--- pre-registry sweepGeneration semantics).
+-- (byItemID + counts, mutated in place by UpsertRow/PatchCounts). The tick
+-- VALUE is the observer's sweep generation, stamped by CATALOG_LOAD_COMPLETED;
+-- the row-patch signals invalidate the path WITHOUT writing it (bump = false --
+-- path invalidation re-runs subscribed selectors; the generation only advances
+-- per completed sweep, preserving the pre-registry sweepGeneration semantics).
 HDG.Resolver:Register{ name = "catalog", facade = "HousingCatalogObserver",
     actions = {
         { name = "DECOR_CATALOG_READY",                   bump = false },
@@ -6030,15 +6344,6 @@ HDG.Resolver:Register{ name = "catalog", facade = "HousingCatalogObserver",
         -- resetting them to the top loses the player's place mid-placement.
         { name = "COLLECTION_CATALOG_ROW_ADDED",          bump = false, retainsScroll = true },
         { name = "COLLECTION_CATALOG_ROW_COUNTS_UPDATED", bump = false, retainsScroll = true },
-        { name = "COLLECTION_CATALOG_ROW_REMOVED",        bump = false,
-          invalidates = { "account.collection.ownedDecorIDs" },
-          -- Observer calls RemoveRow on its index; reducer only scrubs
-          -- ownedDecorIDs for consistency.
-          reduce = function(state, payload)
-              if payload.decorID then
-                  state.account.collection.ownedDecorIDs[payload.decorID] = nil
-              end
-          end },
         { name = "CATALOG_LOAD_COMPLETED",
           invalidates = { "session.catalog", "session.catalog.refreshPending" },
           bump = function(cur, payload) return payload.generation end,
@@ -6051,12 +6356,6 @@ HDG.Resolver:Register{ name = "catalog", facade = "HousingCatalogObserver",
               -- Clear pending on any successful sweep; without this, refreshPending
               -- stays true and every tab switch triggers a full re-sweep.
               c.refreshPending = false
-          end },
-        { name = "CATALOG_REFRESH_COMPLETED",
-          invalidates = { "session.catalog" },
-          bump = function(cur, payload) return payload.generation or (cur + 1) end,  -- exception(boundary): generation is optional
-          reduce = function(state, payload)
-              state.session.catalog.refreshPending = false
           end },
     } }
 
@@ -6124,3 +6423,11 @@ HDG.Resolver:RegisterFacadeReads{ facade = "ItemNameResolver",
 -- every NPCNameResolver caller reads it.
 HDG.Resolver:RegisterFacadeReads{ facade = "NPCNameResolver",
     requires = { "session.npcNames.names" } }
+
+-- Text measures: a wrap count depends on the fonts. The Theme rebuilds them in a
+-- subscriber to the CONFIG_SET that changed the scheme or font face, and subscribers run
+-- in no set order: a measure keyed on the config could run first, on the old fonts, and
+-- keep them. So every TextMeasure caller reads this tick, which the Theme bumps once the
+-- new fonts are built (review B7, owner R8 10-29).
+HDG.Resolver:Register{ name = "fonts", facade = "TextMeasure",
+    actions = { { name = "FONTS_BUILT" } } }

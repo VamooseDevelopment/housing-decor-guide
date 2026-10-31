@@ -106,25 +106,17 @@ local function _favoritesSnapshot(catalog, owned, favorites)
     return out
 end
 
--- Style-affinity tag skiplist: tagIDs in the Size/Expansion filter groups
--- (they have their own widgets). Built once from GetAllFilterTagGroups; cached.
-local _styleTagSkip = nil
-local function _ensureStyleTagSkiplist()
-    if _styleTagSkip then return _styleTagSkip end
-    _styleTagSkip = {}
-    local CHC = _G.C_HousingCatalog
-    if not (CHC and CHC.GetAllFilterTagGroups) then return _styleTagSkip end
-    local groups = CHC.GetAllFilterTagGroups()
-    if type(groups) ~= "table" then return _styleTagSkip end
-    for _, g in pairs(groups) do
-        local n = (g and g.name) or ""
-        if n == "Size" or n == "Expansion" then
-            for _, tagID in pairs(g.tags or {}) do
-                _styleTagSkip[tagID] = true
-            end
-        end
-    end
-    return _styleTagSkip
+-- Tags that are not styles. Size and Expansion have their own widgets: matched
+-- by group through the observer's tagIDToGroup, which names each group by its
+-- stable groupID. The skiplist this replaces read the group's `name` (Blizzard's
+-- field is groupName) and keyed it by the tag table, so it skipped nothing and
+-- Top Styles ranked Midnight, Large, Medium (test audit B2, 2026-10-31).
+-- Alliance and Horde sit in Blizzard's Style group but topped the list once the
+-- rest were out; skipped by tagID (owner ruling 2026-10-31).
+local NOT_STYLE_GROUPS = { Size = true, Expansion = true }
+
+local function _isStyleTag(tagID, tagGroup)
+    return not NOT_STYLE_GROUPS[tagGroup[tagID]] and not HDG.Constants.FACTION_TAG_IDS[tagID]
 end
 
 -- Boundary helper for collection definitions (same rationale as above).
@@ -137,11 +129,9 @@ end
 -- event vendor (npcID). Event vendors are placeholder-hidden in row.vendors and
 -- surfaced via override sources; the catalog observer indexes BOTH into byVendor
 -- and stamps each entry's resolved npcID -- so we match by ID, no name matching.
--- Add one vendor item to the event-card snapshot once (dedup via `seen`),
--- stamping owned/icon/name from the observer's row.
-local function _accumulateEventItem(out, seen, itemID)
-    if seen[itemID] then return end
-    seen[itemID] = true
+-- Add one vendor item to the event-card snapshot, stamping owned/icon/name from
+-- the observer's row.
+local function _accumulateEventItem(out, itemID)
     local R     = HDG.HousingCatalogObserver
     local row   = R.byItemID[itemID]   -- exception(nullable): a vendor item the catalog has no row for
     local owned = row ~= nil and R:IsOwned(row)
@@ -156,13 +146,9 @@ end
 local function _eventCardSnapshot(npcID)
     local out = { items = {}, collected = 0, total = 0, pct = 0 }
     if not npcID then return out end
-    local seen = {}
-    for _, ven in pairs(HDG.HousingCatalogObserver.byVendor) do
-        if ven.npcID == npcID then
-            for _, itemID in ipairs(ven.items) do
-                _accumulateEventItem(out, seen, itemID)
-            end
-        end
+    local itemIDs = HDG.HousingCatalogObserver:GetItemsByNpc(npcID)  -- exception(nullable): catalog not swept yet, or an event vendor it sells nothing at
+    for _, itemID in ipairs(itemIDs or {}) do
+        _accumulateEventItem(out, itemID)
     end
     out.total = #out.items
     out.pct   = out.total > 0 and (out.collected / out.total) or 0
@@ -235,29 +221,24 @@ end
 
 -- craftableNow snapshot: how many known decor recipes can be crafted now (+ >=50% tier).
 -- Uses Mogul:Candidates for the known-recipe list; inlines readiness math (PowerCrafter DB shape differs).
+-- One recipe's readiness: the share of its reagents (lumber included) held, each
+-- capped at what the recipe needs. Every recipe lists at least one reagent.
+local function _heldShare(recipe, counts)
+    local need, have = 0, 0
+    for itemID, req in pairs(recipe.reagents) do
+        need = need + req.qty
+        have = have + math.min(counts[itemID], req.qty)
+    end
+    return have / need
+end
+
 local function _craftableNowSnapshot()
-    local Mogul = HDG.Mogul
-    local Bag   = HDG.BagObserver
-    if not (Mogul and Bag) then return nil end
-    local counts = (Bag.GetCounts and Bag:GetCounts()) or {}
-    local candidates = Mogul:Candidates("char") or {}
+    local counts = HDG.BagObserver:GetCounts()
     local canNow, almost = 0, 0
-    for _, decor in ipairs(candidates) do
-        if type(decor.reagents) == "table" then
-            local need, have = 0, 0
-            for itemID, req in pairs(decor.reagents) do
-                local q = req.qty or 0   -- migration (defensive against bad recipe data)
-                local h = counts[itemID] or 0  -- exception(boundary): sparse map
-                if h > q then h = q end
-                need = need + q
-                have = have + h
-            end
-            if need > 0 then
-                local pct = have / need
-                if     pct >= 1.0 then canNow = canNow + 1
-                elseif pct >= 0.5 then almost = almost + 1 end
-            end
-        end
+    for _, recipe in ipairs(HDG.Mogul:Candidates("char")) do
+        local share = _heldShare(recipe, counts)
+        if     share >= 1.0 then canNow = canNow + 1
+        elseif share >= 0.5 then almost = almost + 1 end
     end
     return { canCraftNow = canNow, almostCraftable = almost }
 end
@@ -568,14 +549,17 @@ local function _bumpBucket(buckets, key)
     return b
 end
 
+local function _countInto(b, isOwned)
+    b.total = b.total + 1
+    if isOwned then b.collected = b.collected + 1 end
+end
+
+-- A decor tagged with two expansions counts in both (owner ruling 2026-10-31), so the
+-- expansion counts can add up to more than the decor total.
 local function _accumulateSourceExp(row, isOwned, srcType, expName, bySource, byExp)
-    local src = _bumpBucket(bySource, srcType)
-    local exp = _bumpBucket(byExp,    expName)
-    src.total = src.total + 1
-    exp.total = exp.total + 1
-    if isOwned then
-        src.collected = src.collected + 1
-        exp.collected = exp.collected + 1
+    _countInto(_bumpBucket(bySource, srcType), isOwned)
+    for _, name in ipairs(HDG.Expansion.Members(expName)) do
+        _countInto(_bumpBucket(byExp, name), isOwned)
     end
 end
 
@@ -597,12 +581,12 @@ local function _accumulateSubBucket(row, isOwned, subBuckets)
     if isOwned then b.collected = b.collected + 1 end
 end
 
--- styleAffinity: aggregate by tag name, skipping Size/Expansion-group tags.
+-- styleAffinity: aggregate by tag name, skipping the tags that are not styles.
 local function _accumulateStyleTags(row, isOwned, styleTagsOwned, styleTagsTotal)
     if not row.dataTagsByID then return end
-    local skip = _ensureStyleTagSkiplist()
+    local tagGroup = HDG.HousingCatalogObserver.tagIDToGroup
     for tagID, tagName in pairs(row.dataTagsByID) do
-        if type(tagName) == "string" and not skip[tagID] then
+        if type(tagName) == "string" and _isStyleTag(tagID, tagGroup) then
             styleTagsTotal[tagName] = (styleTagsTotal[tagName] or 0) + 1
             if isOwned then
                 styleTagsOwned[tagName] = (styleTagsOwned[tagName] or 0) + 1
@@ -852,7 +836,6 @@ end
 local SNAPSHOT_TRIGGERING_ACTIONS = {
     COLLECTION_BULK_LOAD                  = true,
     COLLECTION_CATALOG_ROW_ADDED          = true,
-    COLLECTION_CATALOG_ROW_REMOVED        = true,
     COLLECTION_CATALOG_ROW_COUNTS_UPDATED = true,
     COLLECTION_ITEM_LEARNED               = true,
     COLLECTION_ITEM_REMOVED               = true,
@@ -872,14 +855,13 @@ local SNAPSHOT_TRIGGERING_ACTIONS = {
     -- Catalog sweep completion: re-derive bySource/byExp from the updated
     -- HousingCatalogObserver (new expansion tags, updated source flags).
     CATALOG_LOAD_COMPLETED                = true,
-    CATALOG_REFRESH_COMPLETED             = true,
 }
 
 function HA:OnStoreNotify(actionType)
     if not actionType then return end
     local actionConst = actionType:gsub("^HDGR_", "")
-    -- First-window-open gate. BuildSnapshot reads C_HousingCatalog (GetAllFilterTagGroups
-    -- + 3 sync APIs) which null-derefs -> client CTD on a COLD client at PLAYER_LOGIN
+    -- First-window-open gate. BuildSnapshot reads C_HousingCatalog (3 sync APIs)
+    -- which null-derefs -> client CTD on a COLD client at PLAYER_LOGIN
     -- (the housing/DB2 subsystem isn't initialized until any char enters the world).
     -- The snapshot only feeds the House tab, invisible until the window opens, so defer
     -- every build to the first MAIN_WINDOW_OPENING -- the same proven-safe gate the
@@ -911,7 +893,7 @@ end
 HDG.Modules:Declare({
     name = "HouseAggregator",
     dependencies = {},
-    -- ADR-011: owns C_CurrencyInfo. C_HousingCatalog.GetAllFilterTagGroups +
+    -- ADR-011: owns C_CurrencyInfo. The C_HousingCatalog capacity reads and
     -- C_Item.GetItemIconByID are stateless shared reads, annotated at site.
     ownsBlizzardNamespaces = { "C_CurrencyInfo" },
     onEnable = function(self)

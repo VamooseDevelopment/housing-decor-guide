@@ -1254,16 +1254,9 @@ function PC:Wire(rootFrame)
                 HDG.ItemNameResolver:ResolveName(itemID) or "Item"))
     end)
     HDG.UI.OnClick(rootFrame, "projectsPickerPreviewPanel.addShopping", function()
-        local state  = HDG.Store:GetState()  -- exception(false-positive): top-level handler read
-        local itemID = state.session.ui.projects.pickerSelectedItemID
-        if not itemID then return end
-        if state.account.activeShoppingListId == "" then
-            HDG.Log:Warn("shopping", "No active shopping list -- open the Shopping tab to create one (Projects picker)")
-            return
-        end
-        HDG.Store:Dispatch({ type = A.SHOPPING_ITEM_ADD, payload = { itemID = itemID, qty = 1 } })
-        HDG.Log:Success("shopping",
-            ("%s added to your shopping list"):format(HDG.ItemNameResolver:ResolveName(itemID) or "Item"))
+        local itemID = HDG.Store:GetState().session.ui.projects.pickerSelectedItemID  -- exception(false-positive): top-level handler read
+        if not itemID then return end  -- exception(nullable): nothing picked yet
+        HDG.ControllerHelpers.Mechanics.AddToShoppingList(itemID, nil, "Projects picker")
     end)
     HDG.UI.OnClick(rootFrame, "projectsPickerPreviewPanel.makeCopyHere", function()
         local copyID = _editCopyHere()

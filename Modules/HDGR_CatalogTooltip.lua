@@ -25,7 +25,8 @@ local GATE_R,   GATE_G,   GATE_B   = 0.82, 0.82, 0.82  -- achievement / quest / 
 local function _sourceLine(label, rec)
     if not rec then return nil end   -- exception(nullable): this source kind absent on the row
     local z = (rec.zone and rec.zone ~= "") and (" in " .. rec.zone) or ""
-    return label .. ": " .. rec.source .. z
+    local act = rec.activity and (" from " .. rec.activity) or ""   -- exception(nullable): the catalog names an activity on a few records only
+    return label .. ": " .. rec.source .. z .. act
 end
 
 -- Gate lines: achievement / quest / reputation / promo / shop / drop-or-
@@ -91,14 +92,12 @@ local function _appendCatalogDyeLine(add, Obs, dyedVariants, variantIdentifier)
     end
 end
 
--- Cost line (last of the sourcing), summing every payment option.
+-- Cost line (last of the sourcing): every price the vendors take, as the detail
+-- shows it (30 coupons OR 500g). The head vendor's price alone hid the others.
 local function _appendCatalogCostLine(add, row)
-    if not (row.costEntries and #row.costEntries > 0) then return end   -- exception(nullable): item has no vendor cost
-    local parts = {}
-    for _, ce in ipairs(row.costEntries) do
-        parts[#parts + 1] = HDG.Format.FormatCost(ce.amount, ce)
-    end
-    add("Cost: " .. table.concat(parts, "  +  "), COST_R, COST_G, COST_B)
+    local variants = row.costVariants
+    if #variants == 0 then return end   -- exception(nullable): item has no vendor cost
+    add("Cost: " .. table.concat(variants, "  or  "), COST_R, COST_G, COST_B)
 end
 
 local function _onTooltipCreated(_, entry, tooltip)

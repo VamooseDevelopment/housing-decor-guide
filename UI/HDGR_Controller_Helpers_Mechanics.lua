@@ -76,6 +76,19 @@ function Mech.SelectVendor(npcID, name, zone)
     Mech.SetUITransientView("acquisition", "selectedRecipeItemID", nil)
 end
 
+-- Add to Cart, from any tab: one of the item onto the active shopping list. npcID
+-- files it under that vendor; nil, under "(any vendor)" (the Shopping selector's
+-- grouping). `surface` names the button in the no-list warning, so a report says
+-- which one was pressed.
+function Mech.AddToShoppingList(itemID, npcID, surface)
+    if Mech.GetState().account.activeShoppingListId == "" then
+        HDG.Log:Warn("shopping", "No active shopping list -- open the Shopping tab to create one (" .. surface .. ")")
+        return
+    end
+    Mech.Dispatch(HDG.Constants.ACTIONS.SHOPPING_ITEM_ADD, { itemID = itemID, npcID = npcID, qty = 1 })
+    HDG.Log:Success("shopping", HDG.UI.ItemName(itemID) .. " added to shopping list")
+end
+
 -- Delete a design version (a what-if layout), with a confirm. Shared by the
 -- Layouts view's Delete button and the Architect's version menu -- one dialog,
 -- one wording. A version has no re-import path, so it confirms like every other
@@ -152,6 +165,30 @@ function Mech.JumpToDecor(itemID)
     Mech.SetUITransientView("decor", "selectedVariantKey", tostring(itemID) .. ":base")
 end
 
+-- Decor Quests deep-link (the Quest Tracker's Open in HDG): the tab on what the tracker
+-- follows, as DQ_SHOW's payload (decorQuests.trackerOpen) -- its view, its row, its
+-- group unfolded, and a campaign's chapter open.
+function Mech.JumpToDecorQuests(show)
+    _openViewReset("decorQuests")
+    if show then Mech.Dispatch(HDG.Constants.ACTIONS.DQ_SHOW, show) end   -- exception(nullable): the empty tracker's Open has nothing to show, the tab opens as is
+end
+
+-- Track: a Track button's spec (the selectors' _trackButton) -- follow it, or, already
+-- followed (t.on), stop. The tab's Track and the tracker's zone list Track (review L7).
+function Mech.TrackDecorQuests(t)
+    if t.on then return Mech.StopTrackingDecorQuests() end
+    Mech.Dispatch(HDG.Constants.ACTIONS.DQ_TRACK, { key = t.key, quest = t.quest, rows = t.rows })
+end
+
+-- Stop tracking, the tracker's or the tab's Tracking: tracking ends and the steps' numbered
+-- pins leave the world map with it (owner 10-30: a player could only /reload them away).
+-- Vendor pins stay.
+function Mech.StopTrackingDecorQuests()
+    Mech.Dispatch(HDG.Constants.ACTIONS.DQ_TRACK_STOP)
+    if HDG.Waypoints:ClearStepPins() > 0 then
+        HDG.Log:Info("waypoints_user", HDG.Locale:Get("DQ_STEP_PINS_CLEARED"))
+    end
+end
 
 -- Race-guarded note editbox (hygiene A4 -- Decor item notes + Acquisition
 -- vendor notes shared this control flow verbatim). The binding-driven SetText

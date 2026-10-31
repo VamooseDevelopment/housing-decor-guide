@@ -316,8 +316,8 @@ end
 -- Format a skill cell by state:
 --   no data -> text.disabled "-"  | 0 decor recipes -> dim
 --   known >= total -> success     | current >= threshold -> accent  | else -> warning
--- decorThreshold from HDGR_ProfessionThresholds; fallback 80.
-local FALLBACK_THRESHOLD = 80
+-- decorThreshold is the bucket's lowest recipe skill (alts.decorRecipeIndex); every
+-- bucket with decor has one, so it is read only past the total == 0 return.
 local function formatCell(sl)
     if not sl then
         return HDG.Theme:ColorCode("text.disabled") .. "-|r"
@@ -325,14 +325,13 @@ local function formatCell(sl)
     local current = sl.current       -- slotData stamps current/decorTotal/decorKnown (all numeric)
     local total   = sl.decorTotal
     local known   = sl.decorKnown
-    local threshold = sl.decorThreshold or FALLBACK_THRESHOLD
     if total == 0 then
         return HDG.Theme:ColorCode("text.dim") .. current .. "|r"
     end
     if known >= total then
         return HDG.Theme:ColorCode("semantic.success") .. current .. "|r"
     end
-    if current >= threshold then
+    if current >= sl.decorThreshold then
         return HDG.Theme:ColorCode("semantic.accent")  .. current .. "|r"
     end
     return HDG.Theme:ColorCode("semantic.warning") .. current .. "|r"

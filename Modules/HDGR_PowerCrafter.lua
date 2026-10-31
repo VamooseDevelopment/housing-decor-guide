@@ -5,9 +5,10 @@
 -- The "PowerCrafter" name follows the VPC heritage -- it's the engine that
 -- turns a queue snapshot into:
 --   * a direct material list (one entry per slot, per queue row)
---   * a raw-DAG-expanded leaf list (intermediate crafted reagents recurse
---     down to their root materials, one craft's reagents per outputQtyMin made)
---   * a per-queue-entry rollup (no cross-row merging)
+--   * a raw-DAG-expanded leaf list (intermediate crafted reagents expand down
+--     to their root materials; the queue's whole demand on an intermediate is
+--     added up, then divided by its outputQtyMin and rounded up once)
+--   * a per-queue-entry rollup, direct or raw (no cross-row merging)
 --   * a "Craft These First" list (subsidiary recipes the queue depends on)
 --
 -- Architecture rules (locked in):
@@ -51,7 +52,7 @@ HDG = HDG or {}
 HDG.PowerCrafter = HDG.PowerCrafter or {}
 local PC = HDG.PowerCrafter
 
-PC.MAX_DEPTH = 6   -- depth cap for DAG recursion (safety net for cycles + deep chains)
+PC.MAX_DEPTH = 6   -- raw walk depth cap (safety net for deep chains; the seed's deepest is 5)
 
 -- Required slots: type=="basic" with itemID+qty (modifying/finishing/automatic are optional embellishments).
 local function basicSlots(recipe)
@@ -64,14 +65,19 @@ end
 
 -- ===== Per-queue-entry direct materials =====================================
 
+-- Adds `qty` crafts of a recipe's basic slots to `into` ({ [itemID] = qty }).
+-- The direct list and the raw walk's starting demand are both this sum.
+local function _addRecipeDemand(graph, into, recipeID, qty)
+    for _, slot in ipairs(basicSlots(graph[recipeID])) do
+        into[slot.itemID] = (into[slot.itemID] or 0) + slot.qty * qty
+    end
+end
+
 -- Direct mode: one entry per basic slot, qty = slot.qty * queueRow.remaining.
 -- Returns { [itemID] = qty } keyed by reagent itemID.
 function PC:_DirectMaterialsForRow(graph, recipeID, qty)
-    local recipe = graph[recipeID]
     local out = {}
-    for _, slot in ipairs(basicSlots(recipe)) do
-        out[slot.itemID] = (out[slot.itemID] or 0) + slot.qty * qty
-    end
+    _addRecipeDemand(graph, out, recipeID, qty)
     return out
 end
 
@@ -140,51 +146,84 @@ local function _craftsFor(sub, q)
     return math.ceil(q / yield)
 end
 
--- _RawMaterialsForRow: DAG-walk to base mats. Crafted intermediates (see
--- _intermediateRecipe) recurse, known-agnostic, one craft's reagents per
--- outputQtyMin made. Cycle defense: per-branch visited set + MAX_DEPTH cap.
-function PC:_RawMaterialsForRow(graph, recipeID, qty)
-    local out = {}
-    local function expand(itemID, q, depth, visited)
-        if depth > PC.MAX_DEPTH then  -- depth cap: treat as leaf
-            out[itemID] = (out[itemID] or 0) + q; return
-        end
-        if visited[itemID] then       -- cycle: treat as leaf
-            out[itemID] = (out[itemID] or 0) + q; return
-        end
-        local subRecipe = _intermediateRecipe(graph, itemID)
-        if not subRecipe then          -- leaf: raw material, or no recipe on file
-            out[itemID] = (out[itemID] or 0) + q; return
-        end
-        -- Intermediate: expand slots. Mark visited per-branch (siblings with
-        -- shared upstream intermediates stay unblocked).
-        visited[itemID] = true
-        local crafts = _craftsFor(subRecipe, q)
-        for _, slot in ipairs(basicSlots(subRecipe)) do
-            expand(slot.itemID, slot.qty * crafts, depth + 1, visited)
-        end
-        visited[itemID] = nil
+-- ===== Raw walk: pooled demand, rounded once per intermediate ===============
+-- Owner ruling 2026-10-31: an intermediate is crafted for ALL the demand on it --
+-- every queue row and every branch that needs it -- and the crafts are rounded up
+-- once. Rounding per branch over-counted multi-yield reagents: Blazing Ink and
+-- Flourishing Ink each need one Draconic Vial, a craft makes 5, and Raw asked for
+-- the materials of two crafts. Pooling needs an intermediate's demand complete
+-- before it is crafted, so every consumer is settled before what it consumes.
+
+-- Depth-first post-order: an intermediate is appended after everything it
+-- consumes, so walking `order` backwards settles consumers first. Marking on
+-- entry skips an edge back to an intermediate still being visited: that edge
+-- closes a cycle, its demand arrives after its target is settled, and it stays
+-- a leaf (the cycle guard).
+local function _appendPostOrder(graph, itemID, mark, order)
+    if mark[itemID] or not _intermediateRecipe(graph, itemID) then return end
+    mark[itemID] = true
+    for _, slot in ipairs(basicSlots(graph[itemID])) do
+        _appendPostOrder(graph, slot.itemID, mark, order)
     end
-    local recipe = graph[recipeID]
-    for _, slot in ipairs(basicSlots(recipe)) do
-        expand(slot.itemID, slot.qty * qty, 1, {})
-    end
-    return out
+    order[#order + 1] = itemID
 end
 
--- CalculateRawMaterials: queue-wide sum of every row's raw materials.
-function PC:CalculateRawMaterials(graph, queue)
-    local out = {}
-    if type(queue) ~= "table" then return out end
-    for _, row in ipairs(queue) do
-        if row.recipeID and (row.remaining or 0) > 0 then  -- exception(boundary): queue row from SVars may lack remaining
-            local rowMats = self:_RawMaterialsForRow(graph, row.recipeID, row.remaining)
-            for itemID, q in pairs(rowMats) do
-                out[itemID] = (out[itemID] or 0) + q
-            end
+local function _postOrder(graph, demand)
+    local roots, mark, order = {}, {}, {}
+    for itemID in pairs(demand) do roots[#roots + 1] = itemID end
+    table.sort(roots)   -- where a cycle is cut must not depend on pairs() order
+    for _, itemID in ipairs(roots) do _appendPostOrder(graph, itemID, mark, order) end
+    return order
+end
+
+-- Craft one intermediate's pooled demand: crafts rounded up once, its reagents'
+-- demand raised. depth[x] is x's longest path from the queued recipe (its own
+-- reagents are 1); past MAX_DEPTH an intermediate stays a leaf.
+local function _settle(graph, itemID, demand, depth)
+    local sub = graph[itemID]
+    local crafts = _craftsFor(sub, demand[itemID])
+    demand[itemID] = nil
+    for _, slot in ipairs(basicSlots(sub)) do
+        local id = slot.itemID
+        demand[id] = (demand[id] or 0) + slot.qty * crafts
+        depth[id] = math.max(depth[id] or 0, depth[itemID] + 1)  -- exception(nullable): first consumer to reach id
+    end
+end
+
+-- Raw-expands `demand` ({ [itemID] = qty }) in place and returns it. Whatever is
+-- not crafted stays: raw materials, intermediates past the depth cap, and demand
+-- that reaches an intermediate already settled (a cycle).
+local function _expandDemand(graph, demand)
+    local depth = {}
+    for itemID in pairs(demand) do depth[itemID] = 1 end
+    local order = _postOrder(graph, demand)
+    for i = #order, 1, -1 do
+        local itemID = order[i]
+        if demand[itemID] and depth[itemID] <= PC.MAX_DEPTH then
+            _settle(graph, itemID, demand, depth)
         end
     end
-    return out
+    return demand
+end
+
+-- _RawMaterialsForRow: one row raw-expanded (By-Recipe + Raw). Known-agnostic.
+function PC:_RawMaterialsForRow(graph, recipeID, qty)
+    local demand = {}
+    _addRecipeDemand(graph, demand, recipeID, qty)
+    return _expandDemand(graph, demand)
+end
+
+-- CalculateRawMaterials: the whole queue raw-expanded as ONE demand, so an
+-- intermediate two rows share is crafted (and rounded) once.
+function PC:CalculateRawMaterials(graph, queue)
+    local demand = {}
+    if type(queue) ~= "table" then return demand end
+    for _, row in ipairs(queue) do
+        if row.recipeID and (row.remaining or 0) > 0 then  -- exception(boundary): queue row from SVars may lack remaining
+            _addRecipeDemand(graph, demand, row.recipeID, row.remaining)
+        end
+    end
+    return _expandDemand(graph, demand)
 end
 
 -- GetSubsidiaryRecipes: intermediates the player can craft (knownRecipeItemIDs gate).

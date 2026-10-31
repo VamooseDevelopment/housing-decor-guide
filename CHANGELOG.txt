@@ -1,3 +1,217 @@
+## [3.41.0] - 2026-11-01 (November 2026)
+
+### Added
+- **Decor Quests: the quests that lead to decor.** A new tab under Acquire lists every decor a
+  quest rewards and the chain of quests before it, with this character's progress: the steps
+  done, the one to do next and what's in your log. A decor reads Done once anyone in your warband
+  has done its quest, since that unlocks it on its vendor for all of them. Filter by To do, In
+  progress, Done (this char), Done (warband), expansion and kind, or hide what you've collected.
+  Click a step you haven't done to aim for it instead of the next one. A breadcrumb quest you
+  skipped drops out of the chain once you're on, or have done, the quest it leads to.
+- **By Chain** lists the chains instead of the decor, with the Garrison Campaign as one row: its
+  12 chapters with your progress on each, and which chapter ends with which decor.
+- **What's next comes first.** A decor's details open with the step to do next: who starts it,
+  who takes it back, the zone, "step 3 of 7", and one button, Map, or Blizzard's quest arrow once
+  the quest is in your log. Every step of the chain below reads the same way: "! Lasan Skyhorn
+  ? Mayla Highmountain - Highmountain".
+- **Every step says how to do it.** A giver or turn-in that differs by faction names your side's,
+  such as Mayla Highmountain for The Skies of Highmountain. Escorts say "who follows you" (Jarod
+  Shadowsong, Thaelin Darkanvil), and a quest an item starts names the item: the Demonic Emblem
+  from Gravax the Desecrator, a Frothing Vial in Port Fogtide. A step with nobody to talk to says
+  how it works instead: "pick it on the Scouting Map", "starts on its own", "given when you reach
+  Searing Gorge" or "complete it from your quest tracker". Decor only one faction can buy, such as
+  the garrison desks and workbenches, follows only that faction's quest.
+- **Done, not owned.** A decor whose quest is done but isn't in your collection reads "Done, not
+  owned" and counts as To do. Its details say the quest won't give it again and who sells it, with
+  a Waypoint.
+- **A done decor says what unlocked it.** Its header in Decor Quests reads "Unlocked by <quest>"
+  before the zone, and so does a done chain's in By Chain.
+- **Your characters.** A decor's details list how far each of your characters has got with it, as
+  of the last time Decor Quests was open on them.
+- **Repeatable decor quests.** Decor you can earn again sits in its own Repeatable group at the top
+  of Decor Quests: the Gnomeregan Recyli-Kiln, the Eversong Party Platter and the Garrison Assault
+  pieces. They read "You have N" instead of Done, and say how to get another copy: a daily that may
+  not be up today, or a Scouting Missive from Sergeant Crowler in your garrison. Their Map takes
+  you to Sergeant Crowler in Lunarfall. Tracked, they show how many you have.
+- **Search finds a step by its name.** Search "Barum's Notes" and the Plight of the Arakkoa decor
+  comes up: any quest on the way to a decor finds it, not only the decor's own quest (English
+  quest names, from the third letter you type). Punctuation and extra spaces don't matter:
+  "wanted hogger" finds WANTED: "Hogger", and "hogger's" finds Hogger's quests.
+- **Quest Tracker.** Track a decor, a chain or a campaign and a small window follows it. The step
+  to do next comes first, with where it starts and one button beside it: Map, which sets a
+  waypoint and opens the world map on it, or Blizzard's quest arrow once the quest is in your log.
+  Under that, a strip of steps shows how far along you are. It moves on when you turn that step
+  in, and never points you at a quest this character has already done while the chain isn't
+  finished; click a disc to aim for another step. Track something this character has already
+  done and it says so: "again" beside a chain's count, "done on this character" beside a single
+  quest. Details opens it in Decor Quests, and once it's done, Close ends it. The Garrison
+  Campaign follows whichever chapter you're on and says what's still to come while the game has
+  none on offer. Open it from Tools > Quest Tracker; drag it by its title. A long decor name
+  wraps to a second line instead of being cut off.
+- **Quest Tracker: who starts it and who ends it.** The step to head for names both, marked
+  with a gold quest "!" and "?" the way Wowhead lists Start and End, then the zone beside its
+  Map button: "! Lasan Skyhorn ? Mayla Highmountain - Highmountain". When one NPC does both, the
+  name shows once after "!?". Once it's in your log, just the "?". Each next step has a Map
+  button too, which opens the map on that step's numbered pin. The quest's name stands out in
+  colour.
+- **Compact Quest Tracker.** A new setting under Interface > Quest Tracker picks Full or Compact.
+  Compact shows the decor's name and count, the step to do next and where to go, with its one
+  button. Its arrow opens the full tracker and folds it back.
+- **More decor quests where you are.** Once the Quest Tracker says Collected!, it lists the other
+  decor quests that start in that zone, ones you haven't started and don't own yet, each with a
+  Track button to follow it next.
+- **Clearing map pins.** Stop tracking takes the quest steps' numbered pins off the world map, and
+  Decor Quests has the X by its search box that Find Decor and Recipe Sources have, to clear every
+  HDG pin.
+- **Quest steps from Decor and Find Decor.** A decor a quest rewards gets a Quest steps button in
+  its details on the Decor tab and in Find Decor. It opens Decor Quests on that decor.
+- **A Map button beside every Waypoint:** on the Zone tab's vendors, Shopping's zones, and the
+  vendor card in Decor Quests.
+- **Hide PvP decor.** A new setting under Interface > Lists takes the decor you buy with Honor or
+  Marks of Honor (the battleground and arena banners, flags and Empowerments, 24 in all) out of
+  the Decor, Acquire and Zone Scanner lists. PvP vendors drop out of Shop by Vendor too. The
+  Destroy list and your shopping lists still show it. Thanks to Arduanne for the list.
+
+### Fixed
+- **Map always shows HDG's pin.** Opening the world map on the zone it last showed, such as the
+  one you're standing in, drew no pin, and the zone map, minimap or flight map could wipe the pins
+  while the world map was open.
+- **Styles Export works on every card.** A card's Export opened an empty box, and no import read
+  the old style codes. A snapshot or style card now shares its decor as a list code that Styles
+  Import and Shopping Import both read. An old snapshot code imports with the right quantities
+  instead of reading them as vendors, and a style code from HDG 3.x imports as a Filtered Set with
+  its tags.
+- **Sharing a Filtered Set shares its tags.** Its Export gives a code with the set's name and tags,
+  even before your collection loads, and Filtered Sets now show in the Export list. Styles Import
+  turns that code back into a Filtered Set that matches decor from your own catalog. Tags your HDG
+  version doesn't know are dropped, and the preview says how many.
+- **Alts: the Battle for Azeroth column counts its decor recipes**, which it showed as none for
+  every profession. A skill cell now turns "enough" at the lowest skill the game's own recipes ask
+  for in that expansion (Shadowlands Alchemy needs 140, not 80; Classic Tailoring 150, not 240).
+- **Item tooltips on five plain walls and doorways.** The Plain Interior Doorway, Walls, Sturdy
+  Wooden Interior Pillar and Bel'ameth Interior Narrow Wall showed no Decor line because the game
+  tags them with no expansion. They now show it, with their vendor.
+- **"Used in N decor recipes" counts the recipes your profession window found**, as Materials
+  does, and so does the bag mark on decor reagents.
+- **Waypoint and map messages are translated**, along with the map pin's tooltip. The note on a
+  vendor only the other faction can use now reads "an Alliance-only vendor".
+- **Large imports come back whole.** An import stopped at 500 items, so a big preset style or a
+  collection export of more than 500 decor lost the rest.
+- **Settings changes go through HDG.** The window scale, waypoint provider, language and font
+  let Blizzard's Settings write HDG's saved settings directly, before HDG heard about the change.
+  They now work like the checkboxes, and Defaults resets them to HDG's defaults instead of to the
+  value at login.
+- **Mogul counts what reagents cost.** The optimizer counted every reagent as free, so net profit
+  equalled revenue and "Lumber + mats" ranked like lumber alone. Net profit and Reagents to buy now
+  use real reagent prices, "Lumber + mats" ranks by profit after reagents, and the totals show a
+  plan's loss.
+- **Mogul's Collection mode counts its reagents.** It showed "Mat cost: 0 g" and no shopping
+  list. It now lists the reagents its crafts need, with their cost (? when a price is unknown),
+  and Send to Auctionator sends them. In Goblin's detail panel a reagent with no price shows ?
+  and sorts last instead of first.
+- **Mogul uses the reagents you hold.** Every plan bought every reagent, even ones in your bags.
+  Crafts now use what you hold (bags, bank, warband bank, any quality) and Reagents to buy lists
+  only what is missing. Collection plans fill the cheapest-lumber recipes first and come out the
+  same every time, where before they could change between reloads. The plan follows your scanned
+  recipes, and its alt hint and the "Known by" tooltip name your alts the same way.
+- **Mogul shows a loss as a loss, and "?" for a cost it can't price.** A losing craft read as a
+  red "0 g"; plan rows, runners-up and Goblin's Profit column now show it as a negative amount in
+  red, and a gain in green. When a material had no price, Mogul added up the rest, so most rows
+  read 0 gold without a price addon, sorted as the cheapest and exported 0. Now the cost, profit,
+  margin and gold per lumber read "?", sort last and export empty, in the optimizer's plan rows,
+  shopping list and totals and in the Goblin table. With Lumber + mats, a recipe whose reagent
+  nobody prices is planned after every priced one instead of being left out.
+- **Easier-to-read text.** The secondary text under a row, notes and hints sit just under normal
+  text in every color scheme, instead of a dark grey that was hard to read in game. Click hints in
+  every HDG tooltip read in white, Mogul's runner-up rows are no longer faded, and the alt named
+  beside a Mogul recipe reads as normal text.
+- **The status bar shows its messages.** The bar along the bottom of the window stayed empty after
+  an action that reports there, so adding a decor to the shopping list gave no sign it worked. It
+  now shows "<decor> added to shopping list" and HDG's other messages for a few seconds.
+- **Shop by Vendor tooltips: real Placed count and the price.** Every tile's tooltip said
+  "Placed: 0"; it now shows how many you have placed and updates when you place one. Tiles also
+  show what the decor costs, gold or currency, with each payment option. The item details'
+  labels, "free", "Recipe not known", unmet requirements and the source line read as normal text.
+- **Recipe vendors show their notes.** A vendor that sells only recipes, such as Echo and Jack
+  (Hallow's End) or Joao Calhandro (up the ramp inside the tower), now shows its note in Acquire.
+- **Crafted decor previews before the catalog loads.** Opened before HDG had read the housing
+  catalog, a crafted decor's preview read "Preview unavailable".
+- **Every price on the catalog hover.** Decor sold at more than one price, such as the Hearthlight
+  Armillary and the Nightborne Lantern, showed only the first vendor's price in HDG's lines on the
+  Housing Dashboard hover. It now lists each price, as the decor's details do.
+- **What earns a cache or chest.** Decor that drops from a cache or chest now says what earns it,
+  the way the game's own text does: "Victorious Stormarion Pinnacle Cache (Voidstorm) from
+  Stormarion Assault", and the Theater Troupe chests on the Isle of Dorn.
+- **Eredath Worktable** shows where it comes from, the treasure chests on Argus, instead of
+  Unknown.
+- **Sources checked against the game's own text.** The four Self-Assembling Homeware Kit pieces
+  come from the kit, not a quest. The Very Reliable Undermine Lamppost is an event, not a quest.
+  The Stormarion pieces are treasure, not a drop. Withered Army Training, for the Ancient Elven
+  Highback Chair, is an event.
+- **21 more quest decor know their quest.** The Coiled Isle, Zul'Aman and Arcantina pieces, the
+  Vol'dun Vulpera pieces, the Shadowlands covenant pieces, the Haranir Reclined Bed and more. Their
+  Quest tag now shows whether you've done the quest, like the rest. Scarecrow Pepe, the Restored
+  Night Fae Sigil and the Runic Kyrian Reliquary now link their achievement.
+- **17 more decor show the quest that rewards them**, next to their vendor: the Arcantina,
+  Zul'Aman and Haranir pieces, the Reinforced Goblin Umbrella, the Stormwind Wooden Table and more.
+  They're in Decor Quests now.
+- **The Draenei Farmer's Trellis, Elodor Barrel and Shadowmoon Open-Air Shed are Alliance only**,
+  and say where they come from: Talador and Shadowmoon Valley, not Tanaan Jungle.
+- **Four In-Game Shop decor no longer also read Promotional:** the Preserved Gift of Gilneas, the
+  Backboard and Hoop Playset, the Zapmaster Viewer 3000 and the Naturally Elegant Doormat.
+- **Silvrath's Map and Waypoint buttons** now use the Valdrakken map you see in Valdrakken.
+- **Decor list counts placed copies.** The number on a row is every copy you own, placed or in
+  storage, so a decor you've only placed no longer reads blank. The Stored view still counts
+  storage, the copies Destroy can act on.
+- **Vendor view shows the vendor's expansion again**: the line was always blank.
+- **The Hallow's End recipes say when they're sold** in Recipe Sources: the Apple Bobbing Bucket
+  technique and the Spidery Witch Hat pattern read "Sold during Hallow's End."
+- **The Styles tab knows every decor**: 591 decor added since September had no style tags, so
+  style filters left them out.
+- **The four Cuddly Grrgles no longer show a PROMO chip**: Dennia Silvertongue sells them.
+- **Pet heights in the Pets browser:** the Lost Star's is corrected, and six newer pets have one now:
+  the Aqir Scuttler, Wingreaver and Razorwing, both Clockwork Quackers and Skipper.
+- **Two characters with the same name on different realms stay apart** in a reagent's hover.
+  Before, they merged into one line ("Alice (you) 66"), and the Lumber hover, which lists your
+  other characters, left the second one out. Characters who share a name now show their realm
+  there and in the Essence of Lumber hover: Alice-Proudmoore, Alice-Stormrage.
+- **House tab Top Styles ranks styles only.** Expansion and size tags (Midnight, Large, Medium)
+  were counted as styles and filled the list, and Alliance and Horde are left out too.
+- **The zone alert counts each shopping-list item once.** An item two vendors in the zone both
+  sell was counted twice.
+- **Blueprints: hover the red "doesn't fit" line to read it in full.** Blizzard's reasons are whole
+  sentences and ran off the end of the line, and hovering did nothing. The hover lists each reason
+  on its own line.
+- **Rae'ana shows in the Zone Scanner and zone alert**, in Silvermoon and the Waking Shores. She
+  was missing from both, along with the 13 decor she sells there.
+- **Rae'ana's Ritual Sites pieces show their Renown rank.** The Void Elf Floating Desk, Runic
+  Parchment, Void Inkwell, Voidflame Candle and Void Elf Scribe's Desk need Renown 3 and the Dark
+  Obelisk Renown 7. They showed no rank, and every character counted as able to buy them.
+- **Venthyr Alchemy Rack is in Recipe Sources**, taught by Elixirist Au'pyr in Oribos, and its
+  Decor row no longer says source Unknown.
+- **Raw materials stop at Taladite Crystal**, since you prospect or buy it. One Draenic Basin asks
+  for 50 Taladite Crystal instead of about 1,024 Blackrock Ore and 500 True Iron Ore.
+- **Raw materials count a multi-craft reagent once for your whole queue.** A reagent one craft
+  makes several of, like Draconic Vial, is added up across the queue and rounded up once: queuing
+  Blazing Ink and Flourishing Ink asks for one vial craft's materials, not two.
+- **Move Planner: switching faction clears your plots.** A plot number is a different plot on the
+  other faction's map, so keeping it showed the wrong move and could drop or change the turn. Pick
+  the plots again after switching.
+- **Decor tagged with two expansions shows both**, oldest first ("Battle for Azeroth, Midnight"),
+  and either expansion's filter finds it in Find Decor, Decor Quests and the House tab's counts.
+  Before, Find Decor said one, the details said the other, and one filter hid it.
+- **Find Decor's The Burning Crusade filter lists its decor.** It found none of its 36.
+- **A vendor shows once per place and price.** A vendor the catalog lists for several zones came
+  out several times at the same spot, up to four for one item; a second copy with no price beside
+  the priced one goes too, and so does a vendor HDG's own source notes named a second time (Morta
+  Gage on Bartender Bob's "No Weapons Allowed" Rack).
+- **A recipe you've scanned shows where it's learned** in the Decor details and the recipe hover,
+  even before HDG ships it.
+- **Class-coloured names stay readable on light themes**, on every part of the window, including
+  list rows and the sunken list background.
+- **Styles: Filtered Set tag counts match your catalog.** They counted every item in HDG's tag data,
+  so a tag like wall art read 156 where the catalog has 125.
+
 ## [3.40.0] - 2026-10-26 (October 2026)
 
 ### Added

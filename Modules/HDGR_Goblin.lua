@@ -4,7 +4,8 @@
 -- each recipe via HDG.PriceSource, and computes the seven derived metrics
 -- the Goblin profit table needs:
 --   * sellPrice       -- AH/TSM price of the crafted item
---   * materialCost    -- sum of non-lumber, non-BoP reagent prices * qty
+--   * materialCost    -- sum of non-lumber, non-BoP reagent prices * qty; nil
+--                        when any of them has no price
 --   * profit          -- sellPrice - materialCost
 --   * margin          -- profit / sellPrice * 100  (percentage)
 --   * lumberQty       -- total lumber units consumed per craft
@@ -65,8 +66,32 @@ end
 -- ===== Per-recipe scoring ===================================================
 -- Compute the seven profit metrics for a single recipe entry. Returns nil
 -- when the recipe is unscoreable (no reagents, no output item, etc.) --
--- caller filters nils. salePrice nil is OK and means "no price source
--- returned a value" (fall back to displaying "?").
+-- caller filters nils. sellPrice nil is OK and means "no price source
+-- returned a value" (fall back to displaying "?"); materialCost nil likewise.
+
+-- The recipe's reagents, split: what the non-lumber ones cost, and the lumber it
+-- needs (costed apart, through lumberValue). The cost is nil when any non-lumber
+-- reagent has no price (owner ruling 2026-10-31): a sum that leaves one out reads
+-- as a real price, too low, and with no price addon Mogul showed 238 of 346 rows
+-- at 0 gold and sorted them cheapest (test audit B7).
+local function _reagentCost(recipe, PS)
+    local cost, lumberQty, lumberType = 0, 0, nil
+    for reagentID, info in pairs(recipe.reagents) do
+        local qty = info.qty or 1  -- migration (legacy recipe reagents without qty)
+        if _lumberSet[reagentID] then
+            lumberQty = lumberQty + qty
+            -- Pick the highest-qty lumber as the dominant type. Recipes
+            -- with mixed lumber are very rare but the engine handles them.
+            if not lumberType or qty > (recipe.reagents[lumberType].qty or 0) then
+                lumberType = reagentID
+            end
+        elseif cost then
+            local matPrice = PS:GetItemPrice(reagentID)
+            if matPrice and matPrice > 0 then cost = cost + matPrice * qty else cost = nil end
+        end
+    end
+    return cost, lumberQty, lumberType
+end
 
 function G:ScoreRecipe(recipe)
     if not (recipe and recipe.itemID and recipe.reagents) then return nil end
@@ -77,31 +102,11 @@ function G:ScoreRecipe(recipe)
     local PS = HDG.PriceSource
     local sellPrice, priceSource = PS:GetItemPrice(recipe.itemID)
 
-    local materialCost = 0
-    local lumberQty    = 0
-    local lumberType   = nil
-    local hasAllPrices = true
-    for reagentID, info in pairs(recipe.reagents) do
-        local qty = info.qty or 1  -- migration (legacy recipe reagents without qty)
-        if _lumberSet[reagentID] then
-            lumberQty = lumberQty + qty
-            -- Pick the highest-qty lumber as the dominant type. Recipes
-            -- with mixed lumber are very rare but the engine handles them.
-            if not lumberType or qty > (recipe.reagents[lumberType].qty or 0) then
-                lumberType = reagentID
-            end
-        else
-            local matPrice = PS:GetItemPrice(reagentID)
-            if matPrice and matPrice > 0 then
-                materialCost = materialCost + matPrice * qty
-            else
-                hasAllPrices = false
-            end
-        end
-    end
+    local materialCost, lumberQty, lumberType = _reagentCost(recipe, PS)
 
+    -- Every figure below takes the material cost off, so none is known without it.
     local profit, margin, lumberValue
-    if sellPrice then
+    if sellPrice and materialCost then
         profit = sellPrice - materialCost
         if sellPrice > 0 then margin = profit / sellPrice * 100 end
         if lumberQty > 0 then lumberValue = profit / lumberQty end
@@ -114,7 +119,7 @@ function G:ScoreRecipe(recipe)
         tsmMin    = PS:GetTSMMinBuyout(recipe.itemID)
         tsmMarket = PS:GetTSMMarket(recipe.itemID)
         tsmRegion = PS:GetRegionSaleAvg(recipe.itemID)
-        if tsmRegion and tsmRegion > 0 then
+        if tsmRegion and tsmRegion > 0 and materialCost then
             tsmPct = (tsmRegion - materialCost) / tsmRegion * 100
         end
         saleRate   = PS:GetRegionSaleRate(recipe.itemID)    -- "Rate" column
@@ -137,7 +142,6 @@ function G:ScoreRecipe(recipe)
         lumberQty     = lumberQty,
         lumberType    = lumberType,
         lumberValue   = lumberValue,
-        hasAllPrices  = hasAllPrices,
         tsmMin        = tsmMin,
         tsmMarket     = tsmMarket,
         tsmRegion     = tsmRegion,

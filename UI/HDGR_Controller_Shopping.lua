@@ -22,9 +22,14 @@ local ShoppingController = HDG.ShoppingController
 
 -- Register at file load (not Wire()) -- callers push to "shopping" before
 -- the user visits the Shopping tab, so Wire() may not have run yet.
+-- shopping_resolve is the vendor resolve's own line, Debug tab only: the resolve
+-- runs a frame after the add or import that woke it, and on the rail its
+-- "Resolved vendors" replaced that action's message ("added to shopping list",
+-- owner 2026-10-31). The list's vendor headers already show what it did.
 if not HDG.Log:HasTag("shopping") then
     HDG.Log:RegisterTags({
-        shopping = { user = true, level = "info", duration = 3 },
+        shopping         = { user = true,  level = "info", duration = 3 },
+        shopping_resolve = { user = false, level = "debug" },
     })
 end
 
@@ -88,11 +93,12 @@ local function _ensureItemChrome(row)
     row._shoppingItemChromeBuilt = true
 end
 
--- Pin button on zone rows. Walks the zone's vendors and sets waypoints for
--- each one with valid coords.
+-- Pin button on zone rows, Map beside it. The pin sets a waypoint for each of the zone's
+-- vendors with valid coords; Map pins them all on the world map.
 local function _ensureZonePin(row)
     if row._shoppingZonePinBuilt then return end
     row._zonePinBtn = HDG.UI.RowPinButton(row)
+    row._zoneMapBtn = HDG.UI.RowMapButton(row, row._zonePinBtn)
     row._shoppingZonePinBuilt = true
 end
 
@@ -106,6 +112,7 @@ local function _hideAllChrome(row)
     end
     if row._shoppingZonePinBuilt then
         row._zonePinBtn:Hide()
+        row._zoneMapBtn:Hide()
     end
     if row._shoppingAhBtnsBuilt then
         row._ahSendBtn:Hide()
@@ -149,36 +156,61 @@ local function _showItemChrome(row, ed)
     row._deleteBtn:Show()
 end
 
--- Set a map waypoint for every distinct vendor in `zoneName`. Walks the
--- projected shopping entries (the row factory has no direct vendor list) and
--- de-dups by npcID. `e.npcID/e.vendor` filters the heterogeneous list down to
--- vendor entries; coordless vendors are still marked seen (so a later coorded
--- dupe -- same npcID -- can't double-pin). Returns the pin count for the log.
-local function _pinZoneVendors(zoneName)
+-- Every distinct vendor in `zoneName`, located or not ({ mapID, x, y, name, zone }). Walks
+-- the projected shopping entries (the row factory has no direct vendor list) and de-dups by
+-- npcID. `e.npcID/e.vendor` filters the heterogeneous list down to vendor entries.
+local function _zoneVendors(zoneName)
     local state = HDG.Store:GetState()  -- exception(false-positive): top-level controller method (not a row factory)
-    local entries = HDG.Selectors:Call("shopping.activeListEntries", state, {})
-    -- RunBatch emits ONE consolidated waypoint message for the whole zone.
+    local out, seen = {}, {}
+    for _, e in ipairs(HDG.Selectors:Call("shopping.activeListEntries", state, {})) do
+        local v = e.vendor
+        if e.npcID and v and v.zone == zoneName and not seen[e.npcID] then
+            seen[e.npcID] = true
+            out[#out + 1] = v
+        end
+    end
+    return out
+end
+
+-- Set a map waypoint for every vendor in `zoneName` with a location. RunBatch emits ONE
+-- consolidated waypoint message for the whole zone.
+local function _pinZoneVendors(zoneName)
+    local vendors = _zoneVendors(zoneName)
     return HDG.Waypoints:RunBatch(function()
-        local seen = {}
-        for _, e in ipairs(entries) do
-            local v = e.vendor
-            if e.npcID and v and v.zone == zoneName and not seen[e.npcID] then
-                seen[e.npcID] = true
-                if HDG.VendorRank.HasLocation(v.mapID, v.x, v.y) then
-                    HDG.Waypoints:Set(v.mapID, v.x, v.y, v.name)
-                end
+        for _, v in ipairs(vendors) do
+            if HDG.VendorRank.HasLocation(v.mapID, v.x, v.y) then
+                HDG.Waypoints:Set(v.mapID, v.x, v.y, v.name)
             end
         end
     end)
 end
 
+-- The zone header's pin and Map read the zone stamped on them each paint: one handler and tip
+-- each, not three closures per row per paint (review P7).
+local function _onZoneWaypoint(self) _pinZoneVendors(self._zone) end   -- RunBatch emits the consolidated message
+local function _onZoneMap(self) HDG.Waypoints:MapAll(_zoneVendors(self._zone)) end   -- says what it placed, or why none
+local function _zoneMapTip(self) return { title = HDG.Locale:Get("SHOP_ZONE_MAP_TIP"):format(self._zone) } end
+
 local function _showZonePin(row, ed)
     _ensureZonePin(row)
-    local zoneName = ed.zone
-    row._zonePinBtn:SetScript("OnClick", function()
-        _pinZoneVendors(zoneName)   -- RunBatch emits the consolidated message
-    end)
+    row._zonePinBtn._zone, row._zoneMapBtn._zone = ed.zone, ed.zone
+    row._zonePinBtn:SetScript("OnClick", _onZoneWaypoint)
+    row._zoneMapBtn:SetScript("OnClick", _onZoneMap)
+    HDG.TooltipEngine:Attach(row._zoneMapBtn, _zoneMapTip)
     row._zonePinBtn:Show()
+    row._zoneMapBtn:Show()
+end
+
+-- The active list's vendors (shopping.entriesByZone's vendor rows) as VendorAugment has them
+-- ({ mapID, x, y, name }), located or not: Waypoint All.
+local function _listVendors()
+    local state = HDG.Store:GetState()  -- exception(false-positive): top-level controller method (not a row factory)
+    local out = {}
+    for _, r in ipairs(HDG.Selectors:Call("shopping.entriesByZone", state, {})) do
+        local aug = r.kind == "vendor" and HDG.StaticData.VendorAugment:Get(r.npcID)
+        if aug then out[#out + 1] = aug end   -- exception(nullable): a vendor VendorAugment has no record for
+    end
+    return out
 end
 
 -- Send every Auction House (crafted/BoE) item in the active list to Auctionator as
@@ -317,10 +349,10 @@ end
 
 local function _configureZoneRow(row, ed)
     row:SetHeight(22)
+    _ensureZonePin(row)
+    row._rightFs:SetPoint("RIGHT", row._zoneMapBtn, "LEFT", -4, 0)
     row._nameFs:SetPoint("LEFT", row, "LEFT", 8, 0)
-    -- Leave space for pin button (-22) + right-text (-30).
-    row._nameFs:SetPoint("RIGHT", row, "RIGHT", -100, 0)
-    row._rightFs:SetPoint("RIGHT", row, "RIGHT", -22, 0)
+    row._nameFs:SetPoint("RIGHT", row._rightFs, "LEFT", -6, 0)
     row._nameFs:SetText(HDG.Theme:ColorCode("semantic.accent")
         .. HDG.UI.CollapsePrefix(ed.collapsed) .. ed.zone .. "|r")
     row._rightFs:SetText("(" .. ed.vendorCount .. " vendors)")
@@ -606,7 +638,7 @@ function ShoppingController:_EnrichListVendors(listID)
     if n > 0 then
         HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.SHOPPING_RESOLVE_VENDORS,
             payload = { listID = listID, resolutions = res } })
-        HDG.Log:Info("shopping", "Resolved vendors for " .. n .. " item" .. (n > 1 and "s" or ""))
+        HDG.Log:Debug("shopping_resolve", "Resolved vendors for " .. n .. " item" .. (n > 1 and "s" or ""))
     end
 end
 
@@ -813,17 +845,13 @@ function ShoppingController:Wire(rootFrame)
     end)
 
     HDG.UI.OnClick(rootFrame, "shoppingPanel.waypointAllBtn", function()
-        local state = HDG.Store:GetState()  -- exception(false-positive): top-level controller method (not a row factory)
-        local rows = HDG.Selectors:Call("shopping.entriesByZone", state, {})
+        local vendors = _listVendors()
         -- RunBatch emits ONE consolidated chat line for the whole batch (via the
         -- central Waypoints:PrintResult), not one per vendor.
         HDG.Waypoints:RunBatch(function()
-            for _, r in ipairs(rows) do
-                if r.kind == "vendor" then
-                    local aug = HDG.StaticData.VendorAugment:Get(r.npcID)
-                    if aug and HDG.VendorRank.HasLocation(aug.mapID, aug.x, aug.y) then
-                        HDG.Waypoints:Set(aug.mapID, aug.x, aug.y, aug.name)
-                    end
+            for _, v in ipairs(vendors) do
+                if HDG.VendorRank.HasLocation(v.mapID, v.x, v.y) then
+                    HDG.Waypoints:Set(v.mapID, v.x, v.y, v.name)
                 end
             end
         end)

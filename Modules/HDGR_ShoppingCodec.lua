@@ -9,6 +9,7 @@
 --                       date, author, idtype). desc is URL-encoded so it can
 --                       carry commas / equals safely.
 --   Lines 2..N: itemID,npcID,qty  -- npcID=0 means wishlist (no vendor).
+--               (source=snapshot: itemID,placed,stored -- old snapshot codes.)
 --
 -- Two functions:
 --   Encode(listRecord) -> "HDGVL:1:..."   pure encoder
@@ -28,7 +29,10 @@ local C = HDG.ShoppingCodec
 
 local MAGIC_PREFIX = "HDGVL"
 local FORMAT_VERSION = "1"
-local MAX_IMPORT_ENTRIES = 500   -- HDG cap; protects against pathological imports
+-- Above the catalog's decor count (2,329 on 2026-10-31), so a whole collection or a
+-- large style comes back whole; still bounds a pasted wall of junk. It was 500, which
+-- cut a 770-decor preset style and any collection over 500.
+local MAX_IMPORT_ENTRIES = 5000
 
 -- ===== Shared codec primitives =============================================
 -- Base64 + URL + ASCII helpers are the ONE copy in HDG.Codec (Core/HDGR_Codec.lua,
@@ -104,6 +108,14 @@ local function parseItemLine(line)
     }
 end
 
+-- Old HDG snapshot codes (header source=snapshot) carry id,placed,stored lines.
+-- The list wants what the look placed, at least one; there is no vendor.
+local function parseSnapshotLine(line)
+    local id, placed = line:match("^(%d+),(%d+),%d+$")
+    if not id then return nil end
+    return { itemID = tonumber(id), qty = math.max(tonumber(placed), 1) }
+end
+
 function C.Decode(encoded)
     -- Accept HDGVL:1:... only. Format version gates future migrations.
     local decoded = HDG.Codec.UnwrapEnvelope(encoded, MAGIC_PREFIX, FORMAT_VERSION)
@@ -112,6 +124,7 @@ function C.Decode(encoded)
     local items = {}
     local meta  = {}
     local first = true
+    local parseLine = parseItemLine
     for line in decoded:gmatch("[^\n]+") do
         if first then
             first = false
@@ -120,13 +133,14 @@ function C.Decode(encoded)
             local firstField = line:match("^([^,]+)")
             if firstField and firstField:match("^%a") then
                 meta = parseHeader(line)
+                if meta.source == "snapshot" then parseLine = parseSnapshotLine end
             else
-                local entry = parseItemLine(line)
+                local entry = parseLine(line)
                 if entry then items[#items + 1] = entry end
             end
         else
             if #items >= MAX_IMPORT_ENTRIES then break end
-            local entry = parseItemLine(line)
+            local entry = parseLine(line)
             if entry then items[#items + 1] = entry end
         end
     end

@@ -5,7 +5,7 @@
 
 HDGR_ReagentsDB = {
 
-    -- ========== GATHERING (1265 items) ==========
+    -- ========== GATHERING (1266 items) ==========
     [74853] = "Gathering|100 Year Soy Sauce",
     [174328] = "Gathering|Aberrant Voidfin",
     [34057] = "Gathering|Abyss Crystal",
@@ -1120,6 +1120,7 @@ HDGR_ReagentsDB = {
     [136631] = "Gathering|Surface-to-Infernal Rocket Launcher",
     [168132] = "Gathering|Sweete's Diamond-Studded Spyglass",
     [2452] = "Gathering|Swiftthistle",
+    [115524] = "Gathering|Taladite Crystal",
     [109129] = "Gathering|Talador Orchid (WoD herb)",
     [36907] = "Gathering|Talandra's Rose",
     [23437] = "Gathering|Talasite",
@@ -1272,7 +1273,7 @@ HDGR_ReagentsDB = {
     [7974] = "Gathering|Zesty Clam Meat",
     [162555] = "Gathering|Zocalo Cheddar",
 
-    -- ========== CRAFTED (750 items) ==========
+    -- ========== CRAFTED (749 items) ==========
     [4407] = "Crafted|Accurate Scope",
     [23446] = "Crafted|Adamantite Bar",
     [23784] = "Crafted|Adamantite Frame",
@@ -1938,7 +1939,6 @@ HDGR_ReagentsDB = {
     [2459] = "Crafted|Swiftness Potion",
     [74644] = "Crafted|Swirling Mist Soup",
     [127838] = "Crafted|Sylvan Elixir",
-    [115524] = "Crafted|Taladite Crystal",
     [114931] = "Crafted|Talador Orchid",
     [32473] = "Crafted|Tankatronic Goggles",
     [130879] = "Crafted|Tanned Fel Leather",

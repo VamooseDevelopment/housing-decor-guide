@@ -1249,7 +1249,6 @@ Selectors:Register("recipeSources.currentZones", {
         local function add(name) if listed[name] then out[name] = true end end
         add(zone.zoneLevelName)
         add(zone.currentZoneName)
-        if zone.currentMapID == 0 then return out end   -- 0 = the game gave no map
         local mapIDs = HDG.ZoneNameResolver.ZONE_MAP_IDS
         for name in pairs(listed) do
             if mapIDs[name] == zone.currentMapID then out[name] = true end

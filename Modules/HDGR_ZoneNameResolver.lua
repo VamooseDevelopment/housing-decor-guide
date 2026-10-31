@@ -12,6 +12,7 @@ HDG.ZoneNameResolver = HDG.ZoneNameResolver or {}
 local R = HDG.ZoneNameResolver
 
 R._cache = R._cache or {}   -- [enUSName] = name in the client's language
+R._mapNames = R._mapNames or {}   -- [uiMapID] = name, or false when the client has none (MapName)
 
 R.ZONE_MAP_IDS = {
     -- Classic capitals
@@ -99,6 +100,31 @@ function R:Localize(enUSName)
     local name = (info and info.name ~= nil and info.name ~= "") and info.name or enUSName   -- exception(boundary): GetMapInfo nil or nameless for a retired map
     self._cache[enUSName] = name
     return name
+end
+
+-- Maps the game names alike, which Decor Quests lists both of: each is named with its
+-- continent, "Dalaran (Northrend)", as the curated names above are (a waypoint to
+-- Northrend's from Legion's read as broken, owner 10-29).
+R.SAME_NAME_MAPS = { [125] = true, [627] = true }
+
+-- name with the continent of uiMapID, for a map in SAME_NAME_MAPS.
+local function _withContinent(name, uiMapID)
+    if not (name and R.SAME_NAME_MAPS[uiMapID]) then return name end
+    local continent = _G.MapUtil.GetMapParentInfo(uiMapID, _G.Enum.UIMapType.Continent)
+    if not continent then return name end   -- exception(boundary): the game places the map on no continent
+    return ("%s (%s)"):format(name, continent.name)
+end
+
+-- A uiMapID's name in the client's language, or nil when the client has none (an
+-- ID it does not know, or a nameless map). Cached: Decor Quests names a zone per
+-- quest step, and the same few maps recur across a line.
+function R:MapName(uiMapID)
+    local cached = self._mapNames[uiMapID]
+    if cached ~= nil then return cached or nil end
+    local info = C_Map.GetMapInfo(uiMapID)
+    local name = info and info.name ~= "" and info.name or false   -- exception(boundary): GetMapInfo nil or nameless for an unknown map
+    self._mapNames[uiMapID] = _withContinent(name, uiMapID)
+    return self._mapNames[uiMapID] or nil
 end
 
 HDG.Modules:Declare({

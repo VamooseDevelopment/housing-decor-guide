@@ -421,7 +421,7 @@ function PS:Scan()
     local existingProf = existingChar and existingChar.professions
                          and existingChar.professions[base.professionName]  -- exception(nullable): first record of this profession
     if existingProf
-        and existingProf.knowsFindLumber == knowsFindLumber
+        and existingChar.knowsFindLumber == knowsFindLumber   -- the reducer keeps the flag on the character
         and sameSet(existingProf.knownRecipes, knownRecipes)
         and sameSkillLines(existingProf.skillLines, skillLines) then
         return
@@ -892,9 +892,14 @@ end
 -- which reads exactly like the spell id this API needs and is not. Passing one
 -- for the other returns nil forever and looks like an item with no data, so the
 -- conversion lives HERE and no call site has to know the difference.
-function PS:GetRecipeSourceForItem(itemID)
+--
+-- `recipes` is the recipes.db selector's map: the shipped seed, then the player's
+-- own capture for a recipe the seed doesn't ship (owner ruling 2026-10-31). The
+-- seed's spell wins where both have the item. Reading the seed alone left a
+-- recipe only the capture knows with no source at all.
+function PS:GetRecipeSourceForItem(itemID, recipes)
     if not itemID then return nil end  -- exception(nullable): header rows carry no item
-    local recipe = HDG.StaticData.Recipes:Get(itemID)  -- exception(nullable): not every crafted item is in DecorDB
+    local recipe = recipes[itemID]  -- exception(nullable): most decor is not crafted
     if not recipe then return nil end
     return self:GetRecipeSource(recipe.spellID)
 end

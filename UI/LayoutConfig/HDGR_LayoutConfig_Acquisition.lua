@@ -577,9 +577,11 @@ LC.widgets["acquisitionDetailPanel.itemInfoName"] = {
     text = "", height = 18, width = "fill", order = 10,
     binding = "acq.selectedItem.name",
 }
+-- Ribbon and gate line are readable content, so Text, never TextDim (owner 2026-10-31):
+-- the hierarchy under the name comes from font size (body, then caption).
 LC.widgets["acquisitionDetailPanel.itemInfoRibbon"] = {
     tooltip = false,
-    kind = "label", role = "TextDim", ["in"] = "acq.itemInfoBox", font = "body",
+    kind = "label", role = "Text", ["in"] = "acq.itemInfoBox", font = "body",
     text = "", height = 50, width = "fill", order = 20,
     wrap = true,
     justifyV = "TOP",
@@ -588,7 +590,7 @@ LC.widgets["acquisitionDetailPanel.itemInfoRibbon"] = {
 -- Gate line: "Gated by: ..." or "Source: ..." acquisition prerequisite (wraps to 2 lines).
 LC.widgets["acquisitionDetailPanel.itemInfoSource"] = {
     tooltip = false,
-    kind = "label", role = "TextDim", ["in"] = "acq.itemInfoBox", font = "caption",
+    kind = "label", role = "Text", ["in"] = "acq.itemInfoBox", font = "caption",
     text = "", height = 42, width = "fill", order = 25,   -- 3 lines max (REP+QUEST+ACH)
     wrap = true,
     justifyV = "TOP",
@@ -605,6 +607,14 @@ LC.widgets["acquisitionDetailPanel.itemWowheadBtn"] = {
     text = "|TInterface\\AddOns\\HousingDecorGuide\\textures\\wowhead_logo:14:14|t",
     width = 26, height = 22, order = 8, variant = "tertiary",
     visible = "acq.hasSelectedItem",
+}
+-- Quest steps (R4, owner 10-30): Decor Quests on this decor, beside + Cart; only for a decor
+-- a quest gives.
+LC.widgets["acquisitionDetailPanel.itemQuestStepsBtn"] = {
+    tooltip = { recipe = "DecorQuestSteps" },
+    kind = "button", ["in"] = "acq.itemInfoCartRow", font = "small",
+    text = "locale:DQ_QUEST_STEPS_BTN", width = "auto", height = 22, order = 9, variant = "tertiary",
+    visible = "decorQuests.findHasSteps",
 }
 LC.widgets["acquisitionDetailPanel.itemInfoCartBtn"] = {
     tooltip = { recipe = "CartAdd" },

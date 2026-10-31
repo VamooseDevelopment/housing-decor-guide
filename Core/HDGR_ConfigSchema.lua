@@ -48,6 +48,8 @@ setting("MATERIAL_TOOLTIP_ITEM_DATA", "materialTooltipItemData", false, Scope.Pr
 setting("CATALOG_DECOR_OVERLAY", "catalogDecorOverlay", true, Scope.Profile)
 setting("AUTO_DEPOSIT_LUMBER", "autoDepositLumber", false, Scope.Profile)
 setting("HIDE_IN_COMBAT", "hideInCombat", true, Scope.Profile)
+setting("HIDE_PVP_DECOR", "hidePvpDecor", false, Scope.Profile)
+setting("DQ_TRACKER_STYLE", "decorQuestTrackerStyle", "full", Scope.Profile)
 setting("PREFERRED_PRICE_ADDON", "preferredPriceAddon", nil, Scope.Profile)
 setting("TSM_PRICE_MODE", "tsmPriceMode", "min", Scope.Profile)
 

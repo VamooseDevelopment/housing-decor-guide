@@ -2,23 +2,25 @@
 -- ============================================================================
 -- Pure-function craft optimizer engine. Stateless. Unit-testable.
 -- Adapted from HDG_Mogul.lua to HDG's data model:
---   * Recipes from HDGR_ProfessionsDB (keyed by recipeID, .slots = list of
---     {type, itemID, qty} with type == "basic" for raw reagents)
+--   * Recipes from recipes.db: the shipped DecorDB with the player's scanned
+--     reagents laid over it (reagents = { [itemID] = { name, qty } }, lumber among them)
 --   * Lumber set from HDG.Constants.LUMBER_DATA
 --   * Known recipes from recipes.knowledge (mine / alts), derived from
 --     account.characters[K].professions[P].knownRecipes (recipeID -> true)
---   * Owned decor from account.collection.ownedDecorIDs (for Collection mode)
+--   * Lumber and reagents held from BagObserver (crafts use what you hold first)
+--   * Owned decor from HousingCatalogObserver:IsOwned (for Collection mode)
 --
 -- Two modes:
---   profit     -- rank by gold-per-lumber (vendor sell price); pick highest
---                 expected revenue per bottleneck lumber unit
+--   profit     -- rank by gold-per-lumber (market price, then vendor sell);
+--                 pick highest expected revenue per bottleneck lumber unit
 --   collection -- prioritize crafts producing UNCOLLECTED decor items; ignore
---                 gold value; round-robin within tier to diversify
+--                 gold value; round-robin within tier to diversify. Its mats,
+--                 spend and revenue are counted the same way as profit's.
 --
 -- Two views (drives which chars contribute the candidate-recipe set):
 --   char       -- current char's knownRecipes only
---   account    -- union of all non-hidden chars' knownRecipes (and mark the
---                 best alt per recipe so the UI can hint "log into Slamz")
+--   account    -- union of all non-hidden chars' knownRecipes (mogul.planRows names
+--                 the alt from recipes.knowledge so the UI can hint "log into Slamz")
 
 HDG = HDG or {}
 HDG.Mogul = HDG.Mogul or {}
@@ -35,58 +37,64 @@ end
 -- Build a set {[itemID] = true} of lumber item IDs from Constants.
 local function lumberSetFromConstants()
     local out = {}
-    local data = HDG.Constants.LUMBER_DATA
-    if type(data) == "table" then
-        for _, l in ipairs(data) do
-            if l.id then out[l.id] = true end
-        end
-    end
+    for _, l in ipairs(HDG.Constants.LUMBER_DATA) do out[l.id] = true end
     return out
 end
 
--- Resolve a vendor sell price for an item via the WoW client cache.
--- Vendor sell-price via ItemNameResolver boundary (ADR-003b: no direct GetItemInfo in selectors).
--- mogul.plan declares session.itemNames.names; resolver bumps tick on drain -> re-ranking.
--- Returns 0 when uncached (mogul treats 0 as "ineligible").
-local function vendorSellPrice(itemID)
-    return HDG.ItemNameResolver:GetSellPrice(itemID)
+-- Prices are nil when nobody knows them, and an unknown part makes the whole
+-- figure unknown (owner ruling 2026-10-31, test audit B7): a sum that leaves a
+-- price out reads as a real price, too low, and the plan showed it as one.
+local function addKnown(sum, part)
+    if sum == nil or part == nil then return nil end
+    return sum + part
 end
 
--- Sale price: PriceSource (AH/TSM) first, then vendor floor fallback.
-local function resolveSalePrice(itemID, override)
-    if override and override > 0 then return override end
+local function netOf(sale, cost)
+    if sale == nil or cost == nil then return nil end
+    return sale - cost
+end
+
+-- Vendor sell-price via ItemNameResolver boundary (ADR-003b: no direct GetItemInfo in selectors).
+-- mogul.plan declares session.itemNames.names; resolver bumps tick on drain -> re-ranking.
+-- The resolver answers 0 for a cold cache and for an item vendors won't buy; neither is a price.
+local function vendorSellPrice(itemID)
+    local copper = HDG.ItemNameResolver:GetSellPrice(itemID)
+    if copper > 0 then return copper end
+    return nil  -- exception(nullable): cold item cache, or no vendor sell price
+end
+
+-- An item's price via PriceSource (TSM/Auctionator/Direct, then the Vendor:N list in
+-- ReagentsDB). The one place a mat is priced: cost, marginal cost, mat spend and the
+-- shopping list all read the unit _splitReagents stamps from it. nil = unpriced.
+local function marketPrice(itemID)
     local p = HDG.PriceSource:GetItemPrice(itemID)
     if p and p > 0 then return p end
+    return nil  -- exception(nullable): no price source knows this item
+end
+
+-- Sale price: the market first, then the vendor sell floor. nil = unpriced.
+local function resolveSalePrice(itemID)
+    local p = marketPrice(itemID)
+    if p then return p end
     return vendorSellPrice(itemID)
 end
 
--- Material price via PriceSource (no vendor fallback; Vendor:N in ReagentsDB handled by GetItemPrice).
-local function resolveMatPrice(itemID, override)
-    if override and override > 0 then return override end
-    local p = HDG.PriceSource:GetItemPrice(itemID)
-    if p and p > 0 then return p end
-    return 0
-end
-
--- Max crafts by the strictest per-tier lumber cap. `remainingLumber` is a sparse map
--- (missing key = 0 held) -- `t[k] or 0` is the canonical idiom, not a defensive guard.
+-- Max crafts by the strictest per-tier lumber cap. `remainingLumber` holds every
+-- lumber type (BuildPlan's budget is keyed by the same lumber set the scores split
+-- on), so a lumber reagent always has an entry. Reagent quantities are positive
+-- (a DecorDB guarantee test_mogul_plan checks over the shipped file).
 local function lumberCap(score, remainingLumber)
-    if #score.lumberReagents == 0 then return math.huge end
     local cap = math.huge
     for _, lr in ipairs(score.lumberReagents) do
-        if lr.qty > 0 then
-            local have = remainingLumber[lr.id] or 0  -- exception(boundary): sparse map
-            local k = math.floor(have / lr.qty)
-            if k < cap then cap = k end
-        end
+        local k = math.floor(remainingLumber[lr.id] / lr.qty)
+        if k < cap then cap = k end
     end
     return cap
 end
 
 local function deductLumber(score, K, remainingLumber)
     for _, lr in ipairs(score.lumberReagents) do
-        local have = remainingLumber[lr.id] or 0      -- exception(boundary): sparse map
-        remainingLumber[lr.id] = have - K * lr.qty
+        remainingLumber[lr.id] = remainingLumber[lr.id] - K * lr.qty
     end
 end
 
@@ -96,74 +104,71 @@ local function totalLumberRemaining(remainingLumber)
     return sum
 end
 
+-- `remainingMats` is the reagents still held: one entry per non-lumber reagent of
+-- every candidate (BuildPlan's _ownedMats), so a scored mat always has one.
 local function craftableWithOwned(score, remainingMats)
-    if #score.nonLumberMats == 0 then return math.huge end
     local cap = math.huge
     for _, m in ipairs(score.nonLumberMats) do
-        if m.qty > 0 then
-            local owned = remainingMats[m.id] or 0  -- exception(boundary): sparse map
-            local k = math.floor(owned / m.qty)
-            if k < cap then cap = k end
-        end
+        local k = math.floor(remainingMats[m.id] / m.qty)
+        if k < cap then cap = k end
     end
     return cap
 end
 
-local function marginalMatCost(score, remainingMats, matPrices)
-    local cost = 0
+-- What the mats still to buy cost: the priced ones' sum, and whether every one has
+-- a price. When one has none the sum is a floor (a price is never below 0).
+local function marginalMatCost(score, remainingMats)
+    local cost, allPriced = 0, true
     for _, m in ipairs(score.nonLumberMats) do
-        local owned = remainingMats[m.id] or 0      -- exception(boundary): sparse map
-        local needToBuy = m.qty - owned
-        if needToBuy > 0 then
-            cost = cost + needToBuy * (matPrices[m.id] or 0)
+        local needToBuy = m.qty - remainingMats[m.id]
+        if needToBuy > 0 and m.unit then
+            cost = cost + needToBuy * m.unit
+        elseif needToBuy > 0 then
+            allPriced = false
         end
     end
-    return cost
+    return cost, allPriced
 end
 
 -- ===== ScoreRecipe ==========================================================
 -- Split slots into lumber/non-lumber; compute mat cost + ranking fields.
 -- Lumberless recipes: lumberCost=0 (callers filter; Mogul is the lumber optimizer).
 
-function Mogul:ScoreRecipe(recipe, ctx)
-    if not (recipe and recipe.reagents) then return nil end
-    local lumberSet = ctx.lumberSet or lumberSetFromConstants()
-    local matPrices = ctx.matPrices or {}
-    local salePrices = ctx.salePrices or {}
-
-    local lumberCost = 0
-    local bindingLumberQty = 0
-    local lumberReagents = {}
-    local nonLumberMatCost = 0
-    local nonLumberMats = {}
-
-    -- reagents = { [itemID] = { name, qty } } -- pairs, not ipairs.
+-- reagents = { [itemID] = { name, qty } } -- pairs, not ipairs. Each mat carries
+-- its unit price (nil = unpriced); matCost is nil when any mat is unpriced.
+local function _splitReagents(recipe, lumberSet)
+    local split = { lumberCost = 0, bindingLumberQty = 0, lumberReagents = {},
+                    matCost = 0, mats = {} }
     for itemID, info in pairs(recipe.reagents) do
-        local qty = info.qty or 0   -- migration (defensive against bad recipe data)
-        if qty > 0 then
-            if lumberSet[itemID] then
-                lumberCost = lumberCost + qty
-                if qty > bindingLumberQty then bindingLumberQty = qty end
-                lumberReagents[#lumberReagents + 1] = { id = itemID, qty = qty, name = info.name }
-            else
-                nonLumberMats[#nonLumberMats + 1] = { id = itemID, qty = qty, name = info.name }
-                local price = resolveMatPrice(itemID, matPrices[itemID])
-                nonLumberMatCost = nonLumberMatCost + price * qty
-            end
+        local qty = info.qty
+        if lumberSet[itemID] then
+            split.lumberCost = split.lumberCost + qty
+            if qty > split.bindingLumberQty then split.bindingLumberQty = qty end
+            split.lumberReagents[#split.lumberReagents + 1] = { id = itemID, qty = qty, name = info.name }
+        else
+            local unit = marketPrice(itemID)
+            split.mats[#split.mats + 1] = { id = itemID, qty = qty, name = info.name, unit = unit }
+            split.matCost = addKnown(split.matCost, unit and unit * qty)
         end
     end
+    return split
+end
 
-    local salePrice = resolveSalePrice(recipe.itemID, salePrices[recipe.itemID])
+-- recipe: a DecorDB entry (Candidates hands over only those); ctx.lumberSet: the
+-- lumber IDs BuildPlan budgeted.
+function Mogul:ScoreRecipe(recipe, ctx)
+    local split = _splitReagents(recipe, ctx.lumberSet)
+    local salePrice = resolveSalePrice(recipe.itemID)
     return {
         recipe            = recipe,
-        lumberCost        = lumberCost,
-        bindingLumberQty  = bindingLumberQty,
-        lumberReagents    = lumberReagents,
-        nonLumberMatCost  = nonLumberMatCost,
-        nonLumberMats     = nonLumberMats,
+        lumberCost        = split.lumberCost,
+        bindingLumberQty  = split.bindingLumberQty,
+        lumberReagents    = split.lumberReagents,
+        nonLumberMatCost  = split.matCost,
+        nonLumberMats     = split.mats,
         salePrice         = salePrice,
         revenuePerCraft   = salePrice,
-        netProfitPerCraft = salePrice - nonLumberMatCost,
+        netProfitPerCraft = netOf(salePrice, split.matCost),
     }
 end
 
@@ -177,36 +182,56 @@ end
 -- K=3 means 10x-lumber needs ~1000x more profit (K=1.5 was too gentle).
 local FRUGAL_K = 3
 
--- Per-lumber score for candidate s. nil = disqualified (cap reached, no budget, effProfit <= 0).
+-- What one more craft earns under the optimizer setting, and whether that is known.
+-- Lumber only: the sale. Lumber plus mats: the sale less the mats still to buy.
+-- When one of those has no price the net is unknown: the recipe is still planned,
+-- ranked by its sale (what is known) after every known net -- never as 0, never as
+-- best (owner ruling 2026-10-31). nil = never planned: no sale price, or a loss
+-- (known, or certain because the priced mats alone eat the sale).
+local function _rankValue(s, planner)
+    if s.salePrice == nil then return nil end  -- exception(nullable): no sale price, a runner-up
+    if planner.optimizeBy == "lumberOnly" then return s.salePrice, true end
+    local cost, allPriced = marginalMatCost(s, planner.remainingMats)
+    if s.salePrice - cost <= 0 then return nil end
+    if allPriced then return s.salePrice - cost, true end
+    return s.salePrice, false
+end
+
+-- Per-lumber score for candidate s, and whether its net is known. nil =
+-- disqualified (cap reached, no budget, never planned per _rankValue).
 local function _scoreCandidate(s, planner)
-    local already = planner.craftedSoFar[s.recipe.itemID] or 0
+    local already = planner.craftedSoFar[s.recipe.itemID] or 0  -- exception(nullable): sparse craft count, a miss = none yet
     if planner.siMode == "cap" and already >= planner.siCap then return nil end
     if lumberCap(s, planner.remainingLumber) < 1 then return nil end
 
-    local marginal = marginalMatCost(s, planner.remainingMats, planner.matPrices)
-    local effProfit = (planner.optimizeBy == "lumberOnly")
-        and s.salePrice
-        or  (s.salePrice - marginal)
-    if effProfit <= 0 then return nil end
+    local value, known = _rankValue(s, planner)
+    if value == nil then return nil end
 
     local lumberQty = math.max(1, s.bindingLumberQty)
     local divisor   = planner.frugal and (lumberQty ^ FRUGAL_K) or lumberQty
-    local perLumber = effProfit / divisor
+    local perLumber = value / divisor
     -- Smooth mode: discount by (1-decay)^already so each successive craft
     -- of the same recipe scores lower in the ranking.
     if planner.siMode == "smooth" and planner.siDecay > 0 then
         perLumber = perLumber * ((1 - planner.siDecay) ^ already)
     end
-    return perLumber
+    return perLumber, known
 end
 
--- Return the highest-scoring candidate, or nil when nothing beats -inf.
+-- A known net beats an unknown one whatever the scores; within a tier the higher
+-- score wins, and a tie keeps the earlier (lower itemID) candidate.
+local function _beats(score, known, bestScore, bestKnown)
+    if known ~= bestKnown then return known end
+    return score > bestScore
+end
+
+-- Return the highest-scoring candidate, or nil when none qualifies.
 local function _pickBestCandidate(planner)
-    local bestScore, best = -math.huge, nil
+    local best, bestScore, bestKnown = nil, -math.huge, false
     for _, s in ipairs(planner.scored) do
-        local perLumber = _scoreCandidate(s, planner)
-        if perLumber and perLumber > bestScore then
-            bestScore, best = perLumber, s
+        local perLumber, known = _scoreCandidate(s, planner)
+        if perLumber and _beats(perLumber, known, bestScore, bestKnown) then
+            best, bestScore, bestKnown = s, perLumber, known
         end
     end
     return best
@@ -218,7 +243,7 @@ local function _resolveCraftCount(best, planner)
     local lc = lumberCap(best, planner.remainingLumber)
     local K  = math.min(math.max(craftWithOwned, 1), lc)
     if planner.siMode == "cap" then
-        local already  = planner.craftedSoFar[best.recipe.itemID] or 0
+        local already  = planner.craftedSoFar[best.recipe.itemID] or 0  -- exception(nullable): sparse craft count, a miss = none yet
         local headroom = planner.siCap - already
         if headroom < K then K = headroom end
     end
@@ -227,132 +252,178 @@ local function _resolveCraftCount(best, planner)
     return K
 end
 
--- Deduct K crafts' non-lumber mats from owned stock; track buys for shortfall.
-local function _applyMatPurchase(best, K, planner)
+-- One shopping line per bought mat, priced at the unit its score carries (the same
+-- price the cost and the ranking used). An unpriced buy makes the spend unknown.
+local function _recordBuy(ledger, m, buy)
+    local line = ledger.bought[m.id]
+    if not line then
+        line = { id = m.id, qty = 0, unitPrice = m.unit }
+        ledger.bought[m.id] = line
+    end
+    line.qty = line.qty + buy
+    ledger.actualMatSpend = addKnown(ledger.actualMatSpend, m.unit and buy * m.unit)
+end
+
+-- Take K crafts' non-lumber mats from the reagents held first; buy only the shortfall.
+local function _applyMatPurchase(best, K, ledger)
     for _, m in ipairs(best.nonLumberMats) do
         local need = K * m.qty
-        local owned = planner.remainingMats[m.id] or 0  -- exception(boundary): sparse map
+        local owned = ledger.remainingMats[m.id]
         local fromOwned = math.min(owned, need)
-        planner.remainingMats[m.id] = owned - fromOwned
+        ledger.remainingMats[m.id] = owned - fromOwned
         local buy = need - fromOwned
-        if buy > 0 then
-            planner.matsBoughtPerID[m.id] = (planner.matsBoughtPerID[m.id] or 0) + buy
-            planner.actualMatSpend = planner.actualMatSpend
-                + buy * (planner.matPrices[m.id] or 0)
-        end
+        if buy > 0 then _recordBuy(ledger, m, buy) end
     end
 end
 
 -- Merge K crafts of `best` into rows; same recipe coalesces (summed crafts).
-local function _mergeIntoPlan(best, K, planner)
+local function _mergeIntoPlan(best, K, ledger)
     local itemID = best.recipe.itemID
-    if planner.merged[itemID] then
-        planner.rows[planner.merged[itemID]].crafts =
-            planner.rows[planner.merged[itemID]].crafts + K
+    if ledger.merged[itemID] then
+        ledger.rows[ledger.merged[itemID]].crafts =
+            ledger.rows[ledger.merged[itemID]].crafts + K
     else
-        planner.rows[#planner.rows + 1] = { recipe = best.recipe, crafts = K, score = best }
-        planner.merged[itemID] = #planner.rows
+        ledger.rows[#ledger.rows + 1] = { recipe = best.recipe, crafts = K, score = best }
+        ledger.merged[itemID] = #ledger.rows
     end
-    planner.craftedSoFar[itemID] = (planner.craftedSoFar[itemID] or 0) + K
+    ledger.craftedSoFar[itemID] = (ledger.craftedSoFar[itemID] or 0) + K  -- exception(nullable): sparse craft count, a miss = none yet
+end
+
+-- Commit K crafts of s, the one path both planners take: the lumber comes off the
+-- budget, the mats it lacks are bought, the row is merged.
+local function _commitCrafts(s, K, ledger)
+    deductLumber(s, K, ledger.remainingLumber)
+    _applyMatPurchase(s, K, ledger)
+    _mergeIntoPlan(s, K, ledger)
+end
+
+-- The candidates arrive in table order (the known-recipe set is a hash), and the
+-- planners break ties by list position, so they sort first: the same bags give the
+-- same plan. itemID is the last key: unique, always present (a captured recipe can
+-- lack a name) and the same in every locale.
+local function _byItemID(a, b) return a.recipe.itemID < b.recipe.itemID end
+
+-- Score every candidate; only lumber recipes enter the plan.
+local function _scoreLumberRecipes(candidates, lumberSet)
+    local scored = {}
+    for _, recipe in ipairs(candidates) do
+        local s = Mogul:ScoreRecipe(recipe, { lumberSet = lumberSet })
+        if s.lumberCost > 0 then scored[#scored + 1] = s end
+    end
+    table.sort(scored, _byItemID)
+    return scored
+end
+
+-- What both planners fill: the lumber and reagents left, the rows and the mats
+-- bought. Crafts use the reagents held first, so the shopping list (and the spend)
+-- is only the shortfall.
+local function _newLedger(opts)
+    return {
+        remainingLumber = copyTable(opts.lumberBudgets),
+        remainingMats   = copyTable(opts.ownedMats),      -- [itemID] = still held
+        bought          = {},                             -- [itemID] = shopping line
+        actualMatSpend  = 0,
+        rows            = {},
+        merged          = {},                             -- [itemID] = index into rows
+        craftedSoFar    = {},                             -- [itemID] = total crafts (cap/smooth tracking)
+    }
+end
+
+-- Profit planner: the ledger plus the candidates and the optimizer settings, all
+-- from session.ui.mogul (supplyImpact's mode/smoothPct/capN always hold values:
+-- the store seeds them and the editbox commits only a parsed number).
+local function _newPlanner(opts, scored)
+    local si = opts.supplyImpact
+    local planner = _newLedger(opts)
+    planner.scored     = scored
+    planner.optimizeBy = opts.optimizeBy
+    planner.frugal     = opts.frugal
+    planner.siMode     = si.mode
+    planner.siDecay    = si.smoothPct / 100
+    planner.siCap      = si.capN
+    return planner
+end
+
+-- Revenue is each planned craft at its sale price. Profit mode never plans an
+-- unpriced sale, so there it is always known; collection mode plans by appearance,
+-- and one unpriced decor makes its revenue unknown. The net is as known as both.
+local function _planTotals(ledger, initialTotal)
+    local revenue, crafts = 0, 0
+    for _, row in ipairs(ledger.rows) do
+        local sale = row.score.salePrice
+        revenue = addKnown(revenue, sale and row.crafts * sale)
+        crafts  = crafts + row.crafts
+    end
+    return {
+        revenue      = revenue,
+        netProfit    = netOf(revenue, ledger.actualMatSpend),
+        lumberUsed   = initialTotal - totalLumberRemaining(ledger.remainingLumber),
+        lumberBudget = initialTotal,
+        crafts       = crafts,
+        matSpend     = ledger.actualMatSpend,
+    }
+end
+
+-- Dearest first; an unpriced line can't claim a place by cost, so it sorts last.
+-- Ties (and unpriced lines) by itemID, so the order is the same every run.
+local function _byTotalCostDesc(a, b)
+    if a.totalCost == b.totalCost then return a.id < b.id end
+    if a.totalCost == nil or b.totalCost == nil then return b.totalCost == nil end
+    return a.totalCost > b.totalCost
+end
+
+local function _shoppingList(ledger)
+    local list = {}
+    for _, line in pairs(ledger.bought) do
+        line.totalCost = line.unitPrice and line.qty * line.unitPrice
+        list[#list + 1] = line
+    end
+    table.sort(list, _byTotalCostDesc)
+    return list
+end
+
+local function _byRevenueDesc(a, b)
+    local ra, rb = a.crafts * a.score.salePrice, b.crafts * b.score.salePrice
+    if ra == rb then return a.recipe.itemID < b.recipe.itemID end
+    return ra > rb
 end
 
 local function BuildProfitPlan(opts)
-    local lumberBudgets = opts.lumberBudgets or {}
-    local candidates    = opts.candidates    or {}
-    local ownedMats     = opts.ownedMats     or {}
-    local matPrices     = opts.matPrices     or {}
-    local lumberSet     = opts.lumberSet     or lumberSetFromConstants()
-    local salePrices    = opts.salePrices    or {}
-
-    -- Supply Impact settings (defaults = "off" / 7% / cap=10); fields optional.
-    local si = opts.supplyImpact or {}                    -- exception(boundary): config defaults
-
-    local scored = {}
-    for _, recipe in ipairs(candidates) do
-        local s = Mogul:ScoreRecipe(recipe, {
-            lumberSet = lumberSet, matPrices = matPrices, salePrices = salePrices
-        })
-        if s and s.lumberCost > 0 then scored[#scored + 1] = s end
-    end
-
-    local remainingLumber = copyTable(lumberBudgets)
-    local initialTotal    = totalLumberRemaining(remainingLumber)
-
-    -- Planner state: shared across iteration helpers; mutated by _applyMatPurchase + _mergeIntoPlan.
-    local planner = {
-        scored          = scored,
-        remainingLumber = remainingLumber,
-        remainingMats   = copyTable(ownedMats),
-        matPrices       = matPrices,
-        matsBoughtPerID = {},
-        actualMatSpend  = 0,
-        rows            = {},
-        merged          = {},
-        craftedSoFar    = {},                             -- [itemID] = total crafts (cap/smooth tracking)
-        optimizeBy      = opts.optimizeBy or "lumberOnly",
-        frugal          = opts.frugal == true,
-        siMode          = si.mode      or "off",  -- exception(optional): smoothing config field default
-        siDecay         = (si.smoothPct or 7) / 100,  -- exception(optional): smoothing config field default
-        siCap           = si.capN      or 10,  -- exception(optional): smoothing config field default
-    }
+    local planner = _newPlanner(opts, _scoreLumberRecipes(opts.candidates, opts.lumberSet))
+    local initialTotal = totalLumberRemaining(planner.remainingLumber)
 
     while true do
         local best = _pickBestCandidate(planner)
         if not best then break end
         local K = _resolveCraftCount(best, planner)
         if not K then break end
-        deductLumber(best, K, planner.remainingLumber)
-        _applyMatPurchase(best, K, planner)
-        _mergeIntoPlan(best, K, planner)
+        _commitCrafts(best, K, planner)
     end
 
-    -- Extract post-loop accumulators.
-    local matsBoughtPerID = planner.matsBoughtPerID
-    local actualMatSpend  = planner.actualMatSpend
-    local rows            = planner.rows
-
-    local totalRevenue, totalCrafts = 0, 0
-    for _, row in ipairs(rows) do
-        totalRevenue = totalRevenue + row.crafts * row.score.salePrice
-        totalCrafts  = totalCrafts + row.crafts
-    end
-    local lumberRemaining = totalLumberRemaining(remainingLumber)
-    local totals = {
-        revenue      = totalRevenue,
-        netProfit    = totalRevenue - actualMatSpend,
-        lumberUsed   = initialTotal - lumberRemaining,
-        lumberBudget = initialTotal,
-        crafts       = totalCrafts,
-        matSpend     = actualMatSpend,
-    }
-    table.sort(rows, function(a, b)
-        return a.crafts * a.score.salePrice > b.crafts * b.score.salePrice
-    end)
-
-    local shoppingList = {}
-    for matID, qty in pairs(matsBoughtPerID) do
-        local unit = resolveMatPrice(matID, matPrices[matID])
-        shoppingList[#shoppingList + 1] = {
-            id = matID, qty = qty,
-            unitPrice = unit,
-            totalCost = qty * unit,
-        }
-    end
-    table.sort(shoppingList, function(a, b) return a.totalCost > b.totalCost end)
-
-    return { rows = rows, totals = totals, shoppingList = shoppingList, candidates = scored }
+    local totals = _planTotals(planner, initialTotal)
+    table.sort(planner.rows, _byRevenueDesc)
+    return { rows = planner.rows, totals = totals, shoppingList = _shoppingList(planner),
+             candidates = planner.scored }
 end
 
 -- ===== BuildCollectionPlan ==================================================
 -- Prioritize uncollected decor crafts. Round-robin within tier (1 craft per pick, re-evaluate)
 -- so the player discovers more unique items rather than maxing one recipe.
 
+-- Collection order: cheapest lumber first, so a tight budget reaches the most new
+-- appearances (one craft each, smallest costs first, fits the most recipes), then
+-- itemID (see _byItemID).
+local function _byLumberCostThenItemID(a, b)
+    if a.lumberCost == b.lumberCost then return a.recipe.itemID < b.recipe.itemID end
+    return a.lumberCost < b.lumberCost
+end
+
 -- Score uncollected recipes only. Skips zero-lumber + already-owned.
 local function _scoreUncollectedRecipes(candidates, lumberSet, byItemID)
     local scored = {}
     for _, recipe in ipairs(candidates) do
         local s = Mogul:ScoreRecipe(recipe, { lumberSet = lumberSet })
-        if s and s.lumberCost > 0 then
+        if s.lumberCost > 0 then
             local obsRow = byItemID[recipe.itemID]
             if not HDG.HousingCatalogObserver:IsOwned(obsRow) then
                 s.uncollected = true
@@ -360,196 +431,114 @@ local function _scoreUncollectedRecipes(candidates, lumberSet, byItemID)
             end
         end
     end
+    table.sort(scored, _byLumberCostThenItemID)
     return scored
 end
 
--- Allocate ONE craft if affordable; merge repeats by itemID. Returns true on success.
-local function _tryCraftOne(s, rows, merged, remainingLumber)
-    if lumberCap(s, remainingLumber) < 1 then return false end
-    deductLumber(s, 1, remainingLumber)
-    local idx = merged[s.recipe.itemID]
-    if idx then
-        rows[idx].crafts = rows[idx].crafts + 1
-    else
-        rows[#rows + 1] = { recipe = s.recipe, crafts = 1, score = s }
-        merged[s.recipe.itemID] = #rows
-    end
-    return true
-end
-
--- Round-robin: one craft per affordable recipe per pass (scored order). Stops when none can craft.
-local function _allocateRoundRobin(scored, remainingLumber)
-    local rows, merged = {}, {}
+-- Round-robin: one craft per affordable recipe per pass (scored order), each one
+-- committed like a profit craft (lumber, mats bought, row). Stops when none fits.
+local function _allocateRoundRobin(scored, ledger)
     while true do
         local anyCraft = false
         for _, s in ipairs(scored) do
-            if _tryCraftOne(s, rows, merged, remainingLumber) then anyCraft = true end
+            if lumberCap(s, ledger.remainingLumber) >= 1 then
+                _commitCrafts(s, 1, ledger)
+                anyCraft = true
+            end
         end
         if not anyCraft then break end
     end
-    return rows
 end
 
--- Aggregate plan totals from the allocated rows.
-local function _summarizePlan(rows, initialTotal, remainingLumber)
-    local totalCrafts, uniqueDiscoveries = 0, 0
-    for _, row in ipairs(rows) do
-        totalCrafts = totalCrafts + row.crafts
-        uniqueDiscoveries = uniqueDiscoveries + 1
-    end
-    return {
-        revenue           = 0,
-        netProfit         = 0,
-        lumberUsed        = initialTotal - totalLumberRemaining(remainingLumber),
-        lumberBudget      = initialTotal,
-        crafts            = totalCrafts,
-        matSpend          = 0,
-        uniqueDiscoveries = uniqueDiscoveries,
-    }
+-- Display order: by name; a recipe captured without one sorts after the named ones,
+-- and equal names by itemID.
+local function _byRecipeName(a, b)
+    local an, bn = a.recipe.name, b.recipe.name
+    if an == bn then return a.recipe.itemID < b.recipe.itemID end
+    if an == nil or bn == nil then return bn == nil end  -- exception(nullable): a capture saved without a name
+    return an < bn
 end
 
 local function BuildCollectionPlan(opts)
-    local lumberBudgets = opts.lumberBudgets or {}
-    local candidates    = opts.candidates    or {}
-    local lumberSet     = opts.lumberSet     or lumberSetFromConstants()
-    -- ownedDecorIDs now via R:IsOwned (canonical helper).
-    local byItemID      = HDG.HousingCatalogObserver.byItemID
+    local scored = _scoreUncollectedRecipes(opts.candidates, opts.lumberSet,
+        HDG.HousingCatalogObserver.byItemID)
+    local ledger = _newLedger(opts)
+    local initialTotal = totalLumberRemaining(ledger.remainingLumber)
+    _allocateRoundRobin(scored, ledger)
 
-    local scored          = _scoreUncollectedRecipes(candidates, lumberSet, byItemID)
-    local remainingLumber = copyTable(lumberBudgets)
-    local initialTotal    = totalLumberRemaining(remainingLumber)
-    local rows            = _allocateRoundRobin(scored, remainingLumber)
-    local totals          = _summarizePlan(rows, initialTotal, remainingLumber)
-
-    table.sort(rows, function(a, b) return a.recipe.name < b.recipe.name end)
-    return { rows = rows, totals = totals, shoppingList = {}, candidates = scored }
+    local totals = _planTotals(ledger, initialTotal)
+    totals.uniqueDiscoveries = #ledger.rows
+    table.sort(ledger.rows, _byRecipeName)
+    return { rows = ledger.rows, totals = totals, shoppingList = _shoppingList(ledger),
+             candidates = scored }
 end
-
--- ===== DecorDB reverse indexes =============================================
--- byOutputItemID: output itemID -> decor entry (char-view knowledge join).
--- bySpellID: for alt-knowledge join (char.professions[P].knownRecipes keyed by spellID).
-local _decorByOutputItemID
-local function decorByOutputItemID()
-    if _decorByOutputItemID then return _decorByOutputItemID end
-    _decorByOutputItemID = {}
-    local db = HDG.StaticData.Recipes:GetAll()
-    if type(db) ~= "table" then return _decorByOutputItemID end
-    for _, entry in pairs(db) do
-        if entry.itemID then _decorByOutputItemID[entry.itemID] = entry end
-    end
-    return _decorByOutputItemID
-end
--- Public accessor: lazy O(1) itemID -> decor-entry (ADR-003a carve-out; called from goblin.* selectors).
-function Mogul:GetDecorByOutputItemID() return decorByOutputItemID() end
 
 -- ===== Candidate builders ===================================================
 -- char: the logged-in character's known recipes. account: those plus every non-hidden
--- alt's. Both come from recipes.knowledge (mine / alts sets of crafted itemIDs); mogul.plan
--- declares the call.
+-- alt's. Both come from recipes.knowledge (mine / alts sets of crafted itemIDs, the one
+-- place "known" is decided). Each recipe is read from recipes.db, as Materials reads it:
+-- the shipped seed with the player's scanned reagents laid over it. knowledge derives
+-- its sets from recipes.db, so every known itemID has an entry. mogul.plan declares
+-- both calls.
 local NOTHING_SKIPPED = {}
 
--- Append the decor entry for each known itemID not in `skip` (the alts pass skips mine).
-local function _appendCandidates(out, knownSet, idx, skip)
+-- Append the recipe for each known itemID not in `skip` (the alts pass skips mine).
+local function _appendCandidates(out, knownSet, recipes, skip)
     for itemID in pairs(knownSet) do
-        local decor = idx[itemID]
-        if decor and decor.spellID and decor.reagents and not skip[itemID] then
-            out[#out + 1] = decor
-        end
+        if not skip[itemID] then out[#out + 1] = recipes[itemID] end
     end
 end
 
+-- viewMode: "char" | "account" (session.ui.mogul.viewMode). Unordered: the planners sort.
 function Mogul:Candidates(viewMode)
-    viewMode = viewMode or "char"
-    local knowledge = HDG.Selectors:Call("recipes.knowledge", HDG.Store:GetState())
-    local idx = decorByOutputItemID()
+    local state     = HDG.Store:GetState()
+    local knowledge = HDG.Selectors:Call("recipes.knowledge", state)
+    local recipes   = HDG.Selectors:Call("recipes.db", state)
     local out = {}
-    _appendCandidates(out, knowledge.mine, idx, NOTHING_SKIPPED)
+    _appendCandidates(out, knowledge.mine, recipes, NOTHING_SKIPPED)
     if viewMode == "account" then
-        _appendCandidates(out, knowledge.alts, idx, knowledge.mine)
+        _appendCandidates(out, knowledge.alts, recipes, knowledge.mine)
     end
     return out
 end
 
--- BestAltForSpellID: first non-hidden alt who knows the recipe. Nil if none.
--- _charKnowsRecipe: true if any of this char's professions lists spellID.
-local function _charKnowsRecipe(char, spellID)
-    if type(char.professions) ~= "table" then return false end
-    for _, prof in pairs(char.professions) do
-        if prof.knownRecipes and prof.knownRecipes[spellID] then
-            return true
-        end
-    end
-    return false
-end
-
-function Mogul:BestAltForSpellID(spellID)
-    local state = HDG.Store:GetState()
-    local chars = state.account.characters
-    local current = HDG.SessionIdentity.GetCharKey(state)
-    for charKey, char in pairs(chars) do
-        if charKey ~= current and not char.hidden and _charKnowsRecipe(char, spellID) then
-            return charKey
-        end
-    end
-    return nil
-end
-
--- All non-current, non-hidden alts who know spellID (sorted display names for tooltip).
-function Mogul:AltsKnowingSpellID(spellID)
-    local state   = HDG.Store:GetState()
-    local current = HDG.SessionIdentity.GetCharKey(state)
-    local names   = {}
-    for charKey, char in pairs(state.account.characters) do
-        if charKey ~= current and not char.hidden and _charKnowsRecipe(char, spellID) then
-            names[#names + 1] = char.name or (charKey:match("^([^%-]+)") or charKey)
-        end
-    end
-    table.sort(names)
-    return names
-end
-
 -- ===== BuildPlan (public dispatch) ==========================================
 
-function Mogul:BuildPlan(opts)
-    opts = opts or {}
-    local mode = opts.mode or "profit"
-    local viewMode = opts.viewMode or "char"
-    if not opts.candidates then
-        opts.candidates = self:Candidates(viewMode)
-    end
+-- Lumber held of every type: bags, bank, reagent bank and warband (GetTotal counts
+-- all four; GetCounts would miss bank-only lumber). One key per lumber type, so the
+-- planners read the budget strictly.
+local function _lumberBudgets(lumberSet)
+    local budgets = {}
+    for itemID in pairs(lumberSet) do budgets[itemID] = HDG.BagObserver:GetTotal(itemID) end
+    return budgets
+end
 
-    -- Default lumber budget: BagObserver:GetTotal covers bag + bank + reagent bank + warband.
-    -- GetCounts() would miss bank-only lumber.
-    if not opts.lumberBudgets then
-        opts.lumberBudgets = {}
-        local lumberSet = lumberSetFromConstants()
-        for itemID, _ in pairs(lumberSet) do
-            opts.lumberBudgets[itemID] = HDG.BagObserver
-                and HDG.BagObserver:GetTotal(itemID) or 0
+-- The reagents held, counted the way Materials counts them (BagObserver:GetCounts:
+-- bags, bank, reagent bank and warband, any quality). One entry per non-lumber
+-- reagent of every candidate, so the planners read it strictly.
+local function _ownedMats(candidates, lumberSet)
+    local counts, owned = HDG.BagObserver:GetCounts(), {}
+    for _, recipe in ipairs(candidates) do
+        for itemID in pairs(recipe.reagents) do
+            if not lumberSet[itemID] then owned[itemID] = counts[itemID] end
         end
     end
+    return owned
+end
 
-    if not opts.ownedDecorIDs then
-        local state = HDG.Store:GetState()
-        opts.ownedDecorIDs = state.account.collection.ownedDecorIDs or {}
-    end
-    -- Supply Impact: read from state if not provided by caller.
-    if not opts.supplyImpact then
-        local state = HDG.Store:GetState()
-        opts.supplyImpact = state.session.ui.mogul.supplyImpact
-            or { mode = "off", smoothPct = 7, capN = 10 }
-    end
+local PLANNERS = { profit = BuildProfitPlan, collection = BuildCollectionPlan }
 
-    -- Frugal: read from state if caller didn't pass it. Default false.
-    if opts.frugal == nil then
-        local state = HDG.Store:GetState()
-        opts.frugal = state.session.ui.mogul.frugal == true
-    end
-
-    if mode == "collection" then
-        return BuildCollectionPlan(opts)
-    end
-    return BuildProfitPlan(opts)
+-- opts: the mogul.plan selector's settings from session.ui.mogul -- mode, viewMode,
+-- optimizeBy, frugal, supplyImpact. The known recipes, the lumber and the reagents
+-- held are read from live state here. A mode with no planner is a bug: fail loud.
+function Mogul:BuildPlan(opts)
+    local planner = PLANNERS[opts.mode]
+    if not planner then error("Mogul:BuildPlan: no planner for mode " .. tostring(opts.mode), 2) end
+    opts.lumberSet     = lumberSetFromConstants()
+    opts.lumberBudgets = _lumberBudgets(opts.lumberSet)
+    opts.candidates    = self:Candidates(opts.viewMode)
+    opts.ownedMats     = _ownedMats(opts.candidates, opts.lumberSet)
+    return planner(opts)
 end
 
 -- ===== Module registration ===================================================

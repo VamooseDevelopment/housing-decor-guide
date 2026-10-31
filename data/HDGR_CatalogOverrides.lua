@@ -118,7 +118,7 @@ HDGR_CatalogOverrides = {
     -- Wooden Mug
     [239162] = { sources = { { type = 5, name = 'Peter', detail = 'Lunarfall', cost = { gold = 500000, currencies = { { id = 824, amount = 100 } } } }, { type = 5, name = 'Vora Strongarm', detail = 'Frostwall' } } },
     -- Elodor Barrel
-    [241043] = { sources = { { type = 2, name = 'Missive: Assault on Shattrath Harbor', detail = 'Tanaan Jungle' } } },
+    [241043] = { sources = { { type = 2, name = 'Missive: Assault on Shattrath Harbor', detail = 'Talador' } } },   -- Shattrath Harbor is in Talador (Wowhead quest text; owner 10-30)
     -- Orcish Lumberjack's Stool
     [244321] = { sources = { { type = 5, name = 'Krixel Pinchwhistle', detail = 'Lunarfall', cost = { currencies = { { id = 824, amount = 100 } } } }, { type = 5, name = 'Ribchewer', detail = 'Frostwall' } } },
     -- Frostwolf Banded Stool
@@ -127,8 +127,9 @@ HDGR_CatalogOverrides = {
     [245259] = { sources = { { type = 2, name = 'Dreamy Inspiration', detail = 'Stormwind City' }, { type = 5, name = 'Second Chair Pawdo', detail = 'Dornogal', cost = { gold = 500000 } } } },
     -- Councilward's Jeweled Goblet
     [245294] = { sources = { { type = 4, name = "Distinguished Actor's Chest", detail = 'Isle of Dorn' } } },
-    -- Very Reliable Undermine Lamppost
-    [245320] = { sources = { { type = 3, name = '10-Job Streak Bonus', detail = 'Undermine' } } },
+    -- Very Reliable Undermine Lamppost (Event, as the master has it -- was typed WQ; the 12.1.5 catalog says
+    -- "Activity: Shipping and Handling // Job: Legally Mandated Break")
+    [245320] = { sources = { { type = 14, name = '10-Job Streak Bonus', detail = 'Undermine' } } },
     -- Draenic Storage Chest
     [245424] = { sources = { { type = 5, name = 'Maaria', detail = 'Lunarfall', cost = { gold = 5000000, currencies = { { id = 823, amount = 1000 } } } } } },
     -- Draenor Cookpot
@@ -149,8 +150,8 @@ HDGR_CatalogOverrides = {
     [246260] = { sources = { { type = 5, name = '"High Tides" Ren', detail = "Founder's Point", cost = { gold = 1000000 } }, { type = 5, name = 'Gronthul', detail = 'Razorwind Shores' } } },
     -- Square Stormpike Table
     [246424] = { sources = { { type = 5, name = 'Thanthaldis Snowgleam', detail = 'Hillsbrad Foothills' } } },
-    -- Retired Industrial Gnomegrabber
-    [246481] = { sources = { { type = 3, name = 'Self-Assembling Homeware Kit', detail = 'Mechagon' } } },
+    -- Retired Industrial Gnomegrabber (contained in the Homeware Kit, Wowhead 10-26 -- was typed WQ)
+    [246481] = { sources = { { type = 4, name = 'Self-Assembling Homeware Kit', detail = 'Mechagon' } } },
     -- Mechanical Gnomish Lamppost (Junkyard Tinkering -- Pascal-K1N6 in Mechagon, NOT the Endeavor Pascal; catalog ships these as "Profession: Junkyard Tinkering")
     [246482] = { sources = { { type = 5, name = 'Pascal-K1N6', detail = 'Mechagon' } } },
     -- Mechagnome Sustenance Distributor (Junkyard Tinkering)
@@ -163,12 +164,12 @@ HDGR_CatalogOverrides = {
     [246596] = { sources = { { type = 5, name = 'Pascal-K1N6', detail = 'Mechagon' } } },
     -- Perpetual Motion Crate (Junkyard Tinkering)
     [246597] = { sources = { { type = 5, name = 'Pascal-K1N6', detail = 'Mechagon' } } },
-    -- Self-Sealing Stembarrel
-    [246599] = { sources = { { type = 3, name = 'Self-Assembling Homeware Kit', detail = 'Mechagon' } } },
-    -- Small Mechanical Crate
-    [246600] = { sources = { { type = 3, name = 'Self-Assembling Homeware Kit', detail = 'Mechagon' } } },
-    -- Small H.O.M.E. Cog
-    [246602] = { sources = { { type = 3, name = 'Self-Assembling Homeware Kit', detail = 'Mechagon' } } },
+    -- Self-Sealing Stembarrel (contained in the Homeware Kit, Wowhead 10-26 -- was typed WQ)
+    [246599] = { sources = { { type = 4, name = 'Self-Assembling Homeware Kit', detail = 'Mechagon' } } },
+    -- Small Mechanical Crate (contained in the Homeware Kit, Wowhead 10-26 -- was typed WQ)
+    [246600] = { sources = { { type = 4, name = 'Self-Assembling Homeware Kit', detail = 'Mechagon' } } },
+    -- Small H.O.M.E. Cog (contained in the Homeware Kit, Wowhead 10-26 -- was typed WQ)
+    [246602] = { sources = { { type = 4, name = 'Self-Assembling Homeware Kit', detail = 'Mechagon' } } },
     -- Mechagon Armory Rack (Junkyard Tinkering)
     [246606] = { sources = { { type = 5, name = 'Pascal-K1N6', detail = 'Mechagon' } } },
     -- "Shu'halo Perspective" Painting (Cravitz Lorent in the Murder Row dungeon -- catalog-empty, not a catalog vendor). Sargle's Fortunes tracker: HDGR_DecorWidgets / decor.fortune.*
@@ -203,13 +204,13 @@ HDGR_CatalogOverrides = {
     -- Spring Blossom Shelf
     [250798] = { sources = { { type = 12, name = 'In-Game Shop' } } },
     -- Shadowmoon Open-Air Shed
-    [251329] = { sources = { { type = 2, name = "Missive: Assault on Socrethar's Rise", detail = 'Tanaan Jungle' } } },
+    [251329] = { sources = { { type = 2, name = "Missive: Assault on Socrethar's Rise", detail = 'Shadowmoon Valley' } } },   -- Socrethar's Rise is in Shadowmoon Valley (Wowhead quest text; owner 10-30)
     -- Draenic Ottoman
     [251331] = { sources = { { type = 4, name = "Teron'gor", detail = 'Auchindoun' } } },
     -- Telredor Recliner
     [251544] = { sources = { { type = 5, name = 'Maaria', detail = 'Lunarfall', cost = { gold = 5000000, currencies = { { id = 823, amount = 1000 } } } } } },
     -- Draenei Farmer's Trellis
-    [251547] = { sources = { { type = 2, name = 'Assault on the Heart of Shattrath', detail = 'Tanaan Jungle' } } },
+    [251547] = { sources = { { type = 2, name = 'Assault on the Heart of Shattrath', detail = 'Talador' } } },   -- the game's catalog: "Garrison Quest: ... Zone: Talador" (owner shot 10-29)
     -- Lush Garden Fungal Basin -- Battle.net Shop only (250 Hearthsteel / Lush Garden
     -- Decor Pack). Catalog ships a spurious "Quest: Learn From the Best" line (players
     -- confirm that quest grants no decor); quest = false suppresses the bad [QUEST] chip.
@@ -386,4 +387,7 @@ HDGR_CatalogOverrides = {
     [272445] = { sources = { { type = 5, name = 'Disguised Decor Duel Vendor', detail = 'Silvermoon City', cost = { currencies = { { id = 3393, amount = 10 } } } } } },
     -- Large Decorative Dornogal Opal
     [272446] = { sources = { { type = 5, name = 'Disguised Decor Duel Vendor', detail = 'Silvermoon City', cost = { currencies = { { id = 3393, amount = 10 } } } } } },
+    -- Eredath Worktable: the catalog's only line is "Gather: Argus", which reads as Unknown. It comes
+    -- from the treasure chests across Argus's three zones (2026-10-26).
+    [282164] = { sources = { { type = 9, name = 'Argus treasure chests', detail = 'Legion War Supplies, Ancient Eredar Cache, Eredar War Supplies' } } },
 }

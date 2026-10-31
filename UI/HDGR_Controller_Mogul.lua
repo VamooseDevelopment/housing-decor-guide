@@ -65,17 +65,14 @@ end
 function MogulController:_wireQueueAll(rootFrame)
     HDG.UI.OnClick(rootFrame, "mogulPanel.queueAll", function()
         local plan = HDG.Selectors:Call("mogul.plan", HDG.Store:GetState(), {})  -- exception(false-positive): top-level controller method (not a row factory)
-        if not (plan and plan.rows and #plan.rows > 0) then return end
+        if #plan.rows == 0 then return end   -- the button is disabled then (mogul.queueAllEnabled)
         local A = HDG.Constants.ACTIONS
-        local n = 0
-        for _, row in ipairs(plan.rows) do
-            local r = row.recipe
-            if r and r.itemID and row.crafts > 0 then  -- plan row: crafts is planner-stamped numeric
-                HDG.Store:Dispatch({ type = A.CRAFT_QUEUE_ADD,
-                    payload = { recipeID = r.itemID, itemID = r.itemID, qty = row.crafts, source = "mogul" } })
-                n = n + 1
-            end
+        for _, row in ipairs(plan.rows) do   -- every plan row has its recipe and crafts >= 1
+            local itemID = row.recipe.itemID
+            HDG.Store:Dispatch({ type = A.CRAFT_QUEUE_ADD,
+                payload = { recipeID = itemID, itemID = itemID, qty = row.crafts, source = "mogul" } })
         end
+        local n = #plan.rows
         HDG.Store:Dispatch({ type = A.UI_SET_PERSISTENT, payload = { key = "view", value = "recipes" } })
         HDG.Log:Success("queue", ("Queued %d recipe%s from plan"):format(n, n == 1 and "" or "s"))
     end)
@@ -109,7 +106,7 @@ end
 function MogulController:_wireSendToAH(rootFrame)
     HDG.UI.OnClick(rootFrame, "mogulPanel.sendToAH", function()
         local plan = HDG.Selectors:Call("mogul.plan", HDG.Store:GetState(), {})  -- exception(false-positive): top-level controller method (not a row factory)
-        if not (plan and plan.shoppingList and #plan.shoppingList > 0) then return end
+        if #plan.shoppingList == 0 then return end   -- the button is disabled then (mogul.auctionatorEnabled)
         HDG.UI.SendReagentsToAuctionator("HDG Mogul Reagents", plan.shoppingList)
         HDG.Log:Success("shopping", ("Sent %d reagent%s to Auctionator"):format(
             #plan.shoppingList, #plan.shoppingList == 1 and "" or "s"))
@@ -192,6 +189,10 @@ HDG.Controllers:Register("mogul", MogulController)
 -- Gold formatter (zero shown as "0 <coin>").
 local moneyText = HDG.Format.FormatGoldZero
 
+-- An amount nobody can price paints a loud "?", never "0 <coin>" (a price that looks
+-- real). Shared formatter: the Goblin table, the optimizer rows and the Mogul labels.
+local moneyOrUnknown = HDG.Format.FormatGoldOrUnknown
+
 -- Compact count for the narrow "/Day" column. Spans a huge range: a hot commodity
 -- (~156577/day -> "157k") down to slow decor (0.096/day -> "0.10").
 local function _compactCount(n)
@@ -202,13 +203,24 @@ local function _compactCount(n)
     return string.format("%.2f", n)   -- sub-1/day (slow decor)
 end
 
--- Format "rev / net" gold pair compactly (e.g. "795g / 791g") used in two
--- columns: per-craft (constant per recipe) and total (crafts * per).
+-- A profit or net, signed ("-50 g" for a loss, never "0 g"); "?" when unknown.
+-- Shared formatter: every profit and net cell, the Mogul totals included.
+local signedMoney = HDG.Format.FormatGoldSigned
+
+-- A profit's colour: success for a gain, error for a loss; none at break-even or
+-- when unknown. Applied once over the whole cell (no nested colour codes).
+local function _tintByProfit(text, copper)
+    if copper == nil or copper == 0 then return text end  -- exception(nullable): an unknown net paints plain "?"
+    return HDG.Theme:StateLabel(copper > 0 and "success" or "error", text)
+end
+
+-- Format "rev / net" gold pair compactly (e.g. "795g / +791g") used in two
+-- columns: per-craft (constant per recipe) and total (crafts * per). Either side
+-- can be unknown ("795g / ?" when a mat has no price, "?" with no sale price).
+-- No mats to pay: revenue and net are one amount, shown as the net.
 local function moneyPair(revenue, net)
-    local r = moneyText(revenue or 0)
-    local n = moneyText(net or 0)
-    if (revenue or 0) == (net or 0) then return r end
-    return r .. " / " .. n
+    if revenue == net then return signedMoney(net) end
+    return moneyOrUnknown(revenue) .. " / " .. signedMoney(net)
 end
 
 -- ensureSection: one centered FontString for section headers.
@@ -330,42 +342,23 @@ end
 
 
 -- Name: state-colored + "(alt: Who)" suffix when sourced from an alt.
-local function _paintMogulName(row, ed, state, dim)
+local function _paintMogulName(row, ed, state, altColor)
     local textColor = HDG.Theme:GetTextStateColorToken(state)
     local name = ed.name or "?"
-    if ed.bestAlt then
-        local who = ed.bestAlt:match("^([^%-]+)") or ed.bestAlt
-        name = name .. "  " .. dim .. "(alt: " .. who .. ")|r"
+    if ed.bestAlt then   -- mogul.planRows: the alt's name, from recipes.knowledge
+        name = name .. "  " .. altColor .. "(alt: " .. ed.bestAlt .. ")|r"
     end
     row._nameFs:SetText(textColor .. name .. "|r")
 end
 
--- Profit: success > 0, error < 0. Runners-up show per-craft pair; plan shows +total.
+-- Profit: success > 0, error < 0. Runners-up show the per-craft pair; plan rows the
+-- total pair. The sign is the net's own (a loss reads "-50 g").
 local function _paintMogulProfit(row, ed)
-    local netForColor = ed.isRunnerUp and ed.netPerCraft or ed.netTotal
-    local profitState
-    if netForColor and netForColor > 0 then profitState = "success"
-    elseif netForColor and netForColor < 0 then profitState = "error" end
-    local profitOpen  = profitState
-        and HDG.Theme:GetTextStateColorToken(profitState) or ""
-    local profitClose = profitState and "|r" or ""
     if ed.isRunnerUp then
-        row._profitFs:SetText(profitOpen
-            .. moneyPair(ed.revenuePerCraft, ed.netPerCraft) .. profitClose)
+        row._profitFs:SetText(_tintByProfit(moneyPair(ed.revenuePerCraft, ed.netPerCraft), ed.netPerCraft))
     else
-        row._profitFs:SetText(profitOpen .. "+"
-            .. moneyPair(ed.revenueTotal, ed.netTotal) .. profitClose)
+        row._profitFs:SetText(_tintByProfit(moneyPair(ed.revenueTotal, ed.netTotal), ed.netTotal))
     end
-end
-
--- Dim runners-up to 60% alpha.
-local function _applyMogulRowAlpha(row, ed)
-    local a = ed.isRunnerUp and 0.6 or 1.0
-    for _, fs in ipairs({ row._nameFs, row._craftsFs, row._lumberFs,
-                          row._eachFs, row._profitFs, row._expFs }) do
-        fs:SetAlpha(a)
-    end
-    if row._starTex and row._starTex.SetAlpha then row._starTex:SetAlpha(a) end
 end
 
 -- Plan/runner-up row: star + name + craft/lumber/each + profit + exp.
@@ -384,7 +377,7 @@ local function _paintMogulPlan(row, ed, template)
 
     local state = ed.knownState or HDG.Constants.RECIPE_STATE.UnknownOnAccount
     HDG.UI:PaintCraftStar(row._starTex, state, HDG.Constants.RECIPE_STATE.UnknownOnAccount)
-    _paintMogulName(row, ed, state, dim)
+    _paintMogulName(row, ed, state, primary)   -- which alt knows it is read, not a hint: never dim
 
     if ed.isRunnerUp then
         row._craftsFs:SetText(dim .. "-|r")
@@ -392,11 +385,10 @@ local function _paintMogulPlan(row, ed, template)
         row._craftsFs:SetText(string.format("%s%dx|r", primary, ed.crafts))  -- mogul.planRows stamps crafts (numeric)
     end
     row._lumberFs:SetText(string.format("%s%d|r", heading, ed.lumberPerCraft))  -- mogul.planRows stamps lumberPerCraft (coerced)
-    row._eachFs:SetText(moneyPair(ed.revenuePerCraft, ed.netPerCraft))
+    row._eachFs:SetText(_tintByProfit(moneyPair(ed.revenuePerCraft, ed.netPerCraft), ed.netPerCraft))
 
     _paintMogulProfit(row, ed)
     row._expFs:SetText(ed.expShort or "")
-    _applyMogulRowAlpha(row, ed)
     _applyMogulRowBg(row, ed)  -- Item 14: expansion-tinted row backdrop
 
     local h = template.height   -- may be a function (section vs plan heights)
@@ -560,9 +552,8 @@ HDG.Rows:Register("mogulLumberRow2x", {
     }),
     key     = function(ed)
         if not ed then return "?" end
-        local lid = ed.left and ed.left.id or "?"
-        local rid = ed.right and ed.right.id or "-"
-        return "lum2x:" .. tostring(lid) .. ":" .. tostring(rid)
+        local rid = ed.right and ed.right.id or "-"  -- exception(nullable): the last pair has no right half when the count is odd
+        return "lum2x:" .. tostring(ed.left.id) .. ":" .. tostring(rid)
     end,
 })
 
@@ -608,7 +599,7 @@ end
 local function _paintMogulMatRow(row, ed)
     row._nameFs:SetText(ed.name or "?")
     row._qtyFs:SetText(string.format("0/%d", ed.qty))  -- goblin.materialRows: qty schema-guaranteed
-    row._costFs:SetText(moneyText(ed.totalCost))  -- mogul mat: totalCost = qty*unit (numeric)
+    row._costFs:SetText(moneyOrUnknown(ed.totalCost))  -- mogul mat: qty x unit, nil when unpriced
 end
 
 HDG.Rows:Register("mogulMatRow", {
@@ -688,13 +679,11 @@ end
 -- ===== _goblinRowFactory primitives ==========================================
 -- First-paint: icon + 12 cells. pct cell = anchor; 7 columns chain LEFT, 4 TSM chain RIGHT.
 local function _layoutGoblinRow(row)
-    if row.CreateTexture then  -- exception(false-positive): Frame always has CreateTexture; mock-fidelity guard
-        local icon = row:CreateTexture(nil, "OVERLAY")
-        icon:SetSize(14, 14)
-        icon:SetPoint("LEFT", row, "LEFT", 4, 0)
-        icon:SetTexCoord(unpack(HDG.Constants.ICON_CROP))
-        row._iconTex = icon
-    end
+    local icon = row:CreateTexture(nil, "OVERLAY")
+    icon:SetSize(14, 14)
+    icon:SetPoint("LEFT", row, "LEFT", 4, 0)
+    icon:SetTexCoord(unpack(HDG.Constants.ICON_CROP))
+    row._iconTex = icon
     -- One-time click hook; Configure stamps _currentItemID + _recipeID + _name per paint.
     -- Shift-click queues the recipe (1 per click); a plain click toggles the detail panel.
     row:EnableMouse(true)
@@ -733,11 +722,7 @@ local function _layoutGoblinRow(row)
     row._saleRateFs  = _addRightCell(row, 50, row._tsmPctFs,    4)   -- "Rate" (TSM-gated)
     row._perDayFs    = _addRightCell(row, 50, row._saleRateFs,  4)   -- "/Day" (TSM-gated)
     local name = HDG.UI.RowText(row, "small", "Text")
-    if row._iconTex then
-        name:SetPoint("LEFT", row._iconTex, "RIGHT", 4, 0)
-    else
-        name:SetPoint("LEFT", row, "LEFT", 6, 0)
-    end
+    name:SetPoint("LEFT", row._iconTex, "RIGHT", 4, 0)
     name:SetPoint("RIGHT", row._lumberFs, "LEFT", -8, 0)
     name:SetJustifyH("LEFT")
     name:SetWordWrap(false)
@@ -750,11 +735,10 @@ end
 
 -- Profession icon: SetAtlas resets the Texture path; SetTexCoord is ignored once atlas takes over.
 local function _paintGoblinIcon(row, ed)
-    if not row._iconTex then return end
     local atlas = profAtlasByName(ed.profession)
     if atlas and row._iconTex.SetAtlas then  -- exception(boundary): SetAtlas absent in some Blizzard client builds; fallback to SetTexture
         row._iconTex:SetAtlas(atlas)
-    elseif row._iconTex.SetTexture then  -- exception(false-positive): Texture always has SetTexture; mock-fidelity guard
+    else
         row._iconTex:SetTexture(resolveItemIcon(ed.itemID))
     end
 end
@@ -804,20 +788,9 @@ local function _paintTsmColumns(row, ed)
         and _compactCount(ed.soldPerDay) or "-")
 end
 
--- Profit: success (positive), error (negative), "?" when unpriceable.
+-- Profit: signed, success (gain) or error (loss), "?" when unpriceable.
 local function _paintProfitCell(row, ed)
-    local prof = ed.profit
-    if prof and prof > 0 then
-        row._profitFs:SetText(
-            HDG.Theme:StateLabel("success", "+" .. moneyText(prof)))
-    elseif prof and prof < 0 then
-        row._profitFs:SetText(
-            HDG.Theme:StateLabel("error", moneyText(prof)))
-    elseif prof then
-        row._profitFs:SetText(moneyText(prof))
-    else
-        row._profitFs:SetText("?")
-    end
+    row._profitFs:SetText(_tintByProfit(signedMoney(ed.profit), ed.profit))
 end
 
 local GOBLIN_RESET_FS = {
@@ -835,7 +808,7 @@ local GOBLIN_ROW_HINTS = {
 }
 
 local function _resetGoblinRow(row)
-    if row._iconTex and row._iconTex.SetTexture then row._iconTex:SetTexture(nil) end
+    row._iconTex:SetTexture(nil)   -- _layoutGoblinRow made it before any paint
     row._itemID, row._recipeID, row._name = nil, nil, nil   -- clear R4 tooltip stamps
     row._clickHints = nil
     HDG.UI.ClearRowText(row, unpack(GOBLIN_RESET_FS))
@@ -851,9 +824,9 @@ local function _goblinRowFactory(template)
             row._itemID, row._recipeID, row._name = ed.itemID, ed.itemID, ed.name  -- R4 tooltip stamps
             row._clickHints = GOBLIN_ROW_HINTS              -- surfaces mouse actions on the row tooltip
             _paintLumberColumn(row, ed)
-            row._perLumFs:SetText(ed.lumberValue  and moneyText(ed.lumberValue)  or "?")
-            row._costFs:SetText(  ed.materialCost and moneyText(ed.materialCost) or "?")
-            row._sellFs:SetText(  ed.sellPrice    and moneyText(ed.sellPrice)    or "?")
+            row._perLumFs:SetText(moneyOrUnknown(ed.lumberValue))
+            row._costFs:SetText(  moneyOrUnknown(ed.materialCost))
+            row._sellFs:SetText(  moneyOrUnknown(ed.sellPrice))
             _paintTsmColumns(row, ed)
             -- #AH: live AH count (Direct scan). nil = unscanned -> "-"; 0 = scanned, none listed.
             -- Green when any listed units are YOURS (Deadi, Discord 2026-06-13):
@@ -904,8 +877,7 @@ local function _paintGoblinDetailRow(row, ed, template)
     local ownedColor = HDG.Theme:GetTextStateColorToken(
         ed.sufficient and "success" or "error")
     row._ownedFs:SetText(ownedColor .. tostring(ed.owned) .. "|r")
-    row._costFs:SetText(ed.totalCost and ed.totalCost > 0
-        and moneyText(ed.totalCost) or "-")
+    row._costFs:SetText(moneyOrUnknown(ed.totalCost))  -- qty x price, nil when unpriced
     row:SetHeight(template.height or 14)
 end
 

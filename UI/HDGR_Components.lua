@@ -93,6 +93,14 @@ function HDG.UI.RefreshIntrinsicWidths(root)
     end
 end
 
+-- A texture's colour from a theme token: the ToneTexture skinner reads the token stamped
+-- on it, so a scheme switch re-tints it. The texture itself is white (an atlas, or
+-- SetColorTexture(1, 1, 1, 1)).
+function HDG.UI.ToneTexture(tex, token)
+    tex._hdgrToneToken = token
+    HDG.Theme:Register(tex, "ToneTexture")
+end
+
 -- Column header backdrop: surface.panel_header rect behind a FontString cell.
 -- Hidden by default; caller calls bg:Show() for header rows.
 function HDG.UI.makeColumnHeaderBg(parent, anchor)
@@ -102,8 +110,7 @@ function HDG.UI.makeColumnHeaderBg(parent, anchor)
     -- White fill tinted by ToneTexture, so a scheme switch re-tints it: a baked
     -- SetColorTexture kept the old scheme's header colour until /reload.
     bg:SetColorTexture(1, 1, 1, 1)
-    bg._hdgrToneToken = "surface.panel_header"
-    HDG.Theme:Register(bg, "ToneTexture")
+    HDG.UI.ToneTexture(bg, "surface.panel_header")
     bg:Hide()
     return bg
 end
@@ -452,7 +459,13 @@ HDG.WidgetTypes:Register("vdivider", {
 })
 
 -- ===== ProgressBar: thin horizontal coverage indicator ====================
--- SetProgress(p) accepts 0..1 (clamped); binding pushes `progress` updates.
+-- SetProgress(p) accepts 0..1 (clamped); binding pushes `progress` updates. SetVariant(state)
+-- repaints the fill as ProgressBarFill's state ({ variant }); a caller passes a shared state
+-- table, not one per paint. Without it the fill is the historical success green.
+local function _barSetVariant(self, state)
+    HDG.Theme:Register(self._hdgrBarFill, "ProgressBarFill", state)
+end
+
 function HDG.UI:ProgressBar(parent)
     if not (parent and CreateFrame) then return nil end
     local frame = CreateFrame("Frame", nil, parent)
@@ -479,9 +492,39 @@ function HDG.UI:ProgressBar(parent)
             self._hdgrBarFill:SetWidth(math.max(1, w * p))
         end
     end
+    frame.SetVariant = _barSetVariant
     frame:SetScript("OnSizeChanged", function(self)
         if self._hdgrProgress then self:SetProgress(self._hdgrProgress) end
     end)
+    return frame
+end
+
+-- ===== Pie: a small disc that fills clockwise ==============================
+-- A paused Cooldown swipe, as Blizzard's renown ring: SetFraction(f), f in 0..1, goes
+-- through CooldownFrame_SetDisplayAsPercentage, and the swipe runs reversed so the done
+-- share fills. The disc under it is the empty share. A finished cooldown hides itself,
+-- so a done pie is the caller's to draw some other way (a check).
+local PIE_DISC = "Interface\\CharacterFrame\\TempPortraitAlphaMask"   -- a soft-edged white disc
+
+function HDG.UI:Pie(parent, size)
+    local frame = CreateFrame("Frame", nil, parent)
+    frame:SetSize(size, size)
+    local disc = frame:CreateTexture(nil, "BACKGROUND")
+    disc:SetAllPoints()
+    disc:SetTexture(PIE_DISC)
+    HDG.Theme:Register(disc, "PieTrack")
+    local swipe = CreateFrame("Cooldown", nil, frame)
+    swipe:SetAllPoints()
+    swipe:SetSwipeTexture(PIE_DISC, 1, 1, 1, 1)
+    swipe:SetReverse(true)
+    swipe:SetDrawEdge(false)
+    swipe:SetDrawBling(false)
+    swipe:SetHideCountdownNumbers(true)
+    HDG.Theme:Register(swipe, "PieSwipe")
+    frame._hdgrSwipe = swipe
+    function frame:SetFraction(f)
+        CooldownFrame_SetDisplayAsPercentage(self._hdgrSwipe, f)
+    end
     return frame
 end
 
@@ -626,10 +669,7 @@ HDG.WidgetTypes:Register("atlas", {
         -- Optional tone: tint a white atlas (e.g. the PlayerPartyBlip state dot)
         -- to a scheme token. Scheme-switch-safe via the ToneTexture skinner,
         -- which reads the token stamped on the texture.
-        if spec.tone then
-            frame.texture._hdgrToneToken = spec.tone
-            HDG.Theme:Register(frame.texture, "ToneTexture")
-        end
+        if spec.tone then HDG.UI.ToneTexture(frame.texture, spec.tone) end
         return frame
     end,
 })
@@ -2261,6 +2301,17 @@ HDG.WidgetTypes:Register("radioGroup", {
 -- Binding: { entry = "status.current" } -> entry table or nil.
 -- ============================================================================
 
+-- Idle draws nothing, but only the rail's textures and text hide: the frame stays
+-- shown once Layout reveals it. The binding engine skips a hidden widget, so a
+-- rail that hid its own frame when idle never received the next entry (no "added
+-- to shopping list" after a cart add, on any tab: owner 2026-10-31).
+local function _clearStatusRail(rail)
+    rail._currentEntry = nil
+    rail.bg:Hide()
+    rail.stripe:Hide()
+    rail.text:SetText("")
+end
+
 local function buildStatusRail(parent, spec)
     local frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
 
@@ -2290,34 +2341,34 @@ local function buildStatusRail(parent, spec)
     text:SetText("")
     frame.text = text
 
-    -- Initial state: empty rail is hidden so the bottom row collapses
-    -- visually until the first user-tagged entry lands.
+    -- Born hidden like every widget; Layout shows it, and it stays shown.
     frame:Hide()
+    _clearStatusRail(frame)
 
     function frame:SetEntry(entry)
-        self._currentEntry = entry
         if not entry then
-            self:Hide()
+            _clearStatusRail(self)
             return
         end
+        self._currentEntry = entry
         local r, g, b = HDG.Format.LogColor(entry.level)
         self.stripe:SetColorTexture(r, g, b, 1)
         self.text:SetTextColor(r, g, b, 1)
-        self.text:SetText(entry.text or "")
-        self:Show()
+        self.text:SetText(entry.text)
+        self.bg:Show()
+        self.stripe:Show()
     end
 
-    -- OnUpdate ticker: 0.5s throttle; hides when entry's duration elapses.
+    -- OnUpdate ticker: 0.5s throttle; clears the entry when its duration elapses.
+    -- An idle rail, or a sticky entry (no duration), returns at once.
     frame:HookScript("OnUpdate", function(self, elapsed)
+        local entry = self._currentEntry
+        if not entry or not entry.duration then return end
         self._tickAccum = (self._tickAccum or 0) + elapsed
         if self._tickAccum < 0.5 then return end
         self._tickAccum = 0
-        local entry = self._currentEntry
-        if not entry or not entry.duration then return end
-        local now = _G.GetTime and _G.GetTime() or 0
-        if (now - (entry.timestamp or 0)) >= entry.duration then
-            self._currentEntry = nil
-            self:Hide()
+        if _G.GetTime() - entry.timestamp >= entry.duration then
+            _clearStatusRail(self)
         end
     end)
 
@@ -2574,6 +2625,16 @@ local function _factionArt(texture, file)
     texture:SetTexture(FACTION_ART .. file)
 end
 
+-- A white rounded rectangle (round7.png, radius 7, sliced) that stretches to any size of 16 or
+-- more each way; tint it (ToneTexture, _TintTexture). The faction capsule and the Quest
+-- Tracker's any-order box draw with it.
+function HDG.UI.RoundedFill(tex)
+    _factionArt(tex, "round7.png")
+    tex:SetTextureSliceMargins(FACTION_CAPSULE_RADIUS, FACTION_CAPSULE_RADIUS,
+                               FACTION_CAPSULE_RADIUS, FACTION_CAPSULE_RADIUS)
+    tex:SetTextureSliceMode(Enum.UITextureSliceMode.Stretched)
+end
+
 -- The switch itself, as a plain helper: the LayoutConfig widget kind below is
 -- one caller, and the copy-requirements dialog -- which is hand-built, not laid
 -- out -- is the other. One capsule, two hosts.
@@ -2585,10 +2646,7 @@ function HDG.UI.FactionSwitch(parent)
     -- a rectangle with a rectangle sitting in it.
     local capsule = btn:CreateTexture(nil, "BACKGROUND")
     capsule:SetAllPoints()
-    _factionArt(capsule, "round7.png")
-    capsule:SetTextureSliceMargins(FACTION_CAPSULE_RADIUS, FACTION_CAPSULE_RADIUS,
-                                   FACTION_CAPSULE_RADIUS, FACTION_CAPSULE_RADIUS)
-    capsule:SetTextureSliceMode(Enum.UITextureSliceMode.Stretched)
+    HDG.UI.RoundedFill(capsule)
     btn._capsule = capsule
 
     -- The knob rides at OVERLAY so it draws above the capsule face -- a knob
@@ -4184,7 +4242,7 @@ end
 -- caches it on HDG.UI; subsequent calls just populate + show.
 --
 -- Usage:
---     HDG.UI:CopyDialog():Show("Copy coordinates", text)
+--     HDG.UI:CopyDialog():Open("Copy coordinates", text)   -- Open, not Show: Show is the bare frame Show and drops the text
 
 function HDG.UI:CopyDialog()
     if self._copyDialog then return self._copyDialog end
@@ -4432,8 +4490,9 @@ function HDG.UI:EnsureRowChrome(row)
     -- through. Parity is stamped per-row by HDG.UI:ScrollBox's element
     -- initializer (row._zebraAlt) and painted by the RowChrome skinner --
     -- nav/card rows use their own factories, so they never get the stamp and
-    -- stay flat.
-    local zebra = row:CreateTexture(nil, "BACKGROUND", nil, 0)
+    -- stay flat. Sublevel -3: under a row's own backdrops (Decor Quests' reward
+    -- box, -2/-1), which it hid on even rows (review B3, owner R7 10-29).
+    local zebra = row:CreateTexture(nil, "BACKGROUND", nil, -3)
     zebra:SetAllPoints()
     zebra:SetTexture(WHITE_TEX)
     zebra:Hide()
