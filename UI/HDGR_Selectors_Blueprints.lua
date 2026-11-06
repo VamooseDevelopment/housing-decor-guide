@@ -100,6 +100,10 @@ end
 -- with six planters missing is one entry but six pieces, and the headline the
 -- player reads as "how much do I still have to get" has to be the pieces
 -- (Soul, Discord 2026-09-10). Per-group header counts still cover every type.
+-- Missing only hides owned rows of that same set and no others: the house
+-- type, rooms and fixtures are what the build needs, and a player told "rooms
+-- not unlocked" lost the very list of rooms under the filter
+-- (CombatWombatt23, Discord 2026-11-01).
 Selectors:Register("blueprints.inspector", {
     reads = { "session.blueprints.selectedCode", "session.blueprints.manifests",
               "session.ui.blueprints.missingOnly", "session.ui.blueprints.collapsedGroups",
@@ -118,14 +122,15 @@ Selectors:Register("blueprints.inspector", {
         local groups, missing, missingPieces, entryCount = {}, 0, 0, 0
         for _, g in ipairs(m.raw.contentGroups) do
             local items = {}
+            local acquirable = g.contentType == 3 or g.contentType == 4
             for _, e in ipairs(_byName(g.entries)) do
                 entryCount = entryCount + 1   -- every entry, before the display filter
                 local have, need, held, inBags = _haveNeed(g.contentType, e)
-                if need > 0 and (g.contentType == 3 or g.contentType == 4) then
+                if need > 0 and acquirable then
                     missing = missing + 1
                     missingPieces = missingPieces + need
                 end
-                if not ui.missingOnly or need > 0 then
+                if need > 0 or not acquirable or not ui.missingOnly then
                     local itemID, srcKind, srcName = _resolveAcq(e, nil)
                     items[#items + 1] = {
                         name = e.name, total = e.total, have = have, need = need,

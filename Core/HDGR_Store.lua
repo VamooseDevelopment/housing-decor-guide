@@ -31,6 +31,15 @@ local function NewConfig()
         -- showMinimap flag was an oversight; collapsed 2026-06-07.)
         showMinimapButton  = true,
         scheme             = HDG.Constants.DEFAULT_SCHEME,
+        -- themeDecorations: a seasonal theme's art over the main window's title bar
+        -- (Winter Veil's snow, holly and baubles; Config > Appearance). The art shows
+        -- only while that theme is picked; this lets a player keep the colours without it.
+        themeDecorations   = true,
+        -- winterVeilOffered: the start year of the last Feast of Winter Veil whose
+        -- theme offer this profile has answered (0 = never). The offer pops once per
+        -- Winter Veil (UI/HDGR_Controller_WinterVeilOffer.lua); a profile setting,
+        -- like the theme it offers.
+        winterVeilOffered  = 0,
         -- decorPreviewBg: 3D-preview background for the decor browser. "default" =
         -- the dark bgTile backdrop (no atlas); other values are housing-bg atlas names.
         decorPreviewBg     = "default",
@@ -86,6 +95,9 @@ local function NewConfig()
         -- merchantQtyPickerAutoClose: the picker closes itself once every item is
         -- bought (its own tick box). Off = it stays open on "Close", as it always did.
         merchantQtyPickerAutoClose = false,
+        -- merchantVendorSidebar: the shopping-list sidebar beside the vendor window,
+        -- shown when a vendor sells something on any list (Helpers > Vendors).
+        merchantVendorSidebar  = true,
         -- materialTooltipItemData: render Blizzard's item tooltip above HDG's stock
         -- roster on material rows, which also lets other addons' item-data processors
         -- add their lines there. Ships OFF -- it makes every material hover much
@@ -850,8 +862,18 @@ end
 local function NewSessionMerchant()
     return {
         open     = false,
-        byItemID = {},    -- [itemID] = { index, price, name, numAvailable }
+        -- [itemID] = { index, name, icon, numAvailable, isPurchasable, costs }.
+        -- costs = { {kind, key, amount, id?, name?, icon?}, ... } -- see
+        -- HDGR_MerchantWallet.lua; an EMPTY costs list is a price that could not
+        -- be read (slot still streaming in), and nothing buys it.
+        byItemID = {},
+        -- [walletKey] = balance: gold (copper) plus each currency and payment item
+        -- the open vendor charges. MerchantObserver keeps it fresh so the
+        -- selectors stay pure.
+        wallet   = {},
         buying   = nil,   -- { total, done } while HDGR_BuyQueue runs; nil otherwise
+        -- The vendor sidebar's title-bar X: hidden for the rest of this visit.
+        sidebarDismissed = false,
     }
 end
 
@@ -890,6 +912,9 @@ local function NewDefaultSession()
         destroying     = nil,   -- { total, done, name, waiting } while HDGR_DestroyQueue runs; nil otherwise
         lumber         = NewLumberSession(),
         identity       = NewIdentitySession(),
+        -- Today's holidays, stamped by HolidayObserver (HOLIDAY_SET). winterVeil =
+        -- the start year of the Feast of Winter Veil on now, 0 while it is off.
+        holiday        = { winterVeil = 0 },
         daily          = { bestowed = nil, orcQuote = nil },  -- seeded here; EnsureSession no longer needs or-guard
         house          = NewHouseSession(),  -- seeded here; EnsureSession no longer needs or-guard
         -- Furnishings (v7): reducer-minted ID echoes (controllers read the id
@@ -1253,7 +1278,7 @@ local function NewDefaultState()
             lumber               = { config = NewLumberConfig(), sessions = {}, history = { entries = {}, nextID = 0 } },
             -- Recent Activity: persisted per-house edit-session history (HDG parity).
             recentActivity       = NewRecentActivity(),
-            -- Last-known decor storage {owned,max}; overwritten by HOUSE_CAPACITY_CACHED
+            -- Last-known decor storage {owned,exempt,max}; overwritten by HOUSE_CAPACITY_CACHED
             -- on each snapshot, read as the buy-picker fallback. false = never captured.
             houseCapacityCache   = false,
         },
@@ -1555,6 +1580,12 @@ local function EnsureStateShape(state)
     state.account.questCompletions = state.account.questCompletions or {}   -- exception(boundary): SV migration
     state.account.decorQuests = state.account.decorQuests or NewDecorQuestsAccount()   -- exception(boundary): SV migration -- added with the Decor Quests tracker (3.41)
     state.account.houseCapacityCache = state.account.houseCapacityCache or false   -- exception(boundary): SV migration -- buy-picker storage fallback added post-3.12
+    -- A cache saved before it carried the exempt count can't show the buy
+    -- picker's exempt or game's-counter figures, so it goes back to never-captured
+    -- until the next read rather than showing exempt as 0.
+    if state.account.houseCapacityCache and state.account.houseCapacityCache.exempt == nil then   -- exception(boundary): SV migration -- exempt added after 3.41.0, which saved {owned, max}
+        state.account.houseCapacityCache = false
+    end
     -- Lumber tracker config + per-char sessions. Config key-by-key from NewLumberConfig
     -- so new defaults flow to existing users (SV migration).
     state.account.lumber          = state.account.lumber          or {}
@@ -3116,7 +3147,7 @@ HDG.Actions:Register{ name = "HOUSE_CAPACITY_CACHED",
     persists = true, combatUnsafe = false,
     invalidates = { "account.houseCapacityCache" },
     reduce = function(state, payload)
-        state.account.houseCapacityCache = { owned = payload.owned, max = payload.max }
+        state.account.houseCapacityCache = { owned = payload.owned, exempt = payload.exempt, max = payload.max }
     end }
 
 HDG.Actions:Register{ name = "HOUSE_LIST_UPDATED",
@@ -3330,6 +3361,13 @@ HDG.Actions:Register{ name = "SESSION_IDENTITY_SET",
         id.raceID       = payload.raceID or 0         -- exception(boundary): SESSION_IDENTITY_SET payload may omit raceID
         id.classID      = payload.classID or 0        -- exception(boundary): SESSION_IDENTITY_SET payload may omit classID
         id.charKey      = id.name .. "-" .. id.realm
+    end }
+
+HDG.Actions:Register{ name = "HOLIDAY_SET",
+    persists = false, combatUnsafe = false,
+    invalidates = { "session.holiday.winterVeil" },
+    reduce = function(state, payload)
+        state.session.holiday.winterVeil = payload.winterVeil
     end }
 
 -- Recipe Sources filter axis -> its session.ui.recipeSources set.
@@ -5447,9 +5485,32 @@ HDG.Actions:Register{ name = "MERCHANT_SET_STATE",
     invalidates = { "session.merchant" },
     reduce = function(state, payload)
         local m = state.session.merchant
+        local wasOpen = m.open
         m.open     = payload.open == true
         m.byItemID = payload.byItemID or {}   -- exception(boundary): two dispatch shapes -- the close dispatch is {open=false} with no byItemID
+        -- The scan and the wallet arrive together so a selector never sees prices
+        -- naming a payment the wallet has no balance for. Closing keeps none.
+        m.wallet   = payload.wallet or {}     -- exception(boundary): two dispatch shapes -- the close dispatch carries no wallet
+        -- A vendor OPENING brings the sidebar back after its X; a rescan of the
+        -- same vendor (MERCHANT_UPDATE) is not an opening and leaves it dismissed.
+        if m.open and not wasOpen then m.sidebarDismissed = false end
         if not m.open then m.buying = nil end -- vendor gone -> any in-flight queue state is moot
+    end }
+
+-- The wallet snapshot for the open vendor (MerchantObserver, on money / currency /
+-- bag changes). Adopted by reference: the observer builds a fresh table each time.
+HDG.Actions:Register{ name = "MERCHANT_WALLET_SET",
+    persists = false, combatUnsafe = false,
+    invalidates = { "session.merchant.wallet" },
+    reduce = function(state, payload)
+        state.session.merchant.wallet = payload.wallet
+    end }
+
+HDG.Actions:Register{ name = "MERCHANT_SIDEBAR_DISMISS",
+    persists = false, combatUnsafe = false,
+    invalidates = { "session.merchant.sidebarDismissed" },
+    reduce = function(state)
+        state.session.merchant.sidebarDismissed = true
     end }
 
 HDG.Actions:Register{ name = "MERCHANT_BUY_PROGRESS",

@@ -128,6 +128,14 @@ function HDG:CreateMainWindow()
     -- EnableMouse(false) so the full-cover overlay never intercepts content clicks.
     HDG.UI.AttachWindowFrameBorder(frame)
 
+    -- Seasonal theme art over the title bar (Winter Veil: snow, holly, baubles),
+    -- main window only. Shown while the scheme names a decorations set and the
+    -- Theme decorations setting is on; the helper owns its layout and its
+    -- config subscriber.
+    HDG.UI.AttachWindowDecorations(frame)
+    -- While Winter Veil is on, the first open offers its theme (a pop-up over the window).
+    HDG.WinterVeilOffer.Attach(frame)
+
     -- Apply initial scale from account.config.scale (default 1.0). The
     -- account.config.scale subscriber below picks up runtime changes; this
     -- handles first-paint when the saved value differs from the factory default.

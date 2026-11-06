@@ -520,6 +520,225 @@ function UI.AttachWindowFrameBorder(frame)
     return border
 end
 
+-- ===== Window decorations: a seasonal theme's art over the title bar ========
+-- Main window only. The WindowDecorations skinner shows the overlay while the
+-- scheme names a decorations set (Winter Veil) and the Theme decorations setting
+-- is on; everything here builds and lays the art out. The textures are the
+-- mockup's own drawing (docs/mockups/winter_veil_lab/export_art.js, 2 texels a
+-- unit), and these numbers are where that script put the window's edges inside
+-- each one. Game units from the window's top-left corner; +y is up.
+local WV_ART = "Interface\\AddOns\\HousingDecorGuide\\textures\\winterveil\\"
+local DECO = {
+    frameLift = 60,  -- above the title bar's widgets and the window border overlay (+50)
+    layer     = "OVERLAY",
+    sublevel  = { swag = 1, bauble = 2, snow = 3, holly = 4 },   -- draw order, bottom to top
+    snowRise  = 8,   -- every snow texture's top sits this far above the window's top edge
+    snowH     = 32,
+    capW      = 32,
+    capIn     = 28,  -- a cap covers 28 inside the window and the rest past its edge
+    tileW     = 256, -- the snow tile's period: its waves repeat every 256
+    hollyW    = 64, hollyH = 32,
+    hollyX    = 30,  -- each sprig's centre: 30 in from its corner,
+    hollyY    = 3,   -- 3 above the top edge
+    swagW     = 64, swagH = 8,    -- the swag's dip spans hookGap; the rest of the texture is clear
+    baubleW   = 16, baubleH = 32,
+    hookY     = 7,   -- the garland's hooks hang 7 below the top edge,
+    hookInArt = 1,   -- 1 down the bauble and swag textures
+    hookGap   = 48,
+    clear     = 16,  -- a bauble's edge keeps this clear of the title bar's empty middle
+    -- The ".png" is required: a path with no extension finds only .blp and .tga,
+    -- and draws nothing (round7.png and disc10.png are named the same way).
+    tex = {
+        snowTile = WV_ART .. "snow_tile.png",
+        capLeft  = WV_ART .. "snow_cap_left.png",
+        capRight = WV_ART .. "snow_cap_right.png",
+        holly    = WV_ART .. "holly.png",
+        swag     = WV_ART .. "swag.png",
+        baubles  = { WV_ART .. "bauble_red.png", WV_ART .. "bauble_gold.png", WV_ART .. "bauble_blue.png" },
+    },
+}
+-- The setting the overlay follows (CONFIG_SET invalidates account.config.<key>).
+local DECO_WATCH = { "account.config.themeDecorations" }
+
+local function _decoTexture(host, sublevel, file)
+    local tex = host:CreateTexture(nil, DECO.layer, nil, sublevel)
+    tex:SetTexture(file)
+    return tex
+end
+
+local function _cornerPiece(overlay, sublevel, file, w, h, relPoint, x, y)
+    local tex = _decoTexture(overlay, sublevel, file)
+    tex:SetSize(w, h)
+    tex:SetPoint("TOPLEFT", overlay, relPoint, x, y)
+    return tex
+end
+
+-- Snow caps and holly sprigs, anchored to the window's top corners so they follow
+-- its width with no relayout. Built on the first show, which other schemes never reach.
+local function _buildCorners(overlay)
+    local s, hollyTop = DECO.sublevel, DECO.hollyY + DECO.hollyH / 2
+    _cornerPiece(overlay, s.snow, DECO.tex.capLeft, DECO.capW, DECO.snowH,
+        "TOPLEFT", DECO.capIn - DECO.capW, DECO.snowRise)
+    _cornerPiece(overlay, s.snow, DECO.tex.capRight, DECO.capW, DECO.snowH,
+        "TOPRIGHT", -DECO.capIn, DECO.snowRise)
+    _cornerPiece(overlay, s.holly, DECO.tex.holly, DECO.hollyW, DECO.hollyH,
+        "TOPLEFT", DECO.hollyX - DECO.hollyW / 2, hollyTop)
+    local right = _cornerPiece(overlay, s.holly, DECO.tex.holly, DECO.hollyW, DECO.hollyH,
+        "TOPRIGHT", -(DECO.hollyX + DECO.hollyW / 2), hollyTop)
+    -- Mirrored. The generated docs name the args (left, right, bottom, top), but
+    -- Blizzard's own flips read (left, right, top, bottom): (1, 0, 0, 1) is horizontal.
+    right:SetTexCoord(1, 0, 0, 1)
+    overlay._decoBuilt = true
+end
+
+-- Pool factories (UI.AcquirePooled): one texture per slot, kept for the session.
+local function _newSnowTile(host) return _decoTexture(host, DECO.sublevel.snow, DECO.tex.snowTile) end
+local function _newSwag(host) return _decoTexture(host, DECO.sublevel.swag, DECO.tex.swag) end
+local function _newBauble(host) return host:CreateTexture(nil, DECO.layer, nil, DECO.sublevel.bauble) end
+
+-- A whole number of tiles between the caps, each stretched a little: the tile's
+-- waves are periodic and both caps are drawn phased to a tile boundary, so the
+-- joins line up. A frame narrower than its two caps has no run between them:
+-- no tiles, rather than one of negative width.
+local function _layoutSnow(overlay, width)
+    local run = width - 2 * DECO.capIn
+    UI.BeginPoolPass(overlay, "_decoTiles")
+    if run > 0 then
+        local n = math.max(1, math.floor(run / DECO.tileW + 0.5))
+        local tileW = run / n
+        for i = 0, n - 1 do
+            local tile = UI.AcquirePooled(overlay, "_decoTiles", i, _newSnowTile)
+            tile:SetSize(tileW, DECO.snowH)
+            tile:SetPoint("TOPLEFT", overlay, "TOPLEFT", DECO.capIn + i * tileW, DECO.snowRise)
+            tile:Show()
+        end
+    end
+    UI.EndPoolPass(overlay, "_decoTiles")
+end
+
+-- Hook i of the garland at x: its bauble, colours cycling red, gold, blue.
+local function _placeBauble(overlay, i, x)
+    local bauble = UI.AcquirePooled(overlay, "_decoBaubles", i, _newBauble)
+    bauble:SetTexture(DECO.tex.baubles[i % #DECO.tex.baubles + 1])
+    bauble:SetSize(DECO.baubleW, DECO.baubleH)
+    bauble:SetPoint("TOPLEFT", overlay, "TOPLEFT", x - DECO.baubleW / 2, DECO.hookInArt - DECO.hookY)
+    bauble:Show()
+end
+
+-- The swag from hook i (at x) to hook i + 1.
+local function _placeSwag(overlay, i, x)
+    local swag = UI.AcquirePooled(overlay, "_decoSwags", i, _newSwag)
+    swag:SetSize(DECO.swagW, DECO.swagH)
+    swag:SetPoint("TOPLEFT", overlay, "TOPLEFT", x, DECO.hookInArt - DECO.hookY)
+    swag:Show()
+end
+
+-- Hooks hookGap apart, centred in [x0, x1] (the mockup's garlandHooks): n + 1
+-- hooks, n swags. A span under one gap holds one bauble; a negative one, none.
+local function _layoutGarland(overlay, x0, x1)
+    local n = math.floor((x1 - x0) / DECO.hookGap)
+    local first = x0 + ((x1 - x0) - n * DECO.hookGap) / 2
+    UI.BeginPoolPass(overlay, "_decoBaubles")
+    UI.BeginPoolPass(overlay, "_decoSwags")
+    for i = 0, n do
+        local x = first + i * DECO.hookGap
+        _placeBauble(overlay, i, x)
+        if i < n then _placeSwag(overlay, i, x) end
+    end
+    UI.EndPoolPass(overlay, "_decoBaubles")
+    UI.EndPoolPass(overlay, "_decoSwags")
+end
+
+-- The garland's span: the lane across the title bar's empty middle, inset so a
+-- bauble's edge keeps `clear` off each end. Read, not assumed: the lane's right end
+-- moves with the window's width and the version text's (font face, version string).
+-- Lane and overlay share the window's scale, so the difference is in window units.
+local function _garlandSpan(overlay)
+    local lane, origin = overlay._decoLane, overlay:GetLeft()
+    local left = lane:GetLeft()
+    if not (left and origin) then return nil end  -- exception(boundary): rects are unresolved until the client first lays the window out; the lane's OnSizeChanged lays the garland out then
+    local inset = DECO.clear + DECO.baubleW / 2
+    return left - origin + inset, lane:GetRight() - origin - inset
+end
+
+-- The one layout path: on show (a scheme switch, the setting, the window opening)
+-- and on a size change of the window or of the title bar's empty middle (the lane).
+local function _layoutDecorations(overlay)
+    if not overlay:IsShown() then return end   -- another scheme, or the setting off
+    if not overlay._decoBuilt then _buildCorners(overlay) end
+    _layoutSnow(overlay, overlay:GetWidth())
+    local x0, x1 = _garlandSpan(overlay)
+    if x0 then _layoutGarland(overlay, x0, x1) end
+end
+
+-- A title-bar widget the lane hangs off. The ids are the chrome strip's own
+-- (HDGR_LayoutConfig.lua); a renamed one must fail here, not anchor to the window.
+local function _chromeWidget(frame, id)
+    return frame.widgets[id] or error("AttachWindowDecorations: the window has no " .. id .. " widget", 3)
+end
+
+-- The garland's lane: an undrawn frame across a title strip's empty middle, from
+-- `left`'s right edge to `right`'s left. Its size changing is the garland's
+-- relayout: the strip's first layout, a resize, a version string of another width.
+local function _garlandLane(frame, overlay, left, right)
+    local lane = CreateFrame("Frame", nil, frame)
+    lane:SetPoint("LEFT", left, "RIGHT")
+    lane:SetPoint("RIGHT", right, "LEFT")
+    lane:SetHeight(1)
+    lane:SetScript("OnSizeChanged", function() _layoutDecorations(overlay) end)
+    return lane
+end
+
+-- The art's overlay on `frame`, its garland in the lane from `left` to `right`.
+-- Mouse-transparent, because the snow and holly reach above the top edge and must
+-- not grow the frame's hit area. Born shown: whoever attaches it decides when it hides.
+local function _decorate(frame, left, right)
+    local overlay = CreateFrame("Frame", nil, frame)
+    overlay:SetAllPoints(frame)
+    overlay:SetFrameLevel(frame:GetFrameLevel() + DECO.frameLift)
+    overlay:EnableMouse(false)
+    overlay._decoLane = _garlandLane(frame, overlay, left, right)
+    overlay:SetScript("OnShow", _layoutDecorations)
+    overlay:SetScript("OnSizeChanged", _layoutDecorations)
+    frame._hdgrDecorations = overlay
+    return overlay
+end
+
+-- The main window's title bar. Its empty middle is the chrome.spacer section, which
+-- is layout only (it has no frame), so the lane hangs off the logo and the version
+-- text either side of it. Built with the window (never in combat: CreateMainWindow
+-- waits it out). The skinner runs at Register, and again on every scheme switch
+-- (ApplyAll) and every change to the setting (SetState below).
+-- The closing layout covers a window already open and laid out when this runs (a
+-- build deferred past combat, or one made for a window restored open): the overlay
+-- is born shown there, so no OnShow comes, and an unchanged layout fires no
+-- OnSizeChanged.
+function UI.AttachWindowDecorations(frame)
+    local overlay = _decorate(frame, _chromeWidget(frame, "chromePanel.title"),
+        _chromeWidget(frame, "chromePanel.version"))
+    HDG.Theme:Register(overlay, "WindowDecorations", { enabled = HDG.Store:GetConfig("themeDecorations") })
+    HDG.Store:Subscribe(function(_, invalidation)
+        if HDG.Paths.MatchesAny(DECO_WATCH, invalidation) then
+            HDG.Theme:SetState(overlay, { enabled = HDG.Store:GetConfig("themeDecorations") })
+        end
+    end)
+    _layoutDecorations(overlay)
+    return overlay
+end
+
+-- A pop-up's title strip (the Winter Veil theme offer): the same art whatever the
+-- scheme, since it previews the theme, so no skinner hides it. The garland runs from
+-- `title`'s right edge to the right-hand holly sprig; the lane ends `clear` short
+-- of the sprig's inner edge because _garlandSpan insets the baubles by that again.
+function UI.AttachTitleDecorations(frame, title)
+    local stop = CreateFrame("Frame", nil, frame)
+    stop:SetSize(1, 1)
+    stop:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -(DECO.hollyX + DECO.hollyW / 2 - DECO.clear), 0)
+    local overlay = _decorate(frame, title, stop)
+    _layoutDecorations(overlay)
+    return overlay
+end
+
 -- Waypoint-pin AtlasButton at a row's right edge, hidden until shown by the
 -- painter (hygiene A12 -- Zone + Shopping shared this verbatim).
 function UI.RowPinButton(row)

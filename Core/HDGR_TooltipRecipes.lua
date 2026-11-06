@@ -82,6 +82,26 @@ R.BuyAll = {
     anchor = "ANCHOR_RIGHT",
 }
 
+-- The windows' settings cogs: each opens HDG's settings at its own section.
+R.SettingsCogZone     = { title = "locale:TIP_COG_ZONE_TITLE",     body = "locale:TIP_COG_ZONE_BODY",     anchor = "ANCHOR_BOTTOM" }
+R.SettingsCogShopping = { title = "locale:TIP_COG_SHOPPING_TITLE", body = "locale:TIP_COG_SHOPPING_BODY", anchor = "ANCHOR_BOTTOM" }
+R.SettingsCogTracker  = { title = "locale:TIP_COG_TRACKER_TITLE",  body = "locale:TIP_COG_TRACKER_BODY",  anchor = "ANCHOR_BOTTOM" }
+R.SettingsCogLumber   = { title = "locale:TIP_COG_LUMBER_TITLE",   body = "locale:TIP_COG_LUMBER_BODY",   anchor = "ANCHOR_BOTTOM" }
+
+-- Vendor sidebar title-bar cog: Helpers settings at its Vendors section.
+R.VendorSidebarSettings = {
+    title  = "locale:TIP_VSIDE_SETTINGS_TITLE",
+    body   = "locale:TIP_VSIDE_SETTINGS_BODY",
+    anchor = "ANCHOR_BOTTOM",
+}
+
+-- Vendor sidebar title-bar X: hidden for this visit only.
+R.VendorSidebarClose = {
+    title  = "locale:TIP_VSIDE_CLOSE_TITLE",
+    body   = "locale:TIP_VSIDE_CLOSE_BODY",
+    anchor = "ANCHOR_BOTTOM",
+}
+
 R.ShopNeighborhood = {
     title  = "locale:SHOP_NBHD_TITLE",
     body   = "locale:SHOP_NBHD_HINT",
@@ -150,6 +170,7 @@ R.EssenceBadge = function()
     return { title = "Essence of Lumber", anchor = "ANCHOR_LEFT", extraLines = extraLines }
 end
 R.LumberAutoShow       = { title = "locale:TIP_LUMBER_AUTO_SHOW_TITLE",      body = "locale:TIP_LUMBER_AUTO_SHOW_BODY" }
+R.ThemeDecorations     = { title = "locale:TIP_THEME_DECORATIONS_TITLE",     body = "locale:TIP_THEME_DECORATIONS_BODY" }
 R.LumberGoal           = { title = "locale:TIP_LUMBER_GOAL_TITLE",           body = "locale:TIP_LUMBER_GOAL_BODY" }
 -- The fit verdict in full. Blizzard's reasons are whole sentences, and joined on
 -- the verdict's one line they ran off the panel with nothing to hover
@@ -170,6 +191,7 @@ R.ZoneMapOpen          = { title = "locale:TIP_ZONE_MAP_TITLE",              bod
 R.ZoneOpenMain         = { title = "locale:TIP_ZONE_OPEN_MAIN_TITLE",        body = "locale:TIP_ZONE_OPEN_MAIN_BODY" }
 R.ZoneTrackShopping    = { title = "locale:TIP_ZONE_TRACK_SHOPPING_TITLE",   body = "locale:TIP_ZONE_TRACK_SHOPPING_BODY", anchor = "ANCHOR_TOP" }
 R.QtyPickerAutoClose   = { title = "locale:TIP_QTYPICKER_AUTO_CLOSE_TITLE",  body = "locale:TIP_QTYPICKER_AUTO_CLOSE_BODY", anchor = "ANCHOR_TOP" }
+R.QtyPickerClose       = { title = "locale:TIP_QTYPICKER_CLOSE_TITLE",       body = "locale:TIP_QTYPICKER_CLOSE_BODY",      anchor = "ANCHOR_TOP" }
 
 -- Layouts tab actions (effect-focused -- what each does, not just the label).
 R.LayoutLoad      = { title = "locale:TIP_LAYOUT_LOAD_TITLE",      body = "locale:TIP_LAYOUT_LOAD_BODY",      anchor = "ANCHOR_TOP" }

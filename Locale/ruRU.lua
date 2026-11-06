@@ -217,7 +217,6 @@ HDG.Locale:Register("ruRU", {
     SHOP_BUY_ALL_DISABLED = "Откройте торговца, у которого есть ваш список.",
     QTYPICKER_BUY = "Купить %d",
     QTYPICKER_HAVE = "у вас %s",
-    QTYPICKER_STORAGE = "хранилище %d / %d",
     CFG_MERCHANT_QTY_PICKER = "Выбор количества правым кликом у торговцев декором",
     SHOP_NO_LIST = "(нет списка)",
     SHOP_OPEN_BTN = "Открыть",

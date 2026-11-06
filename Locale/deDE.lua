@@ -218,7 +218,6 @@ HDG.Locale:Register("deDE", {
     SHOP_BUY_ALL_DISABLED = "Oeffne einen Haendler, der deine Liste fuehrt.",
     QTYPICKER_BUY = "%d kaufen",
     QTYPICKER_HAVE = "du hast %s",
-    QTYPICKER_STORAGE = "Lager %d / %d",
     CFG_MERCHANT_QTY_PICKER = "Rechtsklick-Mengenauswahl bei Dekohaendlern",
     SHOP_NO_LIST = "(keine Liste)",
     SHOP_OPEN_BTN = "Öffnen",

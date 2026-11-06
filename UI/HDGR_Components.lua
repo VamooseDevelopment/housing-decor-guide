@@ -544,6 +544,43 @@ HDG.WidgetTypes:Register("progressbar", {
     specFields = { "font" },
 })
 
+-- ===== BusyDots: three accent dots pulsing in turn, centred in the widget =====
+-- "Still working": Aegis's busy-card dots (Aegis UI/Framework.lua BusyPanel),
+-- same timing. WoW stops OnUpdate on a hidden frame, so they cost nothing while
+-- hidden and there is no ticker to cancel.
+local BUSY_DOT, BUSY_PITCH, BUSY_PERIOD, BUSY_STAGGER = 6, 12, 1.1, 0.22
+
+-- A triangle wave per dot, each a stagger behind the last, never fully out.
+local function _busyDotAlpha(t, i)
+    local p   = (t / BUSY_PERIOD + (i - 1) * BUSY_STAGGER) % 1
+    local tri = (p < 0.5) and (p * 2) or (2 - p * 2)
+    return 0.25 + 0.75 * tri
+end
+
+function HDG.UI:BusyDots(parent)
+    local frame = CreateFrame("Frame", nil, parent)
+    local dots = {}
+    for i = 1, 3 do
+        local d = frame:CreateTexture(nil, "ARTWORK")
+        d:SetSize(BUSY_DOT, BUSY_DOT)
+        d:SetPoint("CENTER", frame, "CENTER", (i - 2) * BUSY_PITCH, 0)
+        HDG.Theme:Register(d, "AccentBar")
+        dots[i] = d
+    end
+    frame._hdgrBusyT = 0
+    frame:SetScript("OnUpdate", function(self, elapsed)
+        self._hdgrBusyT = self._hdgrBusyT + elapsed
+        for i, d in ipairs(dots) do d:SetAlpha(_busyDotAlpha(self._hdgrBusyT, i)) end
+    end)
+    frame._hdgrBusyDots = dots
+    return frame
+end
+
+HDG.WidgetTypes:Register("busydots", {
+    build = function(parent, _spec) return HDG.UI:BusyDots(parent) end,
+    specFields = {},                   -- nothing to bind: shown is "busy"
+})
+
 -- ===== LinkRow: 24x24 icon (atlas > fileID) + optional label + read-only URL EditBox ====
 -- HighlightText on focus for one-click select-all.
 

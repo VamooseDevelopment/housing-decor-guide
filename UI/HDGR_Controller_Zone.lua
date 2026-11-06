@@ -225,6 +225,9 @@ function ZoneController:Wire(rootFrame)
     HDG.UI.OnClick(rootFrame, "zoneHeaderPanel.close", function()
         HDG.Store:Dispatch({ type = A.ZONE_POPUP_TOGGLE })
     end)
+    HDG.UI.OnClick(rootFrame, "zoneHeaderPanel.settings", function()
+        HDG.SettingsPanel.OpenToSection("zoneScanner")
+    end)
 
     -- HDG icon: open the main window. Only ever opens -- a toggle would shut a
     -- main window that is already up.

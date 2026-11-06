@@ -137,6 +137,13 @@ function ConfigController:Wire(rootFrame)
         dispatch("CONFIG_SCALE_STEP", { direction = "inc" })
     end)
 
+    -- ===== Appearance: Theme decorations =================================
+    -- OnClick lands on the inner CheckButton, already toggled: its state is the
+    -- player's pick. The binding pushes the stored value back after the dispatch.
+    HDG.UI.OnClick(rootFrame, "configPanel.themeDecorationsToggle", function(check)
+        dispatch("CONFIG_SET", { key = "themeDecorations", value = check:GetChecked() })
+    end)
+
     -- ===== Lumber Tracker: auto-open toggle ==================================
     -- Mirrors the Warehouse-tab toggle (same action + bound selector, so both
     -- checkboxes stay in sync through the binding engine).

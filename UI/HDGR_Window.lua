@@ -8,8 +8,14 @@
 -- windows entry shape (satellites):
 --   slots    = { fill = "<contentView>" }
 --   shown    = "<selector>"        bool selector -> Show/Hide
+--   lazy     = true | "shown"      (optional) not built at boot: true = the owning
+--                                  module calls EnsureCreated; "shown" = built the
+--                                  first time `shown` is true (_CreateDueLazy)
+--   parent   = function           (optional) returns the parent frame (cascade)
 --   position = {
---     default   = { x, y }        first-open TOPLEFT offset (y negative = top-down)
+--     default   = { x, y, relPoint? }  first-open offset of the window's TOPLEFT from the
+--                                  parent's relPoint (default TOPLEFT; y negative = down).
+--                                  TOPRIGHT keeps a satellite against a parent of any width.
 --     movable   = true
 --     binding   = "<selector>"    (optional) { x, y } saved position
 --     setAction = "<ACTIONS key>" (optional) dispatched on drag-stop
@@ -59,7 +65,7 @@ function W:_CreateOne(name, win)
     -- Initial position from the entry default; the reconciler overrides it if
     -- a position binding has a saved value.
     local pos = win.position and win.position.default or { x = 200, y = -150 }
-    frame:SetPoint("TOPLEFT", parent, "TOPLEFT", pos.x, pos.y)
+    frame:SetPoint("TOPLEFT", parent, pos.relPoint or "TOPLEFT", pos.x, pos.y)  -- exception(optional): position.default.relPoint optional, parent TOPLEFT
 
     -- Drag wiring: WoW gives bottom-up GetLeft/GetTop; convert to top-down TOPLEFT y
     -- so the reconciler can restore position symmetrically.
@@ -198,8 +204,9 @@ end
 -- ===== Boot (called from Init.lua OnEnable) ==================================
 function W:CreateAll()
     _eachSatellite(function(name, win)
-        -- Lazy satellites skipped here (parent frame LoadOnDemand, absent at OnEnable).
-        -- Owning module calls EnsureCreated when the parent exists.
+        -- Lazy satellites skipped here: lazy = true (parent frame LoadOnDemand, absent
+        -- at OnEnable) is built by its owning module's EnsureCreated; lazy = "shown"
+        -- by _CreateDueLazy below.
         if not win.lazy and not self._frames[name] then self:_CreateOne(name, win) end
     end)
     if not self._subscribed then
@@ -213,14 +220,29 @@ function W:CreateAll()
             if actionType == A.COMBAT_ENTER or actionType == A.COMBAT_EXIT then
                 invalidation = nil
             end
+            self:_CreateDueLazy(invalidation)
             for name in pairs(self._frames) do
                 self:_ReconcileOne(name, invalidation, actionType)
             end
         end)
     end
+    self:_CreateDueLazy(nil)
     for name in pairs(self._frames) do
         self:_ReconcileOne(name, nil)
     end
+end
+
+-- A `lazy = "shown"` satellite is built by the registry the first time its
+-- `shown` selector turns true, so a session that never needs it never builds it
+-- (the vendor sidebar: no vendor visit, no sidebar). `lazy = true` stays the
+-- owning module's call -- the companion's parent is a LoadOnDemand frame only
+-- its module knows has loaded. Interest-gated like the reconcile.
+function W:_CreateDueLazy(invalidation)
+    _eachSatellite(function(name, win)
+        if win.lazy ~= "shown" or self._frames[name] then return end
+        if invalidation and not HDG.Paths.MatchesAny(HDG.Selectors:GetReads(win.shown), invalidation) then return end
+        if HDG.Selectors:Call(win.shown, HDG.Store:GetState(), {}) then self:EnsureCreated(name) end
+    end)
 end
 
 -- Scheme / font-face change: re-measure and repaint every satellite whatever its
@@ -234,7 +256,7 @@ function W:RepaintAll()
     end
 end
 
--- ===== Lazy creation (HouseEditorCompanion) =================================
+-- ===== Lazy creation (HouseEditorCompanion; _CreateDueLazy) =================
 -- Idempotent: returns the existing frame on second call.
 -- CreateAll subscription reconciles the new frame on subsequent dispatches;
 -- initial _ReconcileOne here paints it from current state immediately.

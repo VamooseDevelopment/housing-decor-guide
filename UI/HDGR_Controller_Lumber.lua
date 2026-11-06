@@ -95,6 +95,10 @@ function HDG.LumberController:Wire(rootFrame)
         HDG.Log:Success("lumber_action", "Lumber session finalized")
     end)
 
+    HDG.UI.OnClick(rootFrame, "lumberPanel.settings", function()
+        HDG.SettingsPanel.OpenToSection("lumber")
+    end)
+
     -- Close [X]: hides lumber window only (no main-window side effect).
     HDG.UI.OnClick(rootFrame, "lumberPanel.close", function()
         HDG.Store:Dispatch({

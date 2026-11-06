@@ -700,6 +700,9 @@ function ShoppingController:Wire(rootFrame)
     HDG.UI.OnClick(rootFrame, "shoppingHeaderPanel.close", function()
         HDG.Store:Dispatch({ type = A.SHOPPING_WIDGET_TOGGLE })
     end)
+    HDG.UI.OnClick(rootFrame, "shoppingHeaderPanel.settings", function()
+        HDG.SettingsPanel.OpenToSection("vendors")
+    end)
 
     -- Flip the neighborhood preference. Reads the RESOLVED side, not the stored
     -- value: until the player picks one it is stored "" and shown as their own
@@ -826,23 +829,8 @@ function ShoppingController:Wire(rootFrame)
     -- Waypoint All -- chain a waypoint per vendor in the active list.
     -- Walks the tree projection (already grouped by vendor) so we visit
     -- each vendor once even if it sells multiple list items.
-    -- Buy All: at a stocked vendor, one summary confirm replaces Blizzard's
-    -- per-item non-refundable nag; while a buy runs the same button cancels.
-    HDG.UI.OnClick(rootFrame, "shoppingPanel.buyAllBtn", function()
-        if HDG.BuyQueue:IsRunning() then HDG.BuyQueue:Cancel("cancelled") return end
-        local state = HDG.Store:GetState()  -- exception(false-positive): top-level controller method (not a row factory)
-        local rows  = HDG.Selectors:Call("merchant.purchasableFromList", state, {})
-        local s     = HDG.Selectors:Call("merchant.buyAllSummary", state, {})
-        -- Currency/token-priced list items here can't bulk-buy yet -- say so rather
-        -- than silently buying only the gold ones (or nothing at an all-currency vendor).
-        if s.skippedCount > 0 then
-            HDG.Log:Info("merchant_buy", ("%d item%s here sold for a currency -- skipped (gold only for now)")
-                :format(s.skippedCount, s.skippedCount == 1 and "" or "s"))
-        end
-        if #rows == 0 then return end
-        _G.StaticPopup_Show("HDGR_BUY_ALL_CONFIRM", tostring(s.totalQty),
-            HDG.Format.FormatGold(s.totalCost), rows)
-    end)
+    -- Buy All: one confirm for the run; while a buy runs the same button stops it.
+    HDG.UI.OnClick(rootFrame, "shoppingPanel.buyAllBtn", HDG.ControllerHelpers.Mechanics.BuyAllOrStop)
 
     HDG.UI.OnClick(rootFrame, "shoppingPanel.waypointAllBtn", function()
         local vendors = _listVendors()
@@ -903,19 +891,6 @@ function ShoppingController:_RegisterPopups()
             })
         end,
     })
-
-    -- Buy All summary confirm. text args: 1 = totalQty, 2 = gold string; data =
-    -- the purchasable rows (passed to the paced BuyQueue on accept).
-    _G.StaticPopupDialogs["HDGR_BUY_ALL_CONFIRM"] = {   -- exception(boundary): StaticPopupDialogs is a Blizzard global
-        text         = "Buy %s item(s) for %s?",
-        button1      = _G.ACCEPT,
-        button2      = _G.CANCEL,
-        timeout      = 0, whileDead = false, hideOnEscape = true,
-        OnAccept     = function(self, data)
-            local ok, why = HDG.BuyQueue:Enqueue(data)
-            if not ok then HDG.Log:Warn("merchant_buy", why) end
-        end,
-    }
 end
 
 function ShoppingController:Refresh(rootFrame, ctx)

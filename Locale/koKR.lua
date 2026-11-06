@@ -218,7 +218,6 @@ HDG.Locale:Register("koKR", {
     SHOP_BUY_ALL_DISABLED = "목록의 물건을 파는 상인을 여세요.",
     QTYPICKER_BUY = "%d개 구매",
     QTYPICKER_HAVE = "보유 %s",
-    QTYPICKER_STORAGE = "보관 %d / %d",
     CFG_MERCHANT_QTY_PICKER = "장식 상인에서 우클릭 수량 선택기",
     SHOP_NO_LIST = "(목록 없음)",
     SHOP_OPEN_BTN = "열기",

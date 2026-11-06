@@ -108,6 +108,13 @@ LC.widgets["zoneHeaderPanel.title"] = {
     height = 18, width = "fill", order = 10,
     binding = "zone.title",
 }
+-- Settings cog (owner 2026-11-02, as the vendor sidebar's): Interface > Zone Scanner.
+LC.widgets["zoneHeaderPanel.settings"] = {
+    tooltip = { recipe = "SettingsCogZone" },
+    kind = "button", ["in"] = "zoneHeaderPanel", slot = "header",
+    normalAtlas = "GM-icon-settings", highlightAtlas = "GM-icon-settings-hover",
+    width = 22, height = 22, size = 22, order = 90,
+}
 LC.widgets["zoneHeaderPanel.close"] = {
     tooltip = { recipe = "Close" },
     kind = "button", ["in"] = "zoneHeaderPanel", slot = "header",

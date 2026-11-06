@@ -305,6 +305,8 @@ SlashCmdList["HDG"] = function(msg)
         D:TipDump(rest)
     elseif lower == "petscale" then
         D:PetScale()
+    elseif lower == "winterveil" then
+        D:WinterVeil()
     elseif first == "sl" then
         HDG.SelectorCallLog:Command(rest)   -- was /hdgrsl
     elseif first == "perf" then

@@ -1,3 +1,84 @@
+## [3.42.0] - 2026-11-06 (November 2026)
+
+### Added
+- **A new colour theme: Winter Veil.** Madailein Hatter's palette: snowflake text on pine green,
+  with berry red title bars and section headers and a frost blue accent. Pick it under Settings,
+  Theme. Every text colour stays easy to read, and success, warning and error stay distinct for
+  red-green colour blindness.
+- **Snow, holly and baubles.** With Winter Veil picked, snow sits along the top of the window,
+  with a sprig of holly on each corner and a garland of baubles across the title bar. Turn them
+  off with Theme decorations in Settings.
+- **An invitation when Winter Veil comes.** The first time you open the window during the Feast
+  of Winter Veil, a pop-up offers you the Winter Veil theme. Switch to it or say no thanks; either
+  way it won't ask again until next Winter Veil, and it says where to change the theme back. It
+  doesn't ask if you're already on Winter Veil.
+- **Your shopping lists beside the vendor.** When a vendor sells something on any of your
+  shopping lists, your lists open beside the vendor window. Lists with items here are marked with
+  how many; click one to make it your active list. Below them, everything your active list wants
+  from this vendor, with how many and what it costs. Click an item to choose how many to buy.
+  Items the vendor won't sell you yet are listed too, marked "Can't buy yet". The bottom shows
+  what Buy All would spend of each currency against what you have, with Buy All under it. The X
+  hides it until the next vendor; turn it off for good under Helpers, Vendors.
+- **A settings cog on the Zone Scanner, Shopping List, Quest Tracker, Lumber Tracker and vendor
+  sidebar.** It opens HDG's settings at that window's own section.
+- **How long a buy has left.** Once a few items have landed, the quantity picker shows about how
+  many seconds the rest will take, counting down as it goes. A bar fills as items arrive, three
+  dots pulse while the next is on its way, and after Stop it says it's waiting for the item
+  already on its way.
+- **ESC closes the quantity picker,** like Cancel, and stops a buy that's running.
+- **Vendor item tooltips say "Right-click to open Housing Decor Guide auto-buy assistant"** on decor the quantity picker can
+  buy. Hover the picker's X to see what it does.
+- **Auto-open Lumber Tracker is in Settings too,** under Helpers, Lumber. It's the same setting
+  as the checkbox on the Warehouse tab, so changing either changes both.
+
+### Changed
+- **Buy All and the quantity picker buy with any currency.** Gold, Community Coupons, any other
+  currency, items a vendor takes as payment, or a mix of them. They used to take gold and coupons
+  only, and Buy All skipped everything else. Buy All asks once for the whole run and says what it
+  spends of each; when it would use more than half of anything you hold, gold included, it says
+  how much. Items the vendor won't sell you yet are left out and counted. If you can't pay for it
+  all, Buy All is greyed out and the sidebar shows which currency is short.
+- **The quantity picker has a new layout.** It opens beside the vendor window, with the item's
+  icon (hover it for the item's tooltip). Your House Chest gets its own section with a bar: what
+  you'd own after this buy against the limit, how much room that leaves, and the game's own
+  Storage count with your exempt decor, in the game's words. Max sets the most you can afford.
+  When your active list wants the item, the picker opens on that many, and a List button sets it
+  back. Each currency you'd pay with is listed, with a warning when you'd spend more than half of
+  one.
+
+### Fixed
+- **The quantity picker no longer goes dead when your decor storage is full.** Once HDG's
+  storage total reached the limit, Buy greyed out without saying why, which looked like you
+  were short of gold. Storage no longer stops a buy. The picker shows your total, the game's
+  own storage counter and your exempt decor, and past the limit it warns that what doesn't fit
+  goes to your bags. When it does refuse, for no quantity or not enough of a currency, it now
+  says why.
+- **Buy All no longer stops after the first item at vendors whose decor goes to your bags.** It
+  watched the bags for the first item only, so the second item's arrival went unnoticed and the
+  run stalled.
+- **Right-click opens the quantity picker with Krowi's Extended Vendor UI.** That addon draws its
+  own item slots and HDG only reached Blizzard's, so a right-click bought one at a time.
+- **A buy that fills your decor storage partway counts every item.** Once storage was full the
+  rest went to your bags, and the picker lost count, stalled, and then offered to buy one again.
+- **Buying sends one item at a time again.** Any change to any decor's count in your House Chest
+  was taken as the item you're buying arriving, so a second item could go out while the first
+  was still on its way. The server then put one in your bags though the chest had room, and the
+  picker's count jumped by two. It now counts how many of the item have reached your chest and
+  your bags, and sends the next only when that number goes up. An item the game shows in your
+  bags for a moment on its way to the chest is counted once, not twice.
+- **Stop, then buying the rest, no longer buys one too many.** The item already on its way when
+  you pressed Stop wasn't counted. The picker now waits for it before it stops.
+- **Buying stops when the vendor closes, and Buy All's confirm closes with it.** A run used to
+  carry on until its next item arrived, and could buy from the next vendor you opened. Each item
+  is also checked to still be in its slot before it's bought, so a filter change mid-run can't
+  buy something else.
+- **The quantity picker's X lasts until you leave the vendor.** The next purchase or filter
+  change brought it back.
+- **Right-click on the vendor's Buyback tab buys back again** instead of opening the picker.
+- **Blueprints: Missing only keeps the rooms.** The filter hid a build's rooms, house and
+  fixtures along with the decor and dyes you own, so when a blueprint said rooms weren't
+  unlocked you couldn't see which rooms it needs. It now hides only owned decor and dyes.
+
 ## [3.41.0] - 2026-11-01 (November 2026)
 
 ### Added

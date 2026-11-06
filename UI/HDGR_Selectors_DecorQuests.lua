@@ -3039,10 +3039,10 @@ Selectors:Register("decorQuests.trackerDynamicRows", {
     fn = function(state, ctx)
         local h = TRACKER_BODY_PAD
         for _, row in ipairs(Selectors:Call("decorQuests.trackerRows", state, ctx)) do h = h + row.height end
-        -- The title wraps (the Full mockup): a body row's width less the X and the arrow, each
-        -- with the header's gap before it.
+        -- The title wraps (the Full mockup): a body row's width less the X, the settings cog
+        -- and the arrow, each with the header's gap before it.
         local C = HDG.Constants.DQ_TRACKER
-        local w = TRACKER_TEXT_W - (C.closeW + C.gap)
+        local w = TRACKER_TEXT_W - (C.closeW + C.gap) - (C.cogW + C.gap)
         if Selectors:Call("decorQuests.trackerArrow", state, ctx) then w = w - (C.arrowW + C.gap) end
         local lines = HDG.TextMeasure:Lines("subheading", w, Selectors:Call("decorQuests.trackerTitle", state, ctx))
         local head = math.max(TRACKER_HEADER_H, C.headPad + lines * TRACKER_LINE_H.subheading)

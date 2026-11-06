@@ -17,7 +17,9 @@
 -- Krowi's Extended Vendor UI hides Blizzard's MerchantItem1-10 on the merchant tab
 -- and draws its own slots (KrowiEVU_MerchantItem<N>, built from the same
 -- MerchantItemTemplate), so the marks reach those through its plugin API instead
--- (KrowiEVU.PluginsApi, Api/PluginsApi.lua in that addon).
+-- (KrowiEVU.PluginsApi, Api/PluginsApi.lua in that addon). The same hook hands
+-- each slot's button to MerchantObserver for the right-click quantity picker:
+-- one plugin, registered once, for both.
 
 HDG = HDG or {}
 
@@ -100,10 +102,12 @@ end
 
 -- Krowi calls this after drawing each merchant-tab slot: on every page, filter and
 -- item-data redraw, never on the Buyback tab (which shows Blizzard's own buttons).
+-- Registered whatever the overlay setting says, because the picker rides it too.
 local krowiPlugin = {}
 function krowiPlugin:OnItemSlotUpdated(slot)
     _krowiSlots[slot] = true
     _paintKrowiSlot(slot)
+    HDG.MerchantObserver:WrapBuyButton(slot.ItemButton)
 end
 MO._krowiPlugin = krowiPlugin   -- exposed for tests
 

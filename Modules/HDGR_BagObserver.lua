@@ -31,6 +31,13 @@ function B:GetBagCount(itemID)
     return _G.C_Item.GetItemCount(itemID, false, false, false, false) or 0  -- exception(boundary): C_Item nil for uncached / invalid item
 end
 
+-- An item a vendor takes as payment, counted the way Blizzard's merchant counts it
+-- (MerchantFrame.lua: GetItemCount(link, false, false, true)) -- bags plus the
+-- reagent bank, not the bank or the warband bank, which a vendor cannot draw on.
+function B:GetVendorPaymentCount(itemID)
+    return _G.C_Item.GetItemCount(itemID, false, false, true, false)
+end
+
 -- Per-storage breakdown. Derives bank/warband by subtraction across flag combinations.
 function B:GetSplit(itemID)
     if not (itemID and _G.C_Item and _G.C_Item.GetItemCount) then return 0, 0, 0 end

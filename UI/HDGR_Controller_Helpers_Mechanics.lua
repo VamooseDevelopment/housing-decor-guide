@@ -110,6 +110,42 @@ function Mech.ConfirmDeleteVersion(houseID, versionID, name, afterAccept)
     })
 end
 
+-- Buy All, shared by the shopping window and the vendor sidebar. A run in flight
+-- is stopped; otherwise one confirm covers the whole run -- it replaces
+-- Blizzard's per-item non-refundable nag -- and names every payment the run uses
+-- more than half of. Enqueue re-checks vendor and wallet on accept, so a confirm
+-- left open while the wallet moved cannot overspend.
+local BUY_ALL_CONFIRM = "HDGR_BUY_ALL_CONFIRM"
+
+function Mech.BuyAllOrStop()
+    if HDG.BuyQueue:IsRunning() then HDG.BuyQueue:Cancel("stopped by user") return end
+    local state = Mech.GetState()
+    local rows  = HDG.Selectors:Call("merchant.purchasableFromList", state, {})
+    if #rows == 0 then return end
+    HDG.UI.Confirm({
+        id       = BUY_ALL_CONFIRM,
+        text     = "%s",
+        accept   = HDG.Locale:Get("MERCHANT_CONFIRM_BUY"), cancel = _G.CANCEL,
+        textArg1 = HDG.Selectors:Call("merchant.buyAllConfirmText", state, {}),
+        data     = rows,
+        onAccept = function(_, data)
+            local ok, why = HDG.BuyQueue:Enqueue(data)
+            if not ok then HDG.Log:Warn("merchant_buy", why) end
+        end,
+    })
+end
+
+-- The confirm belongs to the vendor it was asked at, so it goes when that vendor
+-- closes -- as Blizzard's own purchase confirms do (MerchantFrame_OnHide). Left
+-- open, accepting it at the next vendor bought by the first one's slot numbers
+-- and prices.
+HDG.Store:Subscribe(function(actionType)
+    if actionType == HDG.Constants.ACTIONS.MERCHANT_SET_STATE
+       and not HDG.Store:GetState().session.merchant.open then
+        _G.StaticPopup_Hide(BUY_ALL_CONFIRM)
+    end
+end)
+
 -- Open the main window on a view, with that view's filters reset so the
 -- target is listed (a zone filter left on once hid the jumped-to vendor, and the
 -- player landed on someone else's goods).

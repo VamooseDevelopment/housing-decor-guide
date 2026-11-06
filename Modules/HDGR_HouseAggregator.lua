@@ -467,6 +467,24 @@ local function _walletSnapshot(housingNeed)
     return { lumber = _lumberList(), housing = _housingList(housingNeed) }
 end
 
+-- ===== C_CurrencyInfo readers for other modules ==============================
+-- This module owns C_CurrencyInfo (ADR-011), so a module that needs a currency
+-- read asks here rather than calling the namespace itself -- the merchant wallet
+-- (MerchantObserver) does.
+
+-- How much of a currency the player holds. 0 for a currency the client has no
+-- record of yet (never earned on this character).
+function HA:CurrencyQuantity(currencyID)
+    local info = _G.C_CurrencyInfo.GetCurrencyInfo(currencyID)
+    if not info then return 0 end   -- exception(boundary): nil for a currency this character has never seen
+    return info.quantity
+end
+
+-- The currency ID inside a currency hyperlink (a vendor's extended cost).
+function HA:CurrencyIDFromLink(link)
+    return _G.C_CurrencyInfo.GetCurrencyIDFromLink(link)
+end
+
 -- Feature picks: deterministic per-calendar-week 4-item rotation across owned items.
 local function _featuredSnapshot(catalog, owned)
     local collectedIDs = {}
@@ -797,17 +815,18 @@ end
 -- ============================================================================
 
 -- The persisted capacity cache is what the buy picker reads, at a merchant, with
--- the HDG window usually closed. It is refreshed on every trigger (three sync
--- API reads) and dispatched only when the reading changed, so it stays live
--- even while the dashboard build below is gated off.
+-- the HDG window usually closed. It is refreshed on every trigger (three sync API
+-- reads) once the window has opened this session, and before that while a vendor
+-- is open (OnStoreNotify), and dispatched only when the reading changed, so it
+-- stays live while the dashboard build below is gated off by view.
 function HA:_RefreshCapacityCache(state)
     local cap = _capacitySnapshot()
     if not (cap and cap.max > 0) then return end   -- max==0 is a cold reading, not a real cap -> don't cache it
     local cache = state.account.houseCapacityCache   -- exception(nullable): false until first capture
-    if cache and cache.owned == cap.owned and cache.max == cap.max then return end
+    if cache and cache.owned == cap.owned and cache.exempt == cap.exempt and cache.max == cap.max then return end
     HDG.Store:Dispatch({
         type    = HDG.Constants.ACTIONS.HOUSE_CAPACITY_CACHED,
-        payload = { owned = cap.owned, max = cap.max },
+        payload = { owned = cap.owned, exempt = cap.exempt, max = cap.max },
     })
 end
 
@@ -877,7 +896,21 @@ function HA:OnStoreNotify(actionType)
         self:DispatchSnapshot()
         return
     end
-    if not self._windowReady then return end
+    if not self._windowReady then
+        -- The dashboard waits for the window, but at a vendor the buy picker reads
+        -- the capacity cache, and most vendor visits never open the window. Waiting
+        -- for it left the picker with no storage line at all wherever no reading
+        -- had been saved -- a fresh install, or the reset cache from before the
+        -- exempt count (owner, in-game 2026-11-06). At a vendor the character is
+        -- in the world (the cold-client crash is a read at PLAYER_LOGIN), and the
+        -- merchant overlay's catalog load reads C_HousingCatalog at that same
+        -- moment. Nothing is owed before the window, so this builds nothing.
+        if (actionConst == "MERCHANT_SET_STATE" or SNAPSHOT_TRIGGERING_ACTIONS[actionConst])
+           and HDG.Store:GetState().session.merchant.open then
+            self:DispatchSnapshot()
+        end
+        return
+    end
     if SNAPSHOT_TRIGGERING_ACTIONS[actionConst] then
         self._dirty = true
         self:DispatchSnapshot()

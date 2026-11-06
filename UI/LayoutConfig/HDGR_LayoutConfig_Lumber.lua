@@ -16,7 +16,9 @@ LC.window.views.lumberWindow = {
     standalone     = true,                   -- standalone (HDG.Window) view, not main-window tab
     width          = "auto",
     height         = "auto",
-    columns        = { 280 },
+    -- 300 holds the header: icon, title, four 20px buttons and the X at md gaps leave
+    -- the title 130px, its room before the settings cog joined the row.
+    columns        = { 300 },
     -- 5 rows: header / radar(210, collapsible) / tracking(38, hides when no session) / counter / action.
     rows           = { 28, 210, 38, 280, 24 },
     dynamicRows    = "lumber.dynamicRows",
@@ -106,16 +108,13 @@ LC.widgets["lumberPanel.titleIcon"] = {
     atlas = "Lumber_Tracking",
     width = 18, height = 18, order = 5,
 }
+-- The title takes the row's slack and cuts with "..." when a translation is longer
+-- than that ("Rastreador de Madeira"), so the buttons and the X never leave the window.
 LC.widgets["lumberPanel.title"] = {
     tooltip = false,
     kind = "label", role = "TextHeading", ["in"] = "lumberPanel", slot = "header",
     text = "locale:LUM_TITLE", font = "heading",
-    height = 18, width = "auto", order = 10,
-}
-LC.widgets["lumberPanel.headerSpacer"] = {
-    tooltip = false,
-    kind = "spacer", ["in"] = "lumberPanel", slot = "header",
-    width = "fill", height = 18, order = 15,
+    height = 18, width = "fill", wrap = false, order = 10,
 }
 -- Zone Map: opens/closes the Blizzard zone map (BattlefieldMap) for the current area.
 LC.widgets["lumberPanel.zoneMapBtn"] = {
@@ -148,6 +147,13 @@ LC.widgets["lumberPanel.collapseToggle"] = {
     size = 20,
     width = 20, height = 20, order = 90,
     binding = { active = "lumber.radarShouldRender" },
+}
+-- Settings cog (owner 2026-11-02, as the vendor sidebar's): Helpers > Lumber.
+LC.widgets["lumberPanel.settings"] = {
+    tooltip = { recipe = "SettingsCogLumber" },
+    kind = "button", ["in"] = "lumberPanel", slot = "header",
+    normalAtlas = "GM-icon-settings", highlightAtlas = "GM-icon-settings-hover",
+    width = 20, height = 20, size = 20, order = 92,
 }
 LC.widgets["lumberPanel.close"] = {
     tooltip = false,

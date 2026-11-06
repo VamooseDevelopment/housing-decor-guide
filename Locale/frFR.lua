@@ -217,7 +217,6 @@ HDG.Locale:Register("frFR", {
     SHOP_BUY_ALL_DISABLED = "Ouvrez un marchand qui vend votre liste.",
     QTYPICKER_BUY = "Acheter %d",
     QTYPICKER_HAVE = "vous avez %s",
-    QTYPICKER_STORAGE = "stockage %d / %d",
     CFG_MERCHANT_QTY_PICKER = "Selecteur de quantite par clic droit chez les marchands de deco",
     SHOP_NO_LIST = "(aucune liste)",
     SHOP_OPEN_BTN = "Ouvrir",

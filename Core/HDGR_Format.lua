@@ -40,6 +40,7 @@ end
 --   FormatCurrency(amount, cid)  -> "1,234 <icon>"
 --   CurrencyName(cid)            -> "Ancient Mana" / "Gold" / nil
 --   FormatGold(copper)           -> FormatCurrency(gold, CURRENCY_GOLD)
+--   FormatCopper(copper)         -> "12 <gold> 50 <silver>" (sub-gold coins kept)
 --   FormatCost(amount, e)        -> "1,234 <icon>" for a currency OR item-token cost entry
 --   CostName(e)                  -> "Mark of Honor" / "Ancient Mana" / "Gold" / nil
 --   CostKey(e)                   -> "item:137642" / "currency:3363" / "currency:-1"
@@ -192,17 +193,22 @@ end
 -- session.itemNames.names.
 -- Copper renders gold, silver and copper: FormatGold floors to whole gold, and a
 -- trainer fee is often under one (500 copper, 40 silver), which showed blank.
--- The silver/copper coins stay here, on the one recipe-price path, so Mogul and
--- the vendor columns keep FormatGold's whole-gold reading.
+-- The silver/copper coins stay on the paths that charge them (recipe prices and
+-- the vendor's own prices), so Mogul and the vendor columns keep FormatGold's
+-- whole-gold reading.
+function F.FormatCopper(copper)
+    local coins = { F.FormatGold(copper) }
+    local silver, rest = math.floor(copper % 10000 / 100), copper % 100
+    if silver > 0 then coins[#coins + 1] = silver .. " " .. HDG.Constants.COIN_SILVER_ATLAS end
+    if rest > 0 then coins[#coins + 1] = rest .. " " .. HDG.Constants.COIN_COPPER_ATLAS end
+    if coins[1] == "" then table.remove(coins, 1) end
+    return table.concat(coins, " ")
+end
+
 function F.FormatRecipeCost(source)
     local parts = {}
     if source.copper then  -- exception(optional): a source priced only in currencies or items has no copper
-        local coins = { F.FormatGold(source.copper) }
-        local silver, copper = math.floor(source.copper % 10000 / 100), source.copper % 100
-        if silver > 0 then coins[#coins + 1] = silver .. " " .. HDG.Constants.COIN_SILVER_ATLAS end
-        if copper > 0 then coins[#coins + 1] = copper .. " " .. HDG.Constants.COIN_COPPER_ATLAS end
-        if coins[1] == "" then table.remove(coins, 1) end
-        parts[#parts + 1] = table.concat(coins, " ")
+        parts[#parts + 1] = F.FormatCopper(source.copper)
     end
     if source.currency then  -- exception(optional): a gold-only or free source has no currency list
         for _, c in ipairs(source.currency) do

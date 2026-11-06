@@ -257,6 +257,9 @@ HDG.LayoutConfig.widgets["chromePanel.title"] = {
 }
 
 -- Version: right-aligned, just left of the close button (chrome.spacer pushes both right).
+-- Sized to its text ("auto"): with no width it was a second fill track and took half
+-- the spacer's slack, so the Winter Veil garland, which runs up to this widget's
+-- left edge, stopped mid-bar (2026-11-01).
 -- exception(boundary): C_AddOns.GetAddOnMetadata guarded for headless / pre-load.
 local _hdgrVersion = (C_AddOns and C_AddOns.GetAddOnMetadata
     and C_AddOns.GetAddOnMetadata("HousingDecorGuide", "Version")) or nil
@@ -265,7 +268,7 @@ HDG.LayoutConfig.widgets["chromePanel.version"] = {
     kind     = "label", role = "TextDim", ["in"] = "chrome.body",
     font     = "caption", justifyH = "RIGHT",
     text     = _hdgrVersion and ("v" .. _hdgrVersion) or "",
-    height   = 14, order = 90,
+    width    = "auto", height = 14, order = 90,
 }
 
 -- Essence of Lumber badge: the item icon with an account-wide count badge and a

@@ -23,6 +23,12 @@ end
 
 -- ===== Appearance ==========================================================
 setting("THEME", "scheme", HDG.Constants.DEFAULT_SCHEME, Scope.Profile)
+-- A seasonal theme's title-bar art (Winter Veil's snow, holly and baubles). On by
+-- default: the art only ever shows while the player has picked that theme.
+setting("THEME_DECORATIONS", "themeDecorations", true, Scope.Profile)
+-- The start year of the last Winter Veil whose theme offer was answered; per
+-- profile because the theme it offers is (UI/HDGR_Controller_WinterVeilOffer.lua).
+setting("WINTER_VEIL_OFFERED", "winterVeilOffered", 0, Scope.Profile)
 setting("DECOR_PREVIEW_BG", "decorPreviewBg", "default", Scope.Profile)
 setting("SCALE", "scale", 1.0, Scope.Profile)
 setting("FONT", "fontFamily", "default", Scope.Profile)
@@ -41,6 +47,7 @@ setting("BAG_BADGE", "bagBadge", true, Scope.Profile)
 setting("MERCHANT_DECOR_OVERLAY", "merchantDecorOverlay", true, Scope.Profile)
 setting("MERCHANT_QTY_PICKER", "merchantQtyPicker", false, Scope.Profile)
 setting("MERCHANT_QTY_PICKER_AUTO_CLOSE", "merchantQtyPickerAutoClose", false, Scope.Profile)
+setting("MERCHANT_VENDOR_SIDEBAR", "merchantVendorSidebar", true, Scope.Profile)
 -- Off by default: SetItemByID on a material row pulls in Blizzard's whole item
 -- block plus every other addon's TooltipDataProcessor lines, which is the
 -- visibility problem the title-only material tooltip was chosen to avoid.

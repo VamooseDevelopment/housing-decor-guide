@@ -43,6 +43,18 @@ function D:Help()
     _cmd("/hdgr sl <cmd>",         "selector call-count profiler: start / stop / dump / clear")
     _cmd("/hdgr perf [on/off/reset]", "performance profiler (bare opens the window)")
     _cmd("/hdgr doors",            "door audit for the OPEN Architect canvas (ShapeAtlas verify)")
+    _cmd("/hdgr winterveil",       "show the Winter Veil theme offer now (closing it uses up nothing)")
+end
+
+-- The window's first build waits for combat end, so the pop-up would have no
+-- window to sit on.
+function D:WinterVeil()
+    if InCombatLockdown() then  -- exception(boundary): Blizzard combat lockdown
+        _print("/hdgr winterveil: out of combat only")
+        return
+    end
+    if not HDG.Store:GetState().account.ui.mainWindowShown then HDG:ToggleMainWindow() end
+    HDG.WinterVeilOffer.Preview(HDG.mainFrame)
 end
 
 -- ===== Config toggles =======================================================

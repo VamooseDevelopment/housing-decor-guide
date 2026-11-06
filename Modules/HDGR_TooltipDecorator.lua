@@ -3,10 +3,11 @@
 -- per ADR-014: hook TooltipDataProcessor to append HDG lines to item tooltips.
 -- Selectors stay pure; state reads happen inside the post-call hook boundary.
 --
--- Three line families appended (best-effort; each skipped if data missing):
+-- Four line families appended (best-effort; each skipped if data missing):
 --   1. Decor catalog row -> "HDG: Decor (<expansion>) - <source>"
 --   2. Queue presence    -> "HDG: In craft queue (Nx remaining)"
 --   3. Reagent usage     -> "HDG: Used in N decor recipes"
+--   4. Quantity picker   -> "Right-click to open Housing Decor Guide auto-buy assistant" (vendor item buttons)
 -- Work per item: O(1) table lookups + O(queue-length) walk (queue caps ~30).
 
 HDG = HDG or {}
@@ -34,6 +35,14 @@ local function decorLine(itemID)
         return string.format("%s%s - %s", ACCENT_PREFIX(), head, src)
     end
     return ACCENT_PREFIX() .. head
+end
+
+-- At a vendor, on an item the quantity picker takes: how to open it. Gated on
+-- the same check as the right-click itself, so an X'd visit shows no hint.
+local function pickerLine(tooltip, itemID)
+    local owner = tooltip:GetOwner()
+    if not (owner and HDG.MerchantObserver:PickerHint(owner, itemID)) then return nil end   -- exception(nullable): a tooltip can have no owner
+    return ACCENT_PREFIX() .. HDG.Locale:Get("QTYPICKER_HINT")
 end
 
 -- Queue presence line. Walks queue once; first match wins.
@@ -181,6 +190,7 @@ function TD:DecorateItemTooltip(tooltip, tooltipData)
         local r = reagentLine(itemID); if r then lines[#lines + 1] = r end
     end
     local q = queueLine(itemID); if q then lines[#lines + 1] = q end
+    local p = pickerLine(tooltip, itemID); if p then lines[#lines + 1] = p end
     for _, line in ipairs(lines) do
         tooltip:AddLine(line, 1, 1, 1, false)   -- white, no wrap
     end

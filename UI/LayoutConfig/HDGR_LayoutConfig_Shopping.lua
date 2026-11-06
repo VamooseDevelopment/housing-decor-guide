@@ -144,6 +144,14 @@ LC.widgets["shoppingHeaderPanel.clickHints"] = {
     rightText = "locale:SHOP_HINT_RIGHT",
     width = 34, height = 16, order = 90,
 }
+-- Settings cog (owner 2026-11-02, as the vendor sidebar's): Helpers > Vendors, where
+-- the vendor sidebar, Buy All's quantity picker and the vendor marks are set.
+LC.widgets["shoppingHeaderPanel.settings"] = {
+    tooltip = { recipe = "SettingsCogShopping" },
+    kind = "button", ["in"] = "shoppingHeaderPanel", slot = "header",
+    normalAtlas = "GM-icon-settings", highlightAtlas = "GM-icon-settings-hover",
+    width = 22, height = 22, size = 22, order = 92,
+}
 LC.widgets["shoppingHeaderPanel.close"] = {
     tooltip = { recipe = "Close" },
     kind = "button", ["in"] = "shoppingHeaderPanel", slot = "header",

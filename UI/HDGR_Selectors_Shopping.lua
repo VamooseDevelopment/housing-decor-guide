@@ -467,8 +467,17 @@ Selectors:Register("shopping.entriesByZone", {
 -- ===== Vendor buying (spec docs/HDGR_VENDOR_BUYING_SPEC.md s4) ===============
 -- Join key = "itemID stocked at the OPEN merchant", NOT the list entry's stored
 -- npcID, so an equivalent vendor selling the same decor still fulfils the list.
-Selectors:Register("merchant.purchasableFromList", {
-    reads = { "session.merchant" },
+--
+-- Any price the vendor charges is bought: gold, a currency, items taken as
+-- payment, or a mix (Core/HDGR_MerchantWallet.lua). What stays out of Buy All is
+-- what the vendor will not sell you yet (isPurchasable false -- reputation and
+-- the like) and a slot whose price has not streamed in.
+local W = HDG.MerchantWallet
+
+-- The active list's entries this vendor sells, locked or not:
+-- { { entry, stock, buyable }, ... } in list order.
+Selectors:Register("merchant.stockedFromList", {
+    reads = { "session.merchant.open", "session.merchant.byItemID" },
     calls = { "shopping.activeListEntries" },
     fn = function(state, ctx)
         local m = state.session.merchant
@@ -476,64 +485,306 @@ Selectors:Register("merchant.purchasableFromList", {
         local out = {}
         for _, e in ipairs(Selectors:Call("shopping.activeListEntries", state, ctx)) do
             local stock = m.byItemID[e.itemID]
-            -- Only gold-priced decor is bulk-buyable for now; currency/token items
-            -- are counted as skipped (buyAllSummary) and left for a normal buy.
-            if stock and stock.goldOnly then   -- exception(nullable): vendor doesn't carry this / not gold-only
-                -- Field names ARE the BuyQueue:Enqueue contract ({index, qty, price,
-                -- name}) -- these rows are passed straight to Enqueue on Buy All.
-                -- itemID + npcID identify the source list entry so BuyQueue can
-                -- decrement it as each unit lands (ADJUST_QTY matches on both).
-                out[#out + 1] = { itemID = e.itemID, npcID = e.npcID, name = stock.name,
-                                  qty = e.qty, index = stock.index, price = stock.price,
-                                  lineCost = stock.price * e.qty }
+            if stock then   -- exception(nullable): this vendor doesn't carry it
+                out[#out + 1] = { entry = e, stock = stock, buyable = W.IsBuyable(stock) }
             end
         end
         return out
     end,
 })
 
--- Summary for the Buy All confirm. listCoverage counts stocked-vs-total list rows.
-Selectors:Register("merchant.buyAllSummary", {
-    reads = { "session.merchant" },
-    calls = { "merchant.purchasableFromList", "shopping.activeListEntries" },
+-- What Buy All buys. Field names ARE the BuyQueue:Enqueue contract ({ index,
+-- itemID, qty, costs, name }) -- these rows go straight to Enqueue on accept.
+-- npcID rides along to identify the source list entry.
+Selectors:Register("merchant.purchasableFromList", {
+    calls = { "merchant.stockedFromList" },
     fn = function(state, ctx)
-        local rows    = Selectors:Call("merchant.purchasableFromList", state, ctx)
-        local entries = Selectors:Call("shopping.activeListEntries", state, ctx)
-        local m = state.session.merchant
-        local qty, cost = 0, 0
-        for _, r in ipairs(rows) do qty = qty + r.qty; cost = cost + r.lineCost end
-        -- Skipped = list items this vendor stocks that carry a currency/token cost
-        -- (hasCost, NOT merely non-gold -- a free item isn't "sold for a currency")
-        -- -- surfaced so Buy All isn't silently partial.
-        local skipped = 0
-        for _, e in ipairs(entries) do
-            local stock = m.byItemID[e.itemID]
-            if stock and stock.hasCost then skipped = skipped + 1 end
+        local out = {}
+        for _, s in ipairs(Selectors:Call("merchant.stockedFromList", state, ctx)) do
+            if s.buyable then
+                out[#out + 1] = { itemID = s.entry.itemID, npcID = s.entry.npcID, name = s.stock.name,
+                                  qty = s.entry.qty, index = s.stock.index, costs = s.stock.costs }
+            end
         end
-        return { rowCount = #rows, totalQty = qty, totalCost = cost, skippedCount = skipped,
-                 listCoverage = ("%d of %d list items sold here"):format(#rows, #entries) }
+        return out
     end,
 })
 
--- Buy All button: enabled only at an open vendor stocking >=1 list item.
-Selectors:Register("merchant.buyAllEnabled", {
-    reads = { "session.merchant" },
-    calls = { "merchant.purchasableFromList" },
+-- The whole run, priced against the wallet: what it spends of each payment
+-- (spend: MerchantWallet.Assess entries), the first payment it cannot cover
+-- (short, or nil), and how many list items here are left out as locked.
+Selectors:Register("merchant.buyAllSummary", {
+    reads = { "session.merchant.wallet" },
+    calls = { "merchant.purchasableFromList", "merchant.stockedFromList" },
     fn = function(state, ctx)
-        return state.session.merchant.open
-           and #Selectors:Call("merchant.purchasableFromList", state, ctx) > 0
+        local rows = Selectors:Call("merchant.purchasableFromList", state, ctx)
+        local qty = 0
+        for _, r in ipairs(rows) do qty = qty + r.qty end
+        local spend = W.Assess(W.Spend(rows), state.session.merchant.wallet)
+        return { rowCount = #rows, totalQty = qty, spend = spend, short = W.FirstShort(spend),
+                 lockedCount = #Selectors:Call("merchant.stockedFromList", state, ctx) - #rows }
     end,
 })
 
--- Button label: "Cancel (done/total)" while a buy runs, else the localized "Buy All".
+local function _countLine(n, oneKey, manyKey)
+    if n == 1 then return HDG.Locale:Get(oneKey) end
+    return HDG.Locale:Get(manyKey):format(n)
+end
+
+-- The Buy All confirm's body: "Buy 18 items?", what it spends of each payment,
+-- every payment it uses more than half of (warning colour), and the locked items
+-- it leaves out. account.config.scheme / locale: colour codes and words baked in.
+Selectors:Register("merchant.buyAllConfirmText", {
+    reads = { "account.config.scheme", "account.config.locale" },
+    calls = { "merchant.buyAllSummary" },
+    fn = function(state, ctx)
+        local s = Selectors:Call("merchant.buyAllSummary", state, ctx)
+        local lines = { _countLine(s.totalQty, "MERCHANT_CONFIRM_ONE", "MERCHANT_CONFIRM_MANY"),
+                        W.SpendLine(s.spend) }
+        local warn = W.WarnLines(s.spend)
+        if #warn > 0 then
+            lines[#lines + 1] = HDG.Theme:ColorCode("semantic.warning") .. table.concat(warn, "\n") .. "|r"
+        end
+        if s.lockedCount > 0 then
+            lines[#lines + 1] = _countLine(s.lockedCount, "MERCHANT_LOCKED_ONE", "MERCHANT_LOCKED_MANY")
+        end
+        return table.concat(lines, "\n")
+    end,
+})
+
+-- Buy All button (shopping window and vendor sidebar): while a run is going it is
+-- the Stop button, so it stays live; otherwise it needs something to buy and a
+-- wallet that covers all of it -- the sidebar's footer names what's short.
+Selectors:Register("merchant.buyAllEnabled", {
+    reads = { "session.merchant.open", "session.merchant.buying" },
+    calls = { "merchant.buyAllSummary" },
+    fn = function(state, ctx)
+        local m = state.session.merchant
+        if not m.open then return false end
+        if m.buying then return true end
+        local s = Selectors:Call("merchant.buyAllSummary", state, ctx)
+        return s.totalQty > 0 and s.short == nil
+    end,
+})
+
+-- Shopping window's Buy All label: "Stop (done/total)" while a run goes -- this
+-- window has no other progress readout -- else "Buy All (N)", or plain "Buy All"
+-- with nothing here to buy.
 Selectors:Register("merchant.buyAllLabel", {
     -- account.config.locale: the idle label is localized, and this button lives on
     -- the shopping SATELLITE window, which RefreshMainWindow doesn't repaint on a
     -- locale switch -- so declare the dependency to invalidate the label directly.
     reads = { "session.merchant.buying", "account.config.locale" },
+    calls = { "merchant.buyAllSummary" },
     fn = function(state, ctx)
         local b = state.session.merchant.buying
-        if b then return ("Cancel (%d/%d)"):format(b.done, b.total) end
-        return HDG.Locale:Get("SHOP_BUY_ALL")
+        if b then return HDG.Locale:Get("SHOP_BUY_ALL_STOP"):format(b.done, b.total) end
+        local n = Selectors:Call("merchant.buyAllSummary", state, ctx).totalQty
+        if n == 0 then return HDG.Locale:Get("SHOP_BUY_ALL") end
+        return HDG.Locale:Get("SHOP_BUY_ALL_COUNT"):format(n)
+    end,
+})
+
+-- ===== Vendor sidebar (UI/HDGR_Controller_VendorSidebar.lua) =================
+-- Beside Blizzard's merchant window: every list with how many of its items this
+-- vendor sells, the active list's items here with their prices, the run's spend
+-- against the wallet, and Buy All. Mockup docs/mockups/vendor_sidebar.html.
+
+-- How many of a list's items this vendor sells -- the same items
+-- shopping.activeListEntries keeps (catalog decor and housing dyes), so the
+-- active list's count and its item rows agree.
+local function _countHere(list, byItemID, sweep)
+    local n = 0
+    for _, entry in ipairs(list.items) do
+        if byItemID[entry.itemID] and _isShoppable(entry.itemID, sweep) then n = n + 1 end
+    end
+    return n
+end
+
+-- Lists with items at this vendor on top (owner 2026-11-02: with many lists the
+-- ones that matter here were scrolled out of sight), then the rest; each half
+-- keeps the switcher's order.
+local function _hereFirst(rows)
+    local out = {}
+    for _, r in ipairs(rows) do if r.here > 0 then out[#out + 1] = r end end
+    for _, r in ipairs(rows) do if r.here == 0 then out[#out + 1] = r end end
+    return out
+end
+
+-- Every list: { { id, name, here, active }, ... }, those with items here first.
+Selectors:Register("merchant.sidebarLists", {
+    reads = { "account.vendorShoppingLists", "account.activeShoppingListId", "session.merchant.open",
+              "session.merchant.byItemID", "session.resolvers.catalog.tick" },
+    calls = { "shopping.activeListMenuItems" },
+    fn = function(state, ctx)
+        local m = state.session.merchant
+        local lists, active = state.account.vendorShoppingLists, state.account.activeShoppingListId
+        local sweep = state.session.resolvers.catalog.tick
+        local out = {}
+        for _, item in ipairs(Selectors:Call("shopping.activeListMenuItems", state, ctx)) do
+            out[#out + 1] = { id = item.value, name = item.text, active = item.value == active,
+                              here = m.open and _countHere(lists[item.value], m.byItemID, sweep) or 0 }
+        end
+        return _hereFirst(out)
+    end,
+})
+
+-- Shown at an open vendor that sells something on any list, unless the setting
+-- is off or the X hid it for this visit. Kept up while a run goes: the purchase
+-- credit takes bought items off the list, and the last one landing would
+-- otherwise pull the sidebar away from under its own progress bar.
+Selectors:Register("merchant.sidebarShown", {
+    reads = { "session.merchant.open", "session.merchant.sidebarDismissed", "session.merchant.buying",
+              "account.config.merchantVendorSidebar" },
+    calls = { "merchant.sidebarLists" },
+    fn = function(state, ctx)
+        local m = state.session.merchant
+        if not (m.open and state.account.config.merchantVendorSidebar) or m.sidebarDismissed then return false end
+        if m.buying then return true end
+        for _, list in ipairs(Selectors:Call("merchant.sidebarLists", state, ctx)) do
+            if list.here > 0 then return true end
+        end
+        return false
+    end,
+})
+
+local function _activeListName(state, ctx)
+    local list = Selectors:Call("shopping.activeList", state, ctx)
+    if not list then return HDG.Locale:Get("SHOP_NO_LIST") end   -- exception(nullable): no list is active
+    return list.name
+end
+
+-- "<list> at this vendor".
+Selectors:Register("merchant.sidebarHeading", {
+    reads = { "account.config.locale" },
+    calls = { "shopping.activeList" },
+    fn = function(state, ctx)
+        return HDG.Locale:Get("VSIDE_AT_VENDOR"):format(_activeListName(state, ctx))
+    end,
+})
+
+-- One cost per line, for the item row's right column ("120g" over "20 Undercoin").
+local function _costLines(costs, qty)
+    local lines = {}
+    for _, cost in ipairs(costs) do lines[#lines + 1] = W.FormatAmount(cost, cost.amount * qty) end
+    return table.concat(lines, "\n")
+end
+
+local function _sidebarItem(s)
+    local e, stock = s.entry, s.stock
+    local ed = { itemID = e.itemID, npcID = e.npcID, icon = stock.icon, buyable = s.buyable,
+                 name = stock.name or "?" }   -- exception(boundary): MerchantItemInfo.name is nilable while a slot streams in
+    if s.buyable then
+        ed.sub  = HDG.Locale:Get("VSIDE_WANT"):format(e.qty, W.FormatCosts(stock.costs, 1))
+        ed.cost = _costLines(stock.costs, e.qty)
+    else
+        ed.sub  = HDG.Locale:Get("VSIDE_LOCKED")
+        ed.cost = HDG.Locale:Get("VSIDE_NOT_IN_BUY_ALL")
+    end
+    return ed
+end
+
+-- The active list's items at this vendor, as row envelopes: { itemID, npcID,
+-- icon, name, buyable, sub, cost }. sub/cost carry their colour codes.
+Selectors:Register("merchant.sidebarItems", {
+    reads = { "account.config.scheme", "account.config.locale" },
+    calls = { "merchant.stockedFromList" },
+    fn = function(state, ctx)
+        local out = {}
+        for _, s in ipairs(Selectors:Call("merchant.stockedFromList", state, ctx)) do
+            out[#out + 1] = _sidebarItem(s)
+        end
+        return out
+    end,
+})
+
+Selectors:Register("merchant.sidebarHasItems", {
+    calls = { "merchant.stockedFromList" },
+    fn = function(state, ctx) return #Selectors:Call("merchant.stockedFromList", state, ctx) > 0 end,
+})
+
+Selectors:Register("merchant.sidebarEmpty", {
+    calls = { "merchant.sidebarHasItems" },
+    fn = function(state, ctx) return not Selectors:Call("merchant.sidebarHasItems", state, ctx) end,
+})
+
+-- "Nothing on <list> is sold here." and where to look instead.
+Selectors:Register("merchant.sidebarEmptyText", {
+    reads = { "account.config.locale" },
+    calls = { "shopping.activeList" },
+    fn = function(state, ctx)
+        return HDG.Locale:Get("VSIDE_EMPTY"):format(_activeListName(state, ctx))
+            .. "\n\n" .. HDG.Locale:Get("VSIDE_EMPTY_HINT")
+    end,
+})
+
+-- One wallet line: "Undercoin: 320 of 400  .  80%". The amount keeps its
+-- payment's colour; a payment the run uses more than half of reads in the
+-- warning colour, one it cannot cover in the error colour.
+local function _walletLine(e)
+    local text = HDG.Locale:Get("VSIDE_WALLET_LINE"):format(W.Name(e), W.FormatAmount(e, e.amount),
+                                                         W.PlainAmount(e, e.have))
+    if e.short then
+        return HDG.Theme:ColorCode("semantic.error") .. HDG.Locale:Get("VSIDE_WALLET_SHORT"):format(text) .. "|r"
+    end
+    if e.flagged then
+        return HDG.Theme:ColorCode("semantic.warning") .. HDG.Locale:Get("VSIDE_WALLET_PCT"):format(text, e.pct) .. "|r"
+    end
+    return text
+end
+
+-- The footer's spend, one line per payment, or "0 items" with nothing to buy.
+Selectors:Register("merchant.sidebarWalletText", {
+    reads = { "account.config.scheme", "account.config.locale" },
+    calls = { "merchant.buyAllSummary" },
+    fn = function(state, ctx)
+        local spend = Selectors:Call("merchant.buyAllSummary", state, ctx).spend
+        if #spend == 0 then return HDG.Locale:Get("VSIDE_ZERO") end
+        local lines = {}
+        for _, e in ipairs(spend) do lines[#lines + 1] = _walletLine(e) end
+        return table.concat(lines, "\n")
+    end,
+})
+
+Selectors:Register("merchant.isBuying", {
+    reads = { "session.merchant.buying" },
+    fn = function(state) return state.session.merchant.buying ~= nil end,
+})
+
+Selectors:Register("merchant.notBuying", {
+    reads = { "session.merchant.buying" },
+    fn = function(state) return state.session.merchant.buying == nil end,
+})
+
+-- "Bought 4 of 18" while a run goes.
+Selectors:Register("merchant.sidebarProgressText", {
+    reads = { "session.merchant.buying", "account.config.locale" },
+    fn = function(state)
+        local b = state.session.merchant.buying
+        if not b then return "" end
+        return HDG.Locale:Get("VSIDE_BOUGHT"):format(b.done, b.total)
+    end,
+})
+
+Selectors:Register("merchant.sidebarProgress", {
+    reads = { "session.merchant.buying" },
+    fn = function(state)
+        local b = state.session.merchant.buying
+        if not b then return 0 end
+        -- total >= 1: the queue refuses a run with nothing to buy.
+        return b.done / b.total
+    end,
+})
+
+-- The sidebar's Buy All: "Stop" while a run goes -- the progress line above it
+-- carries the count -- else "Buy All (N)", or plain "Buy All" with nothing here.
+Selectors:Register("merchant.sidebarBuyLabel", {
+    reads = { "session.merchant.buying", "account.config.locale" },
+    calls = { "merchant.buyAllSummary" },
+    fn = function(state, ctx)
+        if state.session.merchant.buying then return HDG.Locale:Get("MERCHANT_STOP") end
+        local n = Selectors:Call("merchant.buyAllSummary", state, ctx).totalQty
+        if n == 0 then return HDG.Locale:Get("SHOP_BUY_ALL") end
+        return HDG.Locale:Get("SHOP_BUY_ALL_COUNT"):format(n)
     end,
 })

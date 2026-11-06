@@ -12,65 +12,195 @@ local A   -- ACTIONS alias, bound lazily in handlers (Constants loads before Mod
 -- (e.g. MOTHER in the Chamber of Heart) and throws on :match under addon taint
 -- (Reference/MIDNIGHT_SECRET_VALUES.md). The scan keys everything off itemID, so
 -- npcID was never read -- don't reintroduce the GUID parse.
--- Coupons per unit, or nil when this slot is not bought with them.
+
+-- ===== Prices: every slot's cost as components ===============================
+-- HDG buys with anything a vendor charges -- gold, any currency, items taken as
+-- payment, or a mix (the shape is in Core/HDGR_MerchantWallet.lua). It used to
+-- take gold and, from 2026-08-12, Community Coupons only.
 --
--- Deliberately narrow: EXACTLY ONE cost component, and that component is the
--- Community Coupons currency. A slot with two components, or an item-token cost,
--- returns nil and stays out of the bulk-buy path -- the point of this gate is
--- that HDG never spends a currency it did not recognise. Asked for by
--- madaileinhatter (Discord 2026-08-12); the picker previously refused every
--- coupon-priced item because it tested for gold.
+-- Classified the way Blizzard's merchant does (MerchantFrame.lua,
+-- MerchantFrame_UpdateAltCurrency and the shift-click split):
+-- GetMerchantItemCostInfo(index) is how many components the slot has, and
+-- GetMerchantItemCostItem(index, i) -> texture, value, link, currencyName over
+-- i = 1..MAX_ITEM_COST, skipping empty components. A component with a
+-- currencyName is a currency; a link without one is an item paid as currency.
 --
--- GetMerchantItemCostItem(index, costIndex) -> texture, value, link, currencyName.
--- A currency component carries currencyName and a currency link; an item
--- component carries an item link and no currencyName (Blizzard's own test,
--- MerchantFrame.lua:692).
-local function _couponCost(index, costCount)
-    if costCount ~= 1 then return nil end   -- exception(nullable): gold-only or a multi-part cost
-    local _, value, link, currencyName = GetMerchantItemCostItem(index, 1)  -- exception(boundary): classic non-namespaced merchant global
-    if not (link and currencyName and value and value > 0) then return nil end  -- exception(boundary): item-token cost, or a slot still streaming in
-    local currencyID = _G.C_CurrencyInfo.GetCurrencyIDFromLink(link)
-    if currencyID ~= HDG.Constants.COUPON_CURRENCY_ID then return nil end   -- exception(nullable): some other currency
-    return value
+-- A component that is there but not readable yet -- no link or no value while
+-- the slot streams in -- makes the WHOLE price unreadable: costs comes back
+-- empty, nothing buys the slot, and the next MERCHANT_UPDATE rescans it.
+local W = HDG.MerchantWallet
+
+local function _currencyCost(value, link, currencyName, texture)
+    local id = HDG.HouseAggregator:CurrencyIDFromLink(link)
+    if not id then return nil end   -- exception(boundary): currency link not resolvable yet
+    return { kind = "currency", key = "currency:" .. id, id = id, amount = value,
+             name = currencyName, icon = texture }
 end
 
+local function _itemCost(value, link, texture)
+    local id   = tonumber(link:match("item:(%d+)"))
+    local name = link:match("|h%[(.-)%]|h")
+    if not (id and name) then return nil end   -- exception(boundary): item link not fully streamed in
+    return { kind = "item", key = "item:" .. id, id = id, amount = value, name = name, icon = texture }
+end
+
+-- One extended-cost component: a cost table, false for an empty component, or
+-- nil for one that is there but not readable yet.
+local function _costComponent(index, i)
+    local texture, value, link, currencyName = GetMerchantItemCostItem(index, i)  -- exception(boundary): classic non-namespaced merchant global
+    if not texture then return false end   -- empty component: Blizzard skips these too
+    if not (link and value and value > 0) then return nil end   -- exception(boundary): slot still streaming in
+    if currencyName then return _currencyCost(value, link, currencyName, texture) end
+    return _itemCost(value, link, texture)
+end
+
+-- The extended-cost components, or nil when any is unreadable or fewer were
+-- read than the slot declares.
+local function _extendedCosts(index, declared)
+    local out = {}
+    for i = 1, HDG.Constants.MERCHANT_MAX_COST_COMPONENTS do
+        local cost = _costComponent(index, i)
+        if cost == nil then return nil end
+        if cost then out[#out + 1] = cost end
+    end
+    if #out ~= declared then return nil end   -- exception(boundary): a declared component has not streamed in
+    return out
+end
+
+local function _readCosts(index, info)
+    local declared = GetMerchantItemCostInfo(index) or 0   -- exception(boundary): classic non-namespaced merchant global
+    local extended = {}
+    if declared > 0 then
+        extended = _extendedCosts(index, declared)
+        if not extended then return {} end   -- unreadable price: buy nothing
+    end
+    local costs = {}
+    if info.price > 0 then costs[1] = { kind = "gold", key = W.GOLD_KEY, amount = info.price } end
+    for _, cost in ipairs(extended) do costs[#costs + 1] = cost end
+    return costs
+end
+
+-- numAvailable is carried for display only. Do NOT cap a bulk buy with it:
+-- housing decor is unlimited stock (see HDGR_QuantityPicker:Open).
 local function _scan()
     local byItemID = {}
     for i = 1, GetMerchantNumItems() do
         local itemID = GetMerchantItemID(i)
         local info   = C_MerchantFrame.GetItemInfo(i)
         if itemID and info then   -- exception(boundary): slots stream in; nil rows on an early MERCHANT_UPDATE
-            local costCount = GetMerchantItemCostInfo(i) or 0   -- exception(boundary): classic non-namespaced merchant global
-            byItemID[itemID] = { index = i, price = info.price,
-                                 name = info.name, numAvailable = info.numAvailable,
-                                 -- goldOnly: positive gold price AND zero extended-cost
-                                 -- components -> bulk-buyable. hasCost: has a currency/token
-                                 -- cost -> distinguishes currency items from free ones so
-                                 -- Buy All's "sold for a currency" skip note is accurate.
-                                 -- numAvailable is carried for display only. Do NOT
-                                 -- cap a bulk buy with it: housing decor is
-                                 -- unlimited stock (see HDGR_QuantityPicker:Open).
-                                 goldOnly    = (info.price or 0) > 0 and costCount == 0,
-                                 hasCost     = costCount > 0,
-                                 couponPrice = _couponCost(i, costCount) }
+            byItemID[itemID] = { index = i, name = info.name, icon = info.texture,
+                                 numAvailable = info.numAvailable,
+                                 isPurchasable = info.isPurchasable,
+                                 costs = _readCosts(i, info) }
         end
     end
     return byItemID
 end
 
+-- ===== Wallet: what the player holds of everything this vendor charges ======
+-- In state so the selectors (Buy All confirm, sidebar footer, picker) stay pure.
+-- Gold always; a currency or payment item for each the vendor's prices name.
+-- The reads go through each namespace's owner: C_CurrencyInfo is HouseAggregator's,
+-- C_Item.GetItemCount is BagObserver's (ADR-011).
+local function _balance(cost)
+    if cost.kind == "currency" then return HDG.HouseAggregator:CurrencyQuantity(cost.id) end
+    return HDG.BagObserver:GetVendorPaymentCount(cost.id)
+end
+
+local function _readWallet(byItemID)
+    local wallet = { [W.GOLD_KEY] = GetMoney() }
+    for _, stock in pairs(byItemID) do
+        for _, cost in ipairs(stock.costs) do
+            if wallet[cost.key] == nil then wallet[cost.key] = _balance(cost) end
+        end
+    end
+    return wallet
+end
+
+local function _sameWallet(a, b)
+    for key, have in pairs(a) do
+        if b[key] ~= have then return false end
+    end
+    for key in pairs(b) do
+        if a[key] == nil then return false end
+    end
+    return true
+end
+
 function MO:ScanNow()
     A = HDG.Constants.ACTIONS
+    local byItemID = _scan()
     HDG.Store:Dispatch({ type = A.MERCHANT_SET_STATE, payload = {
-        open = true, byItemID = _scan(),
+        open = true, byItemID = byItemID, wallet = _readWallet(byItemID),
     }})
+end
+
+-- Money, currency or bags changed. Only the open vendor's wallet is kept, and an
+-- unchanged one is not re-dispatched: a buy fires several of these per unit.
+function MO:RefreshWallet()
+    local m = HDG.Store:GetState().session.merchant
+    if not m.open then return end
+    local wallet = _readWallet(m.byItemID)
+    if _sameWallet(wallet, m.wallet) then return end
+    HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.MERCHANT_WALLET_SET, payload = { wallet = wallet } })
 end
 
 -- ===== Right-click quantity-picker override (spec s5.1) =====================
 -- Wrap each merchant item button's OnClick: a right-click on a DECOR slot opens
--- HDG's quantity picker; everything else (left-click pickup, non-decor rows)
--- delegates to Blizzard's original handler. Restored verbatim on close so the
--- frame is never left altered. Gated behind MERCHANT_QTY_PICKER so a patch that
+-- HDG's quantity picker; everything else (left-click pickup, non-decor rows, the
+-- Buyback tab) goes to the button's own handler. Restored on close so the frame
+-- is never left altered. Gated behind MERCHANT_QTY_PICKER so a patch that
 -- re-templates the buttons can be worked around with one toggle.
+
+-- Decor with a readable price on the vendor's own tab, at a vendor the picker
+-- was not X'd away from. The Buyback tab reuses the same buttons with GetID()
+-- as the buyback index, so a right-click there must buy back, not open the
+-- picker for whatever the vendor lists at that number.
+local function _pickerTakes(itemID)
+    if MerchantFrame.selectedTab ~= 1 then return false end
+    local stock = itemID and HDG.Store:GetState().session.merchant.byItemID[itemID]   -- exception(nullable): an empty slot, or one the snapshot has not seen
+    return stock and W.IsBuyable(stock) and not HDG.QuantityPicker:IsOptedOut()
+        and HDG.HousingCatalogObserver:GetRow(itemID) ~= nil   -- exception(nullable): non-decor rows delegate to Blizzard
+end
+
+-- Wrap one merchant item button. Called for Blizzard's MerchantItemN buttons on
+-- MERCHANT_SHOW, and for every slot Krowi's Extended Vendor UI draws
+-- (MerchantOverlay's plugin hook): that addon hides Blizzard's buttons and draws
+-- its own from the same template, so wrapping only Blizzard's left right-click
+-- buying one at a time wherever its vendor sidebar was on (owner, in-game
+-- 2026-11-06).
+--
+-- Keyed by button, with our wrapper kept beside the handler it wraps. A button
+-- whose script was set again since -- the other addon redrawing it -- is wrapped
+-- again around the new handler, and restoring puts a handler back only where
+-- ours is still the one installed.
+function MO:WrapBuyButton(btn)
+    if not HDG.Config:Get("MERCHANT_QTY_PICKER") then return end
+    MO._wrapped = MO._wrapped or {}
+    local orig = btn:GetScript("OnClick")
+    local seen = MO._wrapped[btn]
+    if seen and orig == seen.wrapper then return end   -- exception(nullable): a button not wrapped yet
+    local function wrapper(self, mouseButton, down)
+        local itemID = GetMerchantItemID(self:GetID())
+        if mouseButton == "RightButton" and _pickerTakes(itemID) then
+            HDG.QuantityPicker:Open(itemID)
+        elseif orig then   -- exception(nullable): a button with no click handler of its own
+            orig(self, mouseButton, down)
+        end
+    end
+    MO._wrapped[btn] = { orig = orig, wrapper = wrapper }
+    btn:SetScript("OnClick", wrapper)
+end
+
+-- Whether a right-click on this button opens the picker for this item: the
+-- button carries our wrapper now, and the picker takes the item. The vendor's
+-- item tooltip says so on this (TooltipDecorator), so right-click is not the
+-- only place the picker can be found.
+function MO:PickerHint(owner, itemID)
+    local w = MO._wrapped and MO._wrapped[owner]   -- exception(nullable): nothing wrapped outside a vendor, and most tooltip owners never are
+    return w ~= nil and owner:GetScript("OnClick") == w.wrapper and _pickerTakes(itemID)
+end
+
 -- DISCOVER the buttons; do not assume how many there are. Blizzard's stock page
 -- is MERCHANT_ITEMS_PER_PAGE = 10, but a UI that widens the merchant frame gets
 -- MerchantItem11ItemButton and beyond -- and a hardcoded 1..10 left those without
@@ -80,41 +210,22 @@ end
 -- same page (owner, in-game 2026-09-01).
 --
 -- The cap is a runaway guard, not a page size: stop at the first missing button.
--- Removal iterates _origClicks by button, so it restores exactly what was
--- installed however many that turned out to be.
 local MERCHANT_BUTTON_SCAN_CAP = 60
 
 local function _installClickOverrides()
-    if not HDG.Config:Get("MERCHANT_QTY_PICKER") then return end
-    MO._origClicks = MO._origClicks or {}
     for i = 1, MERCHANT_BUTTON_SCAN_CAP do
         local btn = _G["MerchantItem" .. i .. "ItemButton"]
         if not btn then break end   -- exception(boundary): first gap ends the frame's button run
-        if not MO._origClicks[btn] then   -- exception(boundary): Blizzard may re-template merchant buttons in a patch
-            local orig = btn:GetScript("OnClick")
-            MO._origClicks[btn] = orig or false   -- false = "had no handler" (still restore to nil)
-            btn:SetScript("OnClick", function(self, mouseButton, down)
-                local itemID = GetMerchantItemID(self:GetID())
-                local stock  = itemID and HDG.Store:GetState().session.merchant.byItemID[itemID]
-                local buyable = stock and (stock.goldOnly or (stock.couponPrice or 0) > 0)
-                    and not HDG.QuantityPicker:IsOptedOut()                    -- X'd away at this vendor -> Blizzard's own buying
-                if mouseButton == "RightButton" and buyable                    -- gold- or coupon-priced decor -> picker
-                   and HDG.HousingCatalogObserver:GetRow(itemID) then          -- exception(nullable): non-decor rows delegate to Blizzard
-                    HDG.QuantityPicker:Open(itemID)
-                elseif orig then
-                    orig(self, mouseButton, down)
-                end
-            end)
-        end
+        MO:WrapBuyButton(btn)
     end
 end
 
 local function _removeClickOverrides()
-    if not MO._origClicks then return end
-    for btn, orig in pairs(MO._origClicks) do
-        btn:SetScript("OnClick", orig or nil)   -- restore Blizzard's handler (or clear ours)
+    if not MO._wrapped then return end
+    for btn, w in pairs(MO._wrapped) do
+        if btn:GetScript("OnClick") == w.wrapper then btn:SetScript("OnClick", w.orig) end
     end
-    MO._origClicks = nil
+    MO._wrapped = nil
 end
 
 -- ===== Purchase credit: every buy shrinks the shown shopping list ===========
@@ -182,12 +293,23 @@ function MO:_CreditLanded()
     end
 end
 
-function MO:OnMerchantShow()   MO:ScanNow(); _installClickOverrides() end
+-- A vendor opening re-arms the quantity picker after it was X'd away at the last
+-- one. Keyed on the opening, not the close, so a close event that never arrives
+-- cannot leave the picker disabled; and on MERCHANT_SHOW, not on the snapshot,
+-- because every list update re-snapshots the vendor and undid the X.
+function MO:OnMerchantShow()
+    HDG.QuantityPicker:ClearOptOut()
+    MO:ScanNow()
+    _installClickOverrides()
+end
 function MO:OnMerchantUpdate() if HDG.Store:GetState().session.merchant.open then MO:ScanNow() end end
 function MO:OnMerchantClosed()
     _removeClickOverrides()
     A = HDG.Constants.ACTIONS
     HDG.Store:Dispatch({ type = A.MERCHANT_SET_STATE, payload = { open = false } })
+    -- A run must not outlive its vendor. It used to carry on until its next
+    -- landing, and a vendor opened by then got the next buy at the old slot.
+    HDG.BuyQueue:Cancel("vendor closed")
 end
 
 HDG.Modules:Declare({
@@ -211,11 +333,18 @@ HDG.Modules:Declare({
         -- coupon buy, so it sets the pace of the whole run. Halving it halves the
         -- run without giving up the confirmation.
         BAG_UPDATE      = { handler = "OnBagUpdate", debounce = 0.1 },
+        -- The wallet snapshot (gold, currencies, items paid as currency). Always
+        -- subscribed but a no-op unless a vendor is open; debounced because every
+        -- unit of a buy fires each of them.
+        PLAYER_MONEY            = { handler = "OnWalletChanged", debounce = 0.2 },
+        CURRENCY_DISPLAY_UPDATE = { handler = "OnWalletChanged", debounce = 0.3 },
+        BAG_UPDATE_DELAYED      = { handler = "OnWalletChanged", debounce = 0.2 },
     },
     OnMerchantShow   = function(self) MO:OnMerchantShow() end,
     OnMerchantUpdate = function(self) MO:OnMerchantUpdate() end,
     OnMerchantClosed = function(self) MO:OnMerchantClosed() end,
-    OnBagUpdate      = function(self) HDG.BuyQueue:_OnBagLanded(); MO:_CreditLanded() end,
+    OnBagUpdate      = function(self) HDG.BuyQueue:_Recount("BAG_UPDATE"); MO:_CreditLanded() end,
+    OnWalletChanged  = function(self) MO:RefreshWallet() end,
     onEnable = function(self)
         -- A post-hook: it runs after the buy call and never touches its arguments,
         -- so Blizzard's own buying stays untainted.

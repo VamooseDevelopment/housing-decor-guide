@@ -217,7 +217,6 @@ HDG.Locale:Register("zhCN", {
     SHOP_BUY_ALL_DISABLED = "打开一个出售你清单物品的商人。",
     QTYPICKER_BUY = "购买 %d",
     QTYPICKER_HAVE = "你有 %s",
-    QTYPICKER_STORAGE = "存储 %d / %d",
     CFG_MERCHANT_QTY_PICKER = "在装饰商人处右键数量选择器",
     SHOP_NO_LIST = "（无清单）",
     SHOP_OPEN_BTN = "打开",

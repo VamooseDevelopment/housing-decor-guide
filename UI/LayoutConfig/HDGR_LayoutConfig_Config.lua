@@ -85,6 +85,11 @@ LC.sections["config.themeRow"] = {
     ["in"] = "config.appearance", layout = "horizontal",
     height = 24, gap = "md", order = 10,
 }
+-- Theme decorations row: under the theme picker it belongs to
+LC.sections["config.decorationsRow"] = {
+    ["in"] = "config.appearance", layout = "horizontal",
+    height = 24, gap = "md", order = 15,
+}
 -- Scale row inside appearance
 LC.sections["config.scaleRow"] = {
     ["in"] = "config.appearance", layout = "horizontal",
@@ -210,6 +215,16 @@ LC.widgets["configPanel.themeDropdown"] = {
     placeholder = "locale:CFG_THEME_PLACEHOLDER",
     binding   = { menu = "config.themeMenuItems", current = "config.theme" },
     setConfig = { key = "scheme" },
+}
+
+-- Theme decorations: a seasonal theme's title-bar art (Winter Veil's snow, holly and
+-- baubles). ConfigController dispatches CONFIG_SET{key="themeDecorations"}; the
+-- window's overlay (UI.AttachWindowDecorations) follows the config.
+LC.widgets["configPanel.themeDecorationsToggle"] = {
+    tooltip = { recipe = "ThemeDecorations" },
+    kind = "checkbox", ["in"] = "config.decorationsRow", font = "body",
+    text = "locale:CFG_THEME_DECORATIONS", width = 240, height = 22, order = 10,
+    binding = { checked = "config.themeDecorations" },
 }
 
 -- (Font picker lives in Blizzard Settings -> Advanced, below Language.)

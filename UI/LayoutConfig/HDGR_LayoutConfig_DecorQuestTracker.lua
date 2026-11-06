@@ -95,6 +95,14 @@ LC.widgets["decorQuestTrackerPanel.expand"] = {
     binding = { active = "decorQuests.trackerExpanded" },
     visible = "decorQuests.trackerArrow",   -- next steps to list, or Compact's Full to open
 }
+-- Settings cog (owner 2026-11-02, as the vendor sidebar's): Interface > Quest Tracker.
+-- Its width is DQ_TRACKER.cogW: the title is measured past it.
+LC.widgets["decorQuestTrackerPanel.settings"] = {
+    tooltip = { recipe = "SettingsCogTracker" },
+    kind = "button", ["in"] = "decorQuestTrackerPanel", slot = "body",
+    normalAtlas = "GM-icon-settings", highlightAtlas = "GM-icon-settings-hover",
+    width = HDG.Constants.DQ_TRACKER.cogW, height = 20, size = 20, order = 90,
+}
 LC.widgets["decorQuestTrackerPanel.close"] = {
     tooltip = { recipe = "DqTrackerClose" },
     kind = "button", ["in"] = "decorQuestTrackerPanel", slot = "body", font = "button",

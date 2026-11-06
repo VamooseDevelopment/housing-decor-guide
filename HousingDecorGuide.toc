@@ -2,7 +2,7 @@
 ## Title: Vamoose's Housing Decor Guide
 ## Notes: Track, craft, preview, and acquire housing decorations across all professions
 ## Author: Vamoose
-## Version: 3.41.0
+## Version: 3.42.0
 ## SavedVariables: HDG_DB
 ## SavedVariablesPerCharacter: HDG_DB_CURRENT_PROFILE
 ## IconTexture: Interface\AddOns\HousingDecorGuide\textures\Vamoose_HDG_400_trans
@@ -33,6 +33,7 @@ Core\HDGR_Actions.lua
 Core\HDGR_Resolvers.lua
 Core\HDGR_Format.lua
 Core\HDGR_TableUtils.lua
+Core\HDGR_MerchantWallet.lua
 Core\HDGR_VendorRank.lua
 Core\HDGR_RecipeSourceParse.lua
 Core\HDGR_Memo.lua
@@ -104,6 +105,7 @@ UI\LayoutConfig\HDGR_LayoutConfig_Debug.lua
 UI\LayoutConfig\HDGR_LayoutConfig_Config.lua
 UI\LayoutConfig\HDGR_LayoutConfig_Data.lua
 UI\LayoutConfig\HDGR_LayoutConfig_Shopping.lua
+UI\LayoutConfig\HDGR_LayoutConfig_VendorSidebar.lua
 UI\LayoutConfig\HDGR_LayoutConfig_Companion.lua
 UI\LayoutConfig\HDGR_LayoutConfig_Zone.lua
 UI\LayoutConfig\HDGR_LayoutConfig_Lumber.lua
@@ -219,6 +221,7 @@ Modules\HDGR_PlacedDecorSearch.lua
 Modules\HDGR_BagObserver.lua
 Modules\HDGR_LumberObserver.lua
 Modules\HDGR_EssenceObserver.lua
+Modules\HDGR_HolidayObserver.lua
 Modules\HDGR_ReagentStockObserver.lua
 Modules\HDGR_LumberRadar.lua
 Modules\HDGR_ZoneObserver.lua
@@ -270,8 +273,10 @@ UI\HDGR_Controller_Mogul.lua
 UI\HDGR_Controller_Styles.lua
 UI\HDGR_Controller_Debug.lua
 UI\HDGR_Controller_Config.lua
+UI\HDGR_Controller_WinterVeilOffer.lua
 UI\HDGR_Controller_Data.lua
 UI\HDGR_Controller_Shopping.lua
+UI\HDGR_Controller_VendorSidebar.lua
 UI\HDGR_Controller_Companion.lua
 UI\HDGR_Controller_Zone.lua
 UI\HDGR_Controller_Lumber.lua

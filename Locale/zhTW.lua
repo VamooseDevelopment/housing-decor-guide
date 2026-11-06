@@ -217,7 +217,6 @@ HDG.Locale:Register("zhTW", {
     SHOP_BUY_ALL_DISABLED = "開啟一個販售你清單物品的商人。",
     QTYPICKER_BUY = "購買 %d",
     QTYPICKER_HAVE = "你有 %s",
-    QTYPICKER_STORAGE = "儲存 %d / %d",
     CFG_MERCHANT_QTY_PICKER = "在裝飾商人處右鍵數量選擇器",
     SHOP_NO_LIST = "（無清單）",
     SHOP_OPEN_BTN = "開啟",

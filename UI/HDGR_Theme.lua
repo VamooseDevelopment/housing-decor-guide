@@ -579,6 +579,19 @@ HDG.Theme.Skinners = {
         frame:SetShown(atlas ~= nil)
     end,
 
+    -- WindowDecorations: a seasonal theme's art over the main window's title bar
+    -- (Winter Veil: snow, holly, a bauble garland). UI.AttachWindowDecorations builds
+    -- the overlay and lays the art out; this only decides whether it shows: the scheme
+    -- names a decorations set AND the Theme decorations setting (state.enabled) is on.
+    -- Every other scheme hides it -- the teardown on switch-away.
+    WindowDecorations = function(frame, _scheme, state)
+        local set = HDG.Theme:Chrome("decorations")
+        if set ~= nil and set ~= "winterVeil" then
+            error(("WindowDecorations: no art for decorations set %q"):format(tostring(set)))
+        end
+        frame:SetShown(set ~= nil and state.enabled)
+    end,
+
     -- Raised: one step above panel so stat cards lift off. Full border.default edge.
     Raised = function(frame, _scheme)
         setBackdrop(frame, HDG.Theme.BACKDROP_FLAT)

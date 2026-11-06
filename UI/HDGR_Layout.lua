@@ -1679,7 +1679,10 @@ local PANEL_SLOT_FIELDS = { layout = true, chrome = true, padding = true, gap = 
 local FLOAT_WINDOW_FIELDS = { slots = true, shown = true, position = true, lazy = true, parent = true }
 local FLOAT_POSITION_FIELDS = { default = true, movable = true, binding = true, setAction = true }
 local WINDOW_SLOT_NAMES = { top = true, bottom = true, left = true, right = true, corner = true, fill = true }
-local FLOAT_DEFAULT_FIELDS = { x = true, y = true }
+local FLOAT_DEFAULT_FIELDS = { x = true, y = true, relPoint = true }
+-- The parent point a window's TOPLEFT is offset from (default TOPLEFT).
+local ANCHOR_POINTS = { TOPLEFT = true, TOP = true, TOPRIGHT = true, LEFT = true, CENTER = true,
+                        RIGHT = true, BOTTOMLEFT = true, BOTTOM = true, BOTTOMRIGHT = true }
 local FILTER_TAG_FIELDS = { axis = true, textSel = true, visibleSel = true }
 local TOOLTIP_FIELDS = { recipe = true }
 local PADDING_SIDES = { top = true, right = true, bottom = true, left = true }
@@ -1897,6 +1900,9 @@ local function _validateWindowPosition(where, position, err)
     if type(default.x) ~= "number" or type(default.y) ~= "number" then
         err(("%s.default needs numeric x and y"):format(where))
     end
+    if default.relPoint ~= nil and not ANCHOR_POINTS[default.relPoint] then
+        err(("%s.default.relPoint = %s is not an anchor point"):format(where, tostring(default.relPoint)))
+    end
 end
 
 -- A window's slots name the views its frame composes. "@view" is the main
@@ -1919,7 +1925,9 @@ local function _validateFloatingWindow(name, win, views, err)
     local where = ("config.windows.%s"):format(tostring(name))
     _validateClosedSchema("window", where, win, FLOAT_WINDOW_FIELDS, "FLOAT_WINDOW_FIELDS", err)
     _checkSelectorName(where .. ".shown", win.shown, err)
-    if win.lazy ~= nil and type(win.lazy) ~= "boolean" then err(("%s.lazy must be true or false"):format(where)) end
+    if win.lazy ~= nil and type(win.lazy) ~= "boolean" and win.lazy ~= "shown" then
+        err(("%s.lazy must be true, false or \"shown\""):format(where))
+    end
     if win.parent ~= nil and type(win.parent) ~= "function" then
         err(("%s.parent must be a function returning the parent frame"):format(where))
     end

@@ -12,16 +12,15 @@
 
 ---
 
-## What's New in v3.41.0
+## What's New in v3.42.0
 
-- **Decor Quests: the quests that lead to decor.** A new tab under Acquire lists every decor a quest rewards and the chain of quests before it, with this character's progress on each step. Each step names who starts it and who takes it back, with a Map button. A decor reads Done once anyone in your warband has done its quest. By Chain lists the chains instead, with the Garrison Campaign as one row.
-- **Quest Tracker.** Track a decor, a chain or a campaign and a small window shows the step to do next and where it starts, with a Map button, or Blizzard's quest arrow once the quest is in your log. A Compact style shows just the next step. Open it from Tools > Quest Tracker, or with the Quest steps button on a decor in the Decor tab or Find Decor.
-- **A Map button beside every Waypoint** on the Zone tab's vendors, Shopping's zones and Decor Quests.
-- **Hide PvP decor.** A new setting under Interface > Lists takes the decor you buy with Honor or Marks of Honor out of the Decor, Acquire and Zone Scanner lists.
-- **Mogul counts what reagents cost** and uses the reagents you already hold. A loss shows as a negative amount in red, and a cost Mogul can't price shows "?".
-- **Sharing styles.** Every card's Export gives a code that Styles Import reads back. A Filtered Set shares its tags, and a style code from HDG 3.x imports as a Filtered Set.
-- **The status bar shows its messages**, such as "<decor> added to shopping list".
-- **Decor data checked against the game.** More decor show the quest that rewards them, faction-only decor follow their own side's quest, and decor sold at more than one price lists each price.
+- **Winter Veil theme.** A new colour theme: snowflake text on pine green, with berry red title bars and a frost blue accent. With it picked, snow, holly and a garland of baubles decorate the window; turn them off with Theme decorations in Settings. The first time you open HDG during the Feast of Winter Veil, it offers you the theme once.
+- **Your shopping lists beside the vendor.** When a vendor sells something on any of your shopping lists, your lists open beside the vendor window, with everything your active list wants there, what it costs, and Buy All. Click an item to choose how many. The X hides it until the next vendor, and Helpers, Vendors turns it off.
+- **Buy with any currency.** Buy All and the quantity picker take gold, Community Coupons, any other currency, items a vendor takes as payment, or a mix. Buy All asks once for the whole run and says what it spends of each.
+- **A new quantity picker.** Right-click a vendor's decor to open it beside the vendor window. It shows your House Chest against the limit in the game's own words, opens on what your active list wants, and shows how long a buy has left. A full storage no longer greys out Buy: the picker warns that what doesn't fit goes to your bags. ESC closes it.
+- **Buying counts every item.** One item goes out at a time, and each is counted whether it lands in your House Chest or your bags. Stop no longer buys one too many, buying stops when the vendor closes, and right-click opens the picker with Krowi's Extended Vendor UI too.
+- **Settings cogs** on the Zone Scanner, Shopping List, Quest Tracker, Lumber Tracker and vendor sidebar open HDG's settings at that window's section.
+- **Blueprints: Missing keeps the rooms,** so you can see which rooms a blueprint needs.
 
 ## The Decor Catalog
 
@@ -92,10 +91,10 @@ A companion window injects into Blizzard's House Editor so you can **place decor
 
 ## Tools
 
-- **Shopping** -- a floating, multi-list shopping manager grouped by zone and vendor, with "Waypoint All" and share/import codes. Click an item to open its recipe, or its Decor entry if it isn't crafted. At a vendor, "Buy All" purchases every gold-priced list item in one paced pass, and right-clicking a gold-priced decor item opens a quantity picker, which can close itself once it's done. Items come off the list as you buy them.
+- **Shopping** -- a floating, multi-list shopping manager grouped by zone and vendor, with "Waypoint All" and share/import codes. Click an item to open its recipe, or its Decor entry if it isn't crafted. At a vendor, your lists open beside the vendor window with what your active list wants there, and "Buy All" buys it in one paced pass with gold or any other currency the vendor takes. Right-clicking a vendor's decor opens a quantity picker that shows your House Chest against the limit and how long a buy has left, and can close itself once it's done. Items come off the list as you buy them.
 - **Zone alerts** -- entering a zone with a decor vendor (selling something you're missing or have listed) can pop a window, ping chat, and play a sound -- each toggle optional. The Zone Scanner window names the zone, and a cart tick turns shopping-list matching on or off.
 - **Your Data** -- collection KPIs, achievement progress (decor, coupons, lumber milestones), and full crafting/farming history.
-- **Config** -- multiple color themes with a live preview, UI scaling, and account profiles.
+- **Config** -- multiple color themes with a live preview (including a Winter Veil theme with snow, holly and baubles on the window), UI scaling, and account profiles.
 - **Helpers** -- optional collection marks on Blizzard's own windows: a collected/needed mark on vendor items (Krowi's Extended Vendor UI included) and in the Housing catalog, and a reagent mark on bag and bank slots, plus a decor-sourcing block on catalog tooltips. Each toggles under Settings > Helpers.
 
 ## Integrations (all optional)
@@ -118,7 +117,7 @@ A companion window injects into Blizzard's House Editor so you can **place decor
 ---
 
 **Author:** Vamoose
-**Version:** 3.41.0
+**Version:** 3.42.0
 **Game Version:** 12.1.5 (Midnight)
 **Source / Issues:** https://github.com/VamooseDevelopment/housing-decor-guide
 **Discord:** https://discord.gg/RWZaxJaHFP

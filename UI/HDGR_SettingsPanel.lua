@@ -11,14 +11,15 @@
 --     Lists: Hide PvP decor
 --     Quest Tracker: Full / Compact
 --     Zone Scanner: master toggle + popup/chat/sound sub-flags
---   Housing Decor Guide / Helpers: decor sourcing tooltip + reagent-use tooltip
+--   Housing Decor Guide / Helpers: tooltips, bags, vendors, catalog, Lumber (auto-deposit,
+--     and the Lumber Tracker's auto-open, which its windows also carry)
 --   Housing Decor Guide / Advanced: debug, mockTSM, scale, waypoint, locale, font
 --   Housing Decor Guide / Profiles: active profile dropdown + New/Delete
 --
 -- All controls have AddSearchTags for Blizzard's settings search.
 --
--- Lumber Tracking has its own window (HDGR_Controller_Lumber.lua) + in-window
---   config -- intentionally NOT bound into this panel.
+-- The Lumber Tracker's own options (radar, rows, goal) stay in its window
+--   (HDGR_Controller_Lumber.lua).
 -- TODO Flavour: HDG.Quotes module not yet implemented.
 
 HDG = HDG or {}
@@ -71,7 +72,7 @@ local SCALE_MAX  = 1.5
 local RESETTABLE_KEYS = {
     "showMinimapButton", "showCompartment", "showProfessionButtons", "tooltipDecorTag",
     "catalogTooltip", "bagBadge", "materialTooltipItemData",
-    "merchantDecorOverlay", "merchantQtyPicker", "merchantQtyPickerAutoClose", "catalogDecorOverlay", "autoDepositLumber", "hideInCombat", "waypointProvider", "scale",
+    "merchantDecorOverlay", "merchantQtyPicker", "merchantQtyPickerAutoClose", "merchantVendorSidebar", "catalogDecorOverlay", "autoDepositLumber", "hideInCombat", "waypointProvider", "scale",
     "hidePvpDecor", "decorQuestTrackerStyle",
     "debug", "mockTSM", "locale", "fontFamily",
     "zoneScannerEnabled", "zoneScannerPopup", "zoneScannerPopupShopping",
@@ -89,6 +90,7 @@ local SEARCH_TAGS = {
     bagBadge               = { "bag", "bank", "warband", "badge", "icon", "reagent", "decor", "marker", "helper" },
     merchantDecorOverlay   = { "vendor", "merchant", "decor", "collected", "marker", "helper" },
     merchantQtyPicker      = { "vendor", "merchant", "buy", "quantity", "picker", "bulk", "purchase" },
+    merchantVendorSidebar  = { "vendor", "merchant", "sidebar", "shopping", "list", "buy all", "currency" },
     catalogDecorOverlay    = { "catalog", "decor", "uncollected", "marker", "plus", "helper" },
     autoDepositLumber      = { "lumber", "warband", "bank", "deposit", "auto", "helper" },
     hideInCombat           = { "combat", "hide", "auto", "fight", "lockdown" },
@@ -105,12 +107,24 @@ local SEARCH_TAGS = {
     zoneScannerPopupShopping = { "zone", "popup", "shopping", "list", "alert" },
     zoneScannerChat        = { "zone", "chat", "alert" },
     zoneScannerSound       = { "zone", "sound", "alert" },
+    lumberAutoShow         = { "lumber", "tracker", "harvest", "auto", "open", "popup" },
 }
 
 local function ApplyTags(initializer, key)
     local tags = SEARCH_TAGS[key]
     if not tags then return end
     initializer:AddSearchTags(unpack(tags))
+end
+
+-- Mirror Store changes at `path` (slash command, window buttons, Reset-all) into
+-- an open panel.
+local function MirrorStore(setting, path, read)
+    local watchPaths = { path }
+    HDG.Store:Subscribe(function(_, invalidation)
+        if HDG.Paths.MatchesAny(watchPaths, invalidation) then
+            setting:SetValue(read())
+        end
+    end)
 end
 
 -- ===== BindSetting helper ====================================================
@@ -133,13 +147,7 @@ local function BindSetting(cat, configKey, settingName, varType)
             })
         end
     )
-    -- Mirror Store changes (slash command, window buttons, Reset-all) into an open panel.
-    local watchPaths = { "account.config." .. configKey }
-    HDG.Store:Subscribe(function(_, invalidation)
-        if HDG.Paths.MatchesAny(watchPaths, invalidation) then
-            setting:SetValue(HDG.Store:GetConfig(configKey))
-        end
-    end)
+    MirrorStore(setting, "account.config." .. configKey, function() return HDG.Store:GetConfig(configKey) end)
     return setting
 end
 
@@ -151,6 +159,33 @@ local function BindProxyBool(sub, layout, configKey, settingName, tooltip)
     layout:AddInitializer(init)
     ApplyTags(init, configKey)
     return setting, init
+end
+
+-- ===== Lumber Tracker auto-open ==============================================
+-- The flag lives on account.lumber.config, outside the config schema, so it is
+-- bound here rather than through BindSetting: it reads the selector the Warehouse
+-- and Config checkboxes bind and a change dispatches their toggle. The setter
+-- only runs when the value differs from the getter, so a toggle lands on the
+-- value asked for.
+local LUMBER_AUTOSHOW_DEFAULT = true   -- NewLumberConfig's autoShowOnHarvest
+
+local function readLumberAutoShow()
+    return HDG.Selectors:Call("warehouse.autoShowLumber", HDG.Store:GetState(), {})  -- exception(false-positive): settings proxy getter, not a row factory
+end
+
+local function toggleLumberAutoShow()
+    HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.LUMBER_AUTOSHOW_TOGGLE })
+end
+
+local function BindLumberAutoShow(sub, layout)
+    local setting = Settings.RegisterProxySetting(sub, "HDGR_lumberAutoShowOnHarvest",
+        Settings.VarType.Boolean, HDG.Locale:Get("WARE_AUTOSHOW_TOGGLE"), LUMBER_AUTOSHOW_DEFAULT,
+        readLumberAutoShow, toggleLumberAutoShow)
+    MirrorStore(setting, "account.lumber.config.autoShowOnHarvest", readLumberAutoShow)
+    local init = Settings.CreateControlInitializer("HDGR_SettingsCheckRowTemplate", setting, nil,
+        HDG.Locale:Get("TIP_LUMBER_AUTO_SHOW_BODY"))
+    layout:AddInitializer(init)
+    ApplyTags(init, "lumberAutoShow")
 end
 
 -- ===== Reset popup ===========================================================
@@ -175,6 +210,8 @@ local function RegisterResetPopup()
                     payload = { key = key, value = defaults[key] },
                 })
             end
+            -- The Lumber Tracker's auto-open is on this panel too, outside the config.
+            if readLumberAutoShow() ~= LUMBER_AUTOSHOW_DEFAULT then toggleLumberAutoShow() end
         end,
     }
 end
@@ -221,6 +258,13 @@ end
 
 -- ===== Subcategory builders ==================================================
 
+-- The sections the windows' settings cogs open at, by key: each header's name,
+-- and (filled as the pages are built) the page it is on. Settings.OpenToCategory
+-- scrolls to a list element by its name, and a section header's name is its text.
+local SECTION = { vendors = "Vendors", lumber = "Lumber", questTracker = "Quest Tracker",
+                  zoneScanner = "Zone Scanner" }
+local sectionPage = {}
+
 -- Main category page: action buttons + credits. Functional settings live in subcategories.
 local function _buildMainPage(layout)
     layout:AddInitializer(CreateSettingsListSectionHeaderInitializer("Housing Decor Guide"))
@@ -263,7 +307,8 @@ end
 -- Quest Tracker: Full, or Compact -- the step to head for and its place only (the Bold
 -- mockup, owner 10-30). Its arrow opens Full whichever is picked here.
 local function _addTrackerStyle(sub, layout)
-    layout:AddInitializer(CreateSettingsListSectionHeaderInitializer("Quest Tracker"))
+    layout:AddInitializer(CreateSettingsListSectionHeaderInitializer(SECTION.questTracker))
+    sectionPage.questTracker = sub
     local styleSetting = BindSetting(sub, "decorQuestTrackerStyle", "Quest Tracker", Settings.VarType.String)
     local function buildStyleOptions()
         local container = Settings.CreateControlTextContainer()
@@ -322,7 +367,8 @@ local function _buildInterfaceSubcategory(category)
 
     -- Zone Scanner: master toggle + sub-flags greyed out when master is off
     -- (SetParentInitializer, matching ZoneAlertEngine's short-circuit).
-    layout:AddInitializer(CreateSettingsListSectionHeaderInitializer("Zone Scanner"))
+    layout:AddInitializer(CreateSettingsListSectionHeaderInitializer(SECTION.zoneScanner))
+    sectionPage.zoneScanner = sub
     local zoneMasterSetting, zoneMasterInit = BindProxyBool(sub, layout, "zoneScannerEnabled",
         "Enable Zone Scanner",
         "Scan the current zone for missing decor vendors when you enter a new area.")
@@ -345,6 +391,7 @@ end
 -- Helpers: optional convenience features that ride alongside the catalog/editor.
 local function _buildHelpersSubcategory(category)
     local sub, layout = Settings.RegisterVerticalLayoutSubcategory(category, "Helpers")
+    sectionPage.vendors, sectionPage.lumber = sub, sub
 
     layout:AddInitializer(CreateSettingsListSectionHeaderInitializer("Tooltips"))
     BindProxyBool(sub, layout, "catalogTooltip", "Show decor sourcing tooltip",
@@ -365,7 +412,7 @@ local function _buildHelpersSubcategory(category)
         .. "Bags: works with the default bags, Bagnon, Baganator, and Ellesmere. "
         .. "Bank: the default bank's character and Warband tabs.")
 
-    layout:AddInitializer(CreateSettingsListSectionHeaderInitializer("Vendors"))
+    layout:AddInitializer(CreateSettingsListSectionHeaderInitializer(SECTION.vendors))
     BindProxyBool(sub, layout, "merchantDecorOverlay", "Mark collected decor at vendors",
         "On a vendor's items, a marker in the icon's top-right corner shows "
         .. _G.CreateAtlasMarkup("common-icon-checkmark", 14, 14)
@@ -374,8 +421,13 @@ local function _buildHelpersSubcategory(category)
         .. " on decor you still need. Works with the default merchant window and Krowi's Extended Vendor UI.")
     BindProxyBool(sub, layout, "merchantQtyPicker", HDG.Locale:Get("CFG_MERCHANT_QTY_PICKER"),
         "Right-click a housing decor item at a vendor to open a quantity picker: set how "
-        .. "many to buy, see the total against your gold and decor storage, and buy in one go. "
-        .. "Default merchant window only.")
+        .. "many to buy, see the total against what you hold of each currency it costs and "
+        .. "your decor storage, and buy in one go. Default merchant window only.")
+    BindProxyBool(sub, layout, "merchantVendorSidebar", HDG.Locale:Get("CFG_MERCHANT_VENDOR_SIDEBAR"),
+        "When a vendor sells something on any of your shopping lists, show your lists beside "
+        .. "the vendor window: which lists have items here, what your active list wants from "
+        .. "this vendor and what it costs, and a Buy All button. Sits beside the default "
+        .. "merchant window.")
 
     layout:AddInitializer(CreateSettingsListSectionHeaderInitializer("Catalog"))
     BindProxyBool(sub, layout, "catalogDecorOverlay", "Mark uncollected decor in the catalog",
@@ -383,10 +435,11 @@ local function _buildHelpersSubcategory(category)
         .. "(The catalog's own number only counts stored copies, so placed decor can look "
         .. "uncollected -- this uses your true collection state.)")
 
-    layout:AddInitializer(CreateSettingsListSectionHeaderInitializer("Lumber"))
+    layout:AddInitializer(CreateSettingsListSectionHeaderInitializer(SECTION.lumber))
     BindProxyBool(sub, layout, "autoDepositLumber", "Auto-deposit lumber to the Warband Bank",
         "When you open a banker with Warband Bank access, automatically move all lumber "
         .. "from your bags into the Warband Bank.")
+    BindLumberAutoShow(sub, layout)
 end
 
 -- Advanced: debug, mockTSM, locale dropdown.
@@ -552,6 +605,10 @@ local function BuildSettingsPanel()
         OpenToCategory = function()
             Settings.OpenToCategory(category:GetID())
         end,
+        -- A window's settings cog: the page its section is on, scrolled to the section.
+        OpenToSection = function(key)
+            Settings.OpenToCategory(sectionPage[key]:GetID(), SECTION[key])
+        end,
     }
 
     RegisterResetPopup()
@@ -564,7 +621,6 @@ local function BuildSettingsPanel()
     _buildProfilesSubcategory(category)
 
     -- ===== Deferred ============================================================
-    -- (Lumber Tracking is a standalone window, not a settings section -- see header.)
     -- TODO Flavour: HDG.Quotes module not yet implemented.
 end
 

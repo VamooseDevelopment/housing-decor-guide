@@ -231,6 +231,14 @@ HDG.Constants = {
     ESSENCE_OF_LUMBER_ITEMID = 269010,
     ESSENCE_OF_LUMBER_ICON   = 132840,
 
+    -- Feast of Winter Veil, every year, in UTC (Modules/HDGR_HolidayObserver).
+    -- Holidays.db2 row 141 starts it Dec 15 10:00 and runs it 432 hours. Decoded
+    -- the same way, Hallow's End (row 324) reads Oct 19 10:00 and was seen in game
+    -- from Oct 20 04:00 AEDT (VCProbe 2026-10-24), so the DB2 clock is Pacific:
+    -- Dec 15 18:00 UTC to Jan 2 18:00 UTC. A region that runs it on its own clock
+    -- moves only when the theme offer first appears, by a few hours.
+    WINTER_VEIL_UTC = { startMonth = 12, startDay = 15, endMonth = 1, endDay = 2, hour = 18 },
+
     -- Housing decor currencies. Hand-curated; iconFileIDs captured live.
     -- Expansion string must match a Palette `expansion.<name>` color key.
     HOUSING_DECOR_CURRENCY_DATA = {
@@ -680,10 +688,10 @@ HDG.Constants = {
     -- each side; way: the block's button (84) and the gap before it; stepOf: "step 12 of 61"
     -- beside Next. The rows set these widths on the text, so it wraps where it was measured.
     DQ_DETAIL_TEXT = { step = 370, next = 410, way = 90, stepOf = 84, body = 15, subheading = 18 },
-    -- The Quest Tracker: its header's X and arrow and the gap before each (the LayoutConfig's;
+    -- The Quest Tracker: its header's X, settings cog and arrow and the gap before each (the LayoutConfig's;
     -- the selectors measure the title past them), headPad the header's height over its title's
     -- lines, and the rule row under a step, the line ruleAt down its ruleH.
-    DQ_TRACKER = { closeW = 24, arrowW = 20, gap = 4, headPad = 10, ruleH = 9, ruleAt = 6 },
+    DQ_TRACKER = { closeW = 24, cogW = 20, arrowW = 20, gap = 4, headPad = 10, ruleH = 9, ruleAt = 6 },
     DQ_ZONE_MORE_MAX = 4,
     DQ_STEP_SEARCH_MIN = 3,     -- Decor Quests search: the letters before it looks in step names too       -- the Quest Tracker's Collected! card: the decor quests starting in its zone it names (Bold C)
     DQ_CLASS_ID_MAX = 13,       -- the highest classID (Evoker): a class gate holding most of 1..13 names the rest
@@ -979,7 +987,7 @@ HDG.Constants = {
 
         -- ===== HouseTab dashboard =====
         HOUSE_SNAPSHOT_UPDATED          = "HDGR_HOUSE_SNAPSHOT_UPDATED",          -- payload: { snapshot = table }
-        HOUSE_CAPACITY_CACHED           = "HDGR_HOUSE_CAPACITY_CACHED",           -- payload: { owned, max } -- persisted last-known decor storage (survives reload for the buy picker)
+        HOUSE_CAPACITY_CACHED           = "HDGR_HOUSE_CAPACITY_CACHED",           -- payload: { owned, exempt, max } -- persisted last-known decor storage (survives reload for the buy picker)
         HOUSE_LIST_UPDATED              = "HDGR_HOUSE_LIST_UPDATED",              -- payload: { houses = [{houseGUID, neighborhoodName, faction, ...}] }
         HOUSE_LEVEL_UPDATED             = "HDGR_HOUSE_LEVEL_UPDATED",             -- payload: { houseGUID, level, favor, maxLevel, thresholds }
         ACTIVE_NEIGHBORHOOD_UPDATED     = "HDGR_ACTIVE_NEIGHBORHOOD_UPDATED",     -- payload: { neighborhoodGUID = string|nil }
@@ -1010,6 +1018,8 @@ HDG.Constants = {
 
         -- Once per session; lets all consumers read strictly instead of calling UnitName/GetRealmName/UnitClass independently.
         SESSION_IDENTITY_SET         = "HDGR_SESSION_IDENTITY_SET",         -- payload: { name, realm, class, classFile }; reducer computes charKey
+        -- HolidayObserver, on a change: whether the Feast of Winter Veil is on now.
+        HOLIDAY_SET                  = "HDGR_HOLIDAY_SET",                  -- payload: { winterVeil = its start year, or 0 when off }
 
 
         -- ===== Recipe Sources tab =====
@@ -1198,8 +1208,10 @@ HDG.Constants = {
 
         -- ===== Vendor buying (spec docs/HDGR_VENDOR_BUYING_SPEC.md) =====
         -- MerchantObserver dispatches the snapshot; BuyQueue dispatches progress.
-        MERCHANT_SET_STATE         = "HDGR_MERCHANT_SET_STATE",         -- payload: { open, npcID?, byItemID? } (observer snapshot)
+        MERCHANT_SET_STATE         = "HDGR_MERCHANT_SET_STATE",         -- payload: { open, byItemID?, wallet? } (observer snapshot)
         MERCHANT_BUY_PROGRESS      = "HDGR_MERCHANT_BUY_PROGRESS",      -- payload: { total?, done? }  (empty = clear)
+        MERCHANT_WALLET_SET        = "HDGR_MERCHANT_WALLET_SET",        -- payload: { wallet = { [walletKey] = balance } }
+        MERCHANT_SIDEBAR_DISMISS   = "HDGR_MERCHANT_SIDEBAR_DISMISS",   -- payload: {}  (title-bar X: hidden until the next vendor opens)
 
         -- ===== Zone Scanner =====
         -- ZONE_CHANGED dispatched by ZoneObserver after debouncing ZONE_CHANGED_NEW_AREA.
@@ -1471,11 +1483,29 @@ HDG.Constants.PLACEHOLDER_ICON = 134400
 -- inside one tick) left 7 of 10 in bags -- the burst IS the rapid path. So buy
 -- exactly ONE per tick (genuine one-at-a-time = the straight-to-storage path).
 -- Functional throttle, NOT a UI transition (outside the no-C_Timer-in-UI rule).
--- Community Coupons: the Midnight neighbourhood-endeavor currency, and the only
--- non-gold cost decor vendors charge. Named here because it was a bare 3363 in
--- the acquisition selectors and is now also the merchant buy path's one
--- recognised currency.
+-- Community Coupons: the Midnight neighbourhood-endeavor currency. Named here
+-- because it was a bare 3363 in the acquisition selectors; the merchant surfaces
+-- also paint it in its own colour (MERCHANT_COST_COLOR_TOKENS).
 HDG.Constants.COUPON_CURRENCY_ID     = 3363
+-- Blizzard's MAX_ITEM_COST (MerchantFrame.lua): a vendor slot has at most this
+-- many extended-cost components, and they can be sparse -- Blizzard walks all of
+-- them and skips the empty ones, so the scan does too.
+HDG.Constants.MERCHANT_MAX_COST_COMPONENTS = 3
+-- A run that would spend MORE than this share of any wallet (gold included) is
+-- named in the Buy All confirm and the quantity picker (owner-approved design,
+-- 2026-11-02).
+HDG.Constants.MERCHANT_SPEND_WARN_FRACTION = 0.5
+-- Theme colour token per kind of payment, so gold, Community Coupons, other
+-- currencies and items paid as currency read apart at a glance.
+HDG.Constants.MERCHANT_COST_COLOR_TOKENS = {
+    gold     = "text.numeric",
+    coupon   = "semantic.success",
+    currency = "semantic.accent",
+    item     = "text.heading",
+}
+-- The vendor sidebar sits against Blizzard's MerchantFrame's right edge (444 tall
+-- in MerchantFrame.xml; the sidebar matches that height) with this gap between.
+HDG.Constants.VENDOR_SIDEBAR_GAP     = 2
 HDG.Constants.MERCHANT_BUY_TICK_QTY  = 1     -- fixed-timer fallback: BuyMerchantItem calls per tick
 -- 0 = EVENT-DRIVEN pacing (buy one, wait for the HOUSING_STORAGE_ENTRY_UPDATED
 -- "landed in storage" signal, buy the next -- as fast as the server confirms,
@@ -1488,6 +1518,12 @@ HDG.Constants.MERCHANT_BUY_TICK_SECS    = 0     -- seconds between ticks (0 = ev
 -- flight is what stranded an item in bags). Generous so a merely slow-to-start signal
 -- (first landings lag 2-3s + a ~500ms catalog settle) never trips it.
 HDG.Constants.MERCHANT_BUY_TIMEOUT_SECS = 8
+-- Quantity picker: three 0-9 wheels, so 999 is the most one run can ask for;
+-- the Max and List chips stop there too.
+HDG.Constants.QTYPICKER_MAX_QTY = 999
+-- Landings before the picker shows the time left: the pace is measured from the
+-- first landing, so it takes two more to have one worth showing.
+HDG.Constants.QTYPICKER_ETA_AFTER = 3
 -- How long a merchant buy may take to LAND before its claim on the shopping list
 -- lapses. Past this, a count rise is not credited to it: a failed buy must not
 -- claim a later, unrelated rise (decor picked back up from a house). Well past

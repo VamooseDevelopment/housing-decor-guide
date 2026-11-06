@@ -282,9 +282,9 @@ local function BuildScheme(palette)
         fonts   = palette.fonts   or DEFAULT_FONTS,
         metrics = palette.metrics or DEFAULT_METRICS,
         atlas   = palette.atlas   or DEFAULT_ATLAS,
-        -- chrome: optional atlas-artwork table (housing wood/stone). Present
-        -- only on the Housing scheme; nil elsewhere => the atlas-aware Skinners
-        -- take the solid/watercolor path. No DEFAULT -- absence IS the signal.
+        -- chrome: optional artwork table. Housing carries its wood/stone atlases;
+        -- WinterVeil carries only `decorations`. Each Skinner reads its own key, so
+        -- a missing key => the solid/watercolor path. No DEFAULT -- absence IS the signal.
         chrome  = palette.chrome,
         -- nativeButtons: build action buttons as native UIPanelButtonTemplate
         -- (BlizzardUI). nil elsewhere => HDG's hand-built dark-atlas buttons.
@@ -1356,6 +1356,66 @@ Palettes.PumpkinSpice = function() return {
     diag_hint           = hex("#A3B57A"),  -- sage (the green ladder's top rung)
 } end
 
+
+-- ----- WinterVeil -----------------------------------------------------------
+-- Madailein Hatter's Winter Veil palette (Berry #6B212C, Branch #685652,
+-- Snowflake #DCE0E8, Mist #8EA1AE, Pine #27363F), on a pine-green ground.
+-- Workings: docs/WINTER_VEIL_THEME_ANALYSIS_2026-11-01.md; the values below
+-- are printed by docs/mockups/winter_veil_lab/emit_lua.py from the checked
+-- token set, never typed by hand.
+--   * Her "Pine" is a slate (hue 235). Vamoose found it not festive
+--     (2026-11-01), so the ground ramp is a green at the slate's exact
+--     lightness: every text contrast holds within 0.2.
+--   * Berry and Pine share a lightness (1.11:1), so Berry is STRUCTURE --
+--     header bands, the active nav item, the status rail -- never text.
+--     Frost carries the accent; red would read as error, strike and Horde.
+--   * Her five have no green and no gold: Holly (success), Gold (warning)
+--     and HollyBerry (error) are added, kept apart by lightness so they
+--     hold for red-green colour blindness.
+--   * Header bands paint through the watercolour texture at about half
+--     strength, so Berry shows as a deep wine there.
+--   * The snow, holly and baubles ride this scheme (chrome.decorations).
+Palettes.WinterVeil = function() return {
+    sunken              = hex("#052C21"),        -- PineDeep
+    bg                  = hex("#052C21", 0.95),  -- PineDeep
+    panel_soft          = hex("#001D14"),        -- PineNight
+    panel               = hex("#143C30"),        -- Pine
+    panel_footer        = hex("#001D14"),        -- PineNight
+    panel_header        = hex("#6B212C"),        -- Berry
+    raised              = hex("#1F483B"),        -- PineLift
+    border              = hex("#685652"),        -- Branch
+    text                = hex("#DCE0E8"),        -- Snowflake
+    text_header         = hex("#EFF2F7"),        -- SnowBright
+    text_label          = hex("#B8C7D1"),        -- MistLift
+    text_dim            = hex("#B8C7D1"),        -- MistLift
+    text_disabled       = hex("#8EA1AE"),        -- Mist
+    text_inverse        = hex("#001D14"),        -- PineNight
+    button_normal       = hex("#1F483B"),        -- PineLift
+    button_hover        = hex("#54433F"),        -- BranchDeep
+    button_active       = hex("#001D14"),        -- PineNight
+    button_disabled     = hex("#1F483B", 0.40),  -- PineLift
+    accent              = hex("#86B7E1"),        -- Frost
+    accent_brighter     = hex("#A8D0F3"),        -- FrostBright
+    accent_darker       = hex("#4F86B3"),        -- FrostDeep
+    success             = hex("#97E5B8"),        -- Holly
+    warning             = hex("#E4B750"),        -- Gold
+    error               = hex("#F37985"),        -- HollyBerry
+    error_deep          = hex("#872B39"),        -- BerryBright
+    tab_active_bg       = hex("#6B212C"),        -- Berry
+    tab_active_text     = hex("#EFF2F7"),        -- SnowBright
+    popup_selected_bg   = hex("#6B212C"),        -- Berry
+    popup_selected_text = hex("#EFF2F7"),        -- SnowBright
+    statusline_bg       = hex("#872B39"),        -- BerryBright
+    text_on_accent      = hex("#001D14"),        -- PineNight
+    float_bg            = hex("#001D14"),        -- PineNight
+    float_border        = hex("#8EA1AE"),        -- Mist
+    diag_error          = hex("#F37985"),        -- HollyBerry
+    diag_warn           = hex("#E4B750"),        -- Gold
+    diag_info           = hex("#86B7E1"),        -- Frost
+    diag_hint           = hex("#97E5B8"),        -- Holly
+    chrome = { decorations = "winterVeil" },
+} end
+
 -- ----- BlizzardUI -----------------------------------------------------------
 -- Matches the default Blizzard WoW frame (PortraitFrameTemplate / ButtonFrame-
 -- Template -- the frame used by Toy Box, Collections, Encounter Journal, etc.).
@@ -1459,7 +1519,7 @@ HDGR_SchemeMeta = {
         "Mocha", "TokyonightNight", "RosePineMain", "GruvboxDarkHard",
         "SolarizedDark", "EverforestDark", "KanagawaWave",
         "Nord", "Dracula", "Nightfly", "OneNord", "Badwolf",
-        "Purpura", "Green", "PumpkinSpice",
+        "Purpura", "Green", "PumpkinSpice", "WinterVeil",
         -- Light family
         "SolarizedLight", "GruvboxLightHard", "EverforestLight", "KanagawaLotus",
     },
@@ -1486,5 +1546,6 @@ HDGR_SchemeMeta = {
         Purpura          = "Purpura",
         Green            = "Green",
         PumpkinSpice     = "Pumpkin Spice",
+        WinterVeil       = "Winter Veil",
     },
 }

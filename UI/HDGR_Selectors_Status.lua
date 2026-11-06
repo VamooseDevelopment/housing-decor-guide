@@ -176,6 +176,31 @@ Selectors:Register("config.theme", {
     end,
 })
 
+-- Theme decorations checkbox (Config > Appearance, under the theme picker).
+Selectors:Register("config.themeDecorations", {
+    reads = {"account.config.themeDecorations"},
+    fn = function(state)
+        return state.account.config.themeDecorations
+    end,
+})
+
+-- The Winter Veil theme offer (UI/HDGR_Controller_WinterVeilOffer.lua): the start
+-- year of the Feast of Winter Veil to offer the theme for now, or nil -- the main
+-- window is closed (the offer comes with opening it, never at login), none is on,
+-- this profile already answered this one, or it is already on the theme.
+Selectors:Register("holiday.winterVeilOfferDue", {
+    reads = {"account.ui.mainWindowShown", "session.holiday.winterVeil",
+             "account.config.winterVeilOffered", "account.config.scheme"},
+    fn = function(state)
+        local year, config = state.session.holiday.winterVeil, state.account.config
+        if not state.account.ui.mainWindowShown or year == 0
+            or config.winterVeilOffered == year or config.scheme == "WinterVeil" then
+            return nil  -- exception(nullable): no offer due is the usual answer
+        end
+        return year
+    end,
+})
+
 -- (Font picker lives in Blizzard Settings -> Advanced, wired via BindSetting -- no
 -- selector needed. The font face itself is resolved in Theme:BuildFontObjects from
 -- account.config.fontFamily.)
