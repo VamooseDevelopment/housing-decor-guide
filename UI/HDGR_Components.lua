@@ -3361,7 +3361,7 @@ end
 -- at scrollBox.TOPRIGHT + 2). Exported so layout math (and the
 -- `/hdgr layout` debug helper) can reason about effective scrollbox width
 -- without re-reading the SetPoint magic number.
-HDG.UI.SCROLLBOX_SCROLLBAR_RESERVE = 6
+HDG.UI.SCROLLBOX_SCROLLBAR_RESERVE = HDG.Constants.STYLE.SCROLLBAR_RESERVE
 
 function HDG.UI:CreateScrollBoxSkeleton(parent, opts)
     opts = opts or {}
@@ -3855,9 +3855,27 @@ local function _shouldRetainScroll(dispatchCtx)
     return meta and meta.retainsScroll == true
 end
 
+-- Optional live fields: `cellSize` re-sizes every tile (the companion's tile
+-- size setting) and `columns` holds exactly that many tiles per row, centred.
+-- Either one changing re-lays the same items, so it bypasses the same-items
+-- short-circuit.
+local function _applyGridShape(widget, values)
+    local changed = false
+    if values.cellSize ~= nil and values.cellSize ~= widget._cardGridCfg.cellSize then
+        HDG.CardGrid:SetCellSize(widget, values.cellSize)
+        changed = true
+    end
+    if values.columns ~= nil and values.columns ~= widget._cardGridColumns then
+        changed = true
+    end
+    if values.columns ~= nil then HDG.CardGrid:SetColumns(widget, values.columns) end
+    return changed
+end
+
 local function dispatchCardGrid(widget, values, dispatchCtx)
     if values.items == nil or not widget._cardGridCfg then return end
-    if _sameItems(widget, values.items) then return end
+    local reshaped = _applyGridShape(widget, values)
+    if _sameItems(widget, values.items) and not reshaped then return end
     HDG.CardGrid:SetItems(widget, values.items, _shouldRetainScroll(dispatchCtx))
 end
 
@@ -3872,16 +3890,20 @@ HDG.WidgetTypes:Register("cardGrid", {
             cellSize    = spec.cellSize,
             cellSpacing = spec.cellSpacing,
             rowSpacing  = spec.rowSpacing,
+            iconInset   = spec.iconInset,
+            -- Constant-width scrollbar gutter: a grid with a live `columns`
+            -- binding needs it (HDG.CardGrid:SetColumns).
+            fixedGutter = spec.fixedGutter,
             -- cellsPerRow is now advisory (SequenceView wraps based on
             -- actual container width + per-element cellSize). LayoutConfig
             -- entries that still pass it are no-ops.
         })
         return box
     end,
-    dispatch = { fields = { "items" }, push = dispatchCardGrid },
+    dispatch = { fields = { "items", "cellSize", "columns" }, push = dispatchCardGrid },
     skin = "Frame",
     resolveCellKind = function(name) return HDG.CardGrid:GetCellKind(name) end,
-    specFields = { "cellKind", "cellSize", "cellSpacing", "rowSpacing", "cellsPerRow" },
+    specFields = { "cellKind", "cellSize", "cellSpacing", "rowSpacing", "cellsPerRow", "iconInset", "fixedGutter" },
 })
 
 -- ===== filmstrip: horizontal single-row scrollable cell strip ==============
@@ -3891,7 +3913,10 @@ HDG.WidgetTypes:Register("cardGrid", {
 -- trophy-shelf pattern), laying each item out left-to-right instead of the
 -- cardGrid's wrap-and-vertical-scroll. Renders each item via a registered
 -- CardGrid cellKind so it reuses companionGridCell's icon/tooltip/chrome; cells
--- are cached + reused across pushes (the list is small + capped).
+-- are cached + reused across pushes (the list is small + capped). Items carry a
+-- `key`: the strip scrolls back to the start only when the first item's key
+-- changes (something new arrived on the left). Any other re-push -- a house
+-- tick, the cost toggle -- keeps the player's place.
 local function dispatchFilmstrip(widget, values)
     if values.items == nil or not widget._filmContent then return end
     local kindDef = HDG.CardGrid:GetCellKind(widget._filmCellKind)
@@ -3919,7 +3944,9 @@ local function dispatchFilmstrip(widget, values)
     for i = #items + 1, #cells do cells[i]:Hide() end
     content:SetWidth(math.max(1, #items * pitch))
     content:SetHeight(cfg.cellSize)
-    widget:SetHorizontalScroll(0)   -- newest-left: snap back to the start on a fresh push
+    local firstKey = items[1] and items[1].key   -- exception(nullable): an empty strip has no first item
+    if firstKey ~= widget._filmFirstKey then widget:SetHorizontalScroll(0) end   -- newest-left: show what just arrived
+    widget._filmFirstKey = firstKey
     if widget._filmSyncBar then widget._filmSyncBar() end
 end
 
@@ -3938,7 +3965,8 @@ HDG.WidgetTypes:Register("filmstrip", {
         scroll._filmContent  = content
         scroll._filmCells    = {}
         scroll._filmCellKind = spec.cellKind
-        scroll._filmCfg      = { cellSize = cellSize, cellSpacing = cellSpacing }
+        scroll._filmCfg      = { cellSize = cellSize, cellSpacing = cellSpacing,
+                                 iconInset = spec.iconInset }   -- exception(optional): spec.iconInset optional, CardGrid default
         local step = cellSize + cellSpacing
 
         -- Thin auto-hiding horizontal scrollbar along the bottom: a track + a
@@ -4007,7 +4035,7 @@ HDG.WidgetTypes:Register("filmstrip", {
     -- No skin: the enclosing inset section provides the chrome; the cells carry
     -- their own visuals (a ScrollFrame has no SetBackdrop for the Frame skin).
     resolveCellKind = function(name) return HDG.CardGrid:GetCellKind(name) end,
-    specFields = { "cellKind", "cellSize", "cellSpacing" },
+    specFields = { "cellKind", "cellSize", "cellSpacing", "iconInset" },
 })
 
 -- ===== treeList: 2-level expandable list ==================================

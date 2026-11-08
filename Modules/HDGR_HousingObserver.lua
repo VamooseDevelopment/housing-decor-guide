@@ -1206,11 +1206,21 @@ function HO:_PushHouseTick()
     HDG.Store:Dispatch({
         type    = HDG.Constants.ACTIONS.PROJECTS_HOUSE_TICK,
         payload = {
-            -- live decor spend; placement CAPS come from projects.placementCaps (reward-derived).
-            -- exception(boundary): live cap API is layout-editor-state-dependent (returns 9/300 until Edit Layout opens).
+            -- Live decor budget for where the player stands: the game answers spend and
+            -- max for the interior inside, the exterior outside (Blizzard's own editor
+            -- counter, HouseEditorDecorCountMixin, reads exactly these two calls and only
+            -- swaps its icon on IsInsideHouse). Projects' caps stay reward-derived
+            -- (projects.placementCaps). CAVEAT, unresolved: a recorded gotcha says
+            -- GetMaxPlacementBudget reads an engine default (300) until Edit Layout opens
+            -- in a session. The companion chip mirrors Blizzard's header rather than
+            -- second-guessing it; if the two ever disagree with the true cap in game,
+            -- switch the chip to the house-level reward record. Both calls are nil when
+            -- not in an owned house or plot (Blizzard's docs).
             budget = {  -- exception(boundary): live C_HousingDecor reads
-                decorSpent = (CD and CD.GetSpentPlacementBudget and CD.GetSpentPlacementBudget()) or 0,  -- exception(boundary): CD = C_HousingDecor, Blizzard API namespace
+                decorSpent = (CD and CD.GetSpentPlacementBudget and CD.GetSpentPlacementBudget()) or 0,  -- exception(boundary): CD = C_HousingDecor, Blizzard API namespace; nil off an owned house/plot
                 decorCount = (CD and CD.GetNumDecorPlaced       and CD.GetNumDecorPlaced())       or 0,  -- exception(boundary): CD = C_HousingDecor, Blizzard API namespace
+                decorMax   = (CD and CD.GetMaxPlacementBudget   and CD.GetMaxPlacementBudget())   or 0,  -- exception(boundary): CD = C_HousingDecor, Blizzard API namespace; nil off an owned house/plot
+                inside     = self:IsInsideHouse(),
             },
             numFloors    = _numFloors() or 0,  -- exception(boundary): _numFloors nil in headless tests (no C_HousingLayout); 12.1-safe (GetNumFloors undocumented but shimmed; range path covers CVar-off)
             editorActive = (CE and CE.IsHouseEditorActive and CE.IsHouseEditorActive()) or false,  -- exception(boundary): CE = C_HouseEditor, Blizzard API namespace
@@ -1279,6 +1289,7 @@ HDG.Modules:Declare({
         HOUSING_LAYOUT_PIN_FRAME_ADDED       = { handler = "OnPinFrameAddedEvent" },
         HOUSING_LAYOUT_VIEWED_FLOOR_CHANGED  = { handler = "OnLayoutFloorChangedEvent" },
         HOUSING_NUM_DECOR_PLACED_CHANGED     = { handler = "OnHousingBudgetEvent",      debounce = 0.3 },
+        HOUSE_LEVEL_CHANGED                  = { handler = "OnHousingBudgetEvent",      debounce = 0.3 }, -- a level-up raises the max (Blizzard's counter listens too)
         HOUSING_LAYOUT_ROOM_RECEIVED         = { handler = "OnHousingBudgetEvent",      debounce = 0.3 },
         HOUSING_LAYOUT_ROOM_REMOVED          = { handler = "OnHousingBudgetEvent",      debounce = 0.3 },
         HOUSING_LAYOUT_OCCUPIED_FLOOR_RANGE_CHANGED = { handler = "OnHousingBudgetEvent", debounce = 0.3 }, -- 12.1 rename of HOUSING_LAYOUT_NUM_FLOORS_CHANGED

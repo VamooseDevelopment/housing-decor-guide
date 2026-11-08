@@ -451,12 +451,20 @@ R.MogulSupplyImpact   = { title = "locale:TIP_MOGUL_SUPPLY_IMPACT_TITLE",   body
 R.RedeemableTag       = { title = "locale:TIP_REDEEMABLE_TAG_TITLE",         body = "locale:TIP_REDEEMABLE_TAG_BODY",         anchor = "ANCHOR_BOTTOM" }
 
 -- ===== House-editor companion: mode tabs ===================================
+R.CompanionCatalog     = { title = "locale:TIP_COMPANION_CATALOG_TITLE",     body = "locale:TIP_COMPANION_CATALOG_BODY",     anchor = "ANCHOR_BOTTOM" }
 R.CompanionStyles      = { title = "locale:TIP_COMPANION_STYLES_TITLE",      body = "locale:TIP_COMPANION_STYLES_BODY",      anchor = "ANCHOR_BOTTOM" }
 R.CompanionRooms       = { title = "locale:TIP_COMPANION_ROOMS_TITLE",       body = "locale:TIP_COMPANION_ROOMS_BODY",       anchor = "ANCHOR_BOTTOM" }
 R.CompanionSnapshots   = { title = "locale:TIP_COMPANION_SNAPSHOTS_TITLE",   body = "locale:TIP_COMPANION_SNAPSHOTS_BODY",   anchor = "ANCHOR_BOTTOM" }
 R.CompanionThemes      = { title = "locale:TIP_COMPANION_THEMES_TITLE",      body = "locale:TIP_COMPANION_THEMES_BODY",      anchor = "ANCHOR_BOTTOM" }
 R.CompanionCollections = { title = "locale:TIP_COMPANION_COLLECTIONS_TITLE", body = "locale:TIP_COMPANION_COLLECTIONS_BODY", anchor = "ANCHOR_BOTTOM" }
 R.CompanionRecent      = { title = "locale:TIP_COMPANION_RECENT_TITLE",      body = "locale:TIP_COMPANION_RECENT_BODY",      anchor = "ANCHOR_BOTTOM" }
+R.CompanionTileSmaller = { title = "locale:TIP_COMPANION_TILE_SMALLER", anchor = "ANCHOR_BOTTOM" }
+R.CompanionTileBigger  = { title = "locale:TIP_COMPANION_TILE_BIGGER",  anchor = "ANCHOR_BOTTOM" }
+R.CompanionColsFewer   = { title = "locale:TIP_COMPANION_COLS_FEWER",   anchor = "ANCHOR_BOTTOM" }
+R.CompanionColsMore    = { title = "locale:TIP_COMPANION_COLS_MORE",    anchor = "ANCHOR_BOTTOM" }
+R.CompanionPicker      = { title = "locale:TIP_COMPANION_PICKER_TITLE", body = "locale:TIP_COMPANION_PICKER_BODY", anchor = "ANCHOR_BOTTOM" }
+R.CompanionListPrev    = { title = "locale:TIP_COMPANION_LIST_PREV",    anchor = "ANCHOR_BOTTOM" }
+R.CompanionListNext    = { title = "locale:TIP_COMPANION_LIST_NEXT",    anchor = "ANCHOR_BOTTOM" }
 
 
 

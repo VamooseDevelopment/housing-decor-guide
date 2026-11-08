@@ -267,6 +267,8 @@ HDG.Locale:Register("koKR", {
     TAB_DECOR = "장식",
     TIP_CLOSE = "닫기",
     TIP_COFFEE_TITLE = "커피 한 잔 사주기",
+    TIP_COMPANION_CATALOG_BODY = "게임의 모든 장식을 보유 여부와 관계없이 블리자드의 분류대로 보여줍니다.",
+    TIP_COMPANION_CATALOG_TITLE = "범주",
     TIP_COMPANION_COLLECTIONS_BODY = "카테고리별 장식 탐색 -- 최근 습득, 염색 가능, 배치 비용별.",
     TIP_COMPANION_COLLECTIONS_TITLE = "컬렉션",
     TIP_COMPANION_RECENT_BODY = "이번 편집 세션에서 배치하거나 제거한 장식.",

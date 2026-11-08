@@ -487,7 +487,8 @@ HDG.Locale:Register("enUS", {
     COMP_ADDON_TITLE            = "Housing Decor Guide",
     COMP_GROUP_FILTERED_SETS    = "Filtered Sets",
     COMP_GROUP_MATCH_FMT        = "%d of %d",
-    COMP_RECENT_PLACEMENTS_LABEL = "Recent placements",
+    -- The legend uses the strip's own corner icons (communities-chat-icon-plus / -minus).
+    COMP_RECENT_PLACEMENTS_LABEL = "Recent placements ( |A:communities-chat-icon-plus:12:12|a for placed, |A:communities-chat-icon-minus:12:12|a for removed)",
     COMP_SEARCH_PLACEHOLDER     = "Search decor...",
 
     -- Acquisition tab
@@ -1246,6 +1247,8 @@ HDG.Locale:Register("enUS", {
     TIP_MOGUL_SUPPLY_IMPACT_BODY = "Accounts for prices dropping as you flood the market. Smooth% decays the price per copy sold; Cap limits how many you plan.",
     TIP_REDEEMABLE_TAG_TITLE = "Redeemable",
     TIP_REDEEMABLE_TAG_BODY = "You own these -- they were auto-awarded to you (e.g. an achievement or quest reward); you've just never placed one. Place it once to claim a permanent copy. Until then it sits in your catalog as an unredeemed instance.",
+    TIP_COMPANION_CATALOG_TITLE = "Categories",
+    TIP_COMPANION_CATALOG_BODY = "Every decor in the game, owned or not, sorted into Blizzard's categories.",
     TIP_COMPANION_STYLES_TITLE = "Your Styles",
     TIP_COMPANION_STYLES_BODY = "Place decor from the style sets you've saved.",
     TIP_COMPANION_SNAPSHOTS_TITLE = "Snapshots",
@@ -1256,6 +1259,14 @@ HDG.Locale:Register("enUS", {
     TIP_COMPANION_COLLECTIONS_BODY = "Browse decor by category -- Recently Learned, Dyeable, and by placement cost.",
     TIP_COMPANION_RECENT_TITLE = "Recent",
     TIP_COMPANION_RECENT_BODY = "Decor you've placed or removed this editing session.",
+    TIP_COMPANION_TILE_SMALLER = "Smaller tiles",
+    TIP_COMPANION_TILE_BIGGER  = "Bigger tiles",
+    TIP_COMPANION_COLS_FEWER   = "Fewer columns",
+    TIP_COMPANION_COLS_MORE    = "More columns",
+    TIP_COMPANION_PICKER_TITLE = "Pick a list",
+    TIP_COMPANION_PICKER_BODY  = "Opens this mode's lists over the grid.",
+    TIP_COMPANION_LIST_PREV    = "Previous list",
+    TIP_COMPANION_LIST_NEXT    = "Next list",
     TIP_WARN_HARD_RESET_TITLE = "|cffff6060Hard reset all data|r",
     TIP_WARN_HARD_RESET_BODY = "Wipes ALL HDG data: SavedVariables, queue, alts. Click once to arm, a second time within 5 seconds to confirm. Requires /reload.",
     TIP_WARN_CLEAR_PINS_TITLE = "|cffff6060Clear all map pins|r",

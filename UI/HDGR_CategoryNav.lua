@@ -127,6 +127,8 @@ local function _showsSubcategories(tree, catID, storedOnly)
     return false
 end
 
+M.ShowsSubcategories = _showsSubcategories   -- the companion's Catalog picker opens a category by the same rule
+
 function M.BuildPickerRail(tree, focusedCatID, focusedSubID, storedOnly)
     if focusedCatID and _showsSubcategories(tree, focusedCatID, storedOnly) then
         -- Subcategory view: BACK + ("All <Cat>" + subcategory icons), in place.

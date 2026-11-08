@@ -42,6 +42,7 @@ local DEFAULT_CFG = {
     cellSize    = C.CELL_SIZE,
     cellSpacing = C.CELL_SPACING,
     rowSpacing  = C.ROW_SPACING,
+    iconInset   = C.ICON_INSET,
 }
 M.DEFAULT_CFG = DEFAULT_CFG
 
@@ -67,11 +68,20 @@ function M:GetCellKind(name) return self._cellKinds[name] end
 
 -- ===== Default cell anatomy ================================================
 -- Lazy-built once per pooled frame (_anatomyBuilt short-circuits). Call at top of initFunc.
+-- Every pass sizes the cell, its icon and band stripe from cfg, so a grid whose
+-- tile size changes live (SetCellSize) re-sizes its pooled cells on re-init.
+local function _sizeAnatomy(cell, size, inset)
+    cell:SetSize(size, size)
+    cell.icon:SetSize(size - 2 * inset, size - 2 * inset)
+    cell.bandStripe:SetSize(3, size - 8)
+end
+
 function M:EnsureDefaultAnatomy(cell, cfg)
     cfg = cfg or {}
-    local size = cfg.cellSize or DEFAULT_CFG.cellSize
+    local size  = cfg.cellSize or DEFAULT_CFG.cellSize
+    local inset = cfg.iconInset or DEFAULT_CFG.iconInset
     if cell._anatomyBuilt then
-        cell:SetSize(size, size)
+        _sizeAnatomy(cell, size, inset)
         return cell
     end
 
@@ -87,7 +97,6 @@ function M:EnsureDefaultAnatomy(cell, cfg)
     cell.hoverBg:Hide()
 
     cell.icon = cell:CreateTexture(nil, "ARTWORK")
-    cell.icon:SetSize(size - 16, size - 16)
     cell.icon:SetPoint("CENTER", 0, 0)
     cell.icon:Hide()
 
@@ -118,11 +127,10 @@ function M:EnsureDefaultAnatomy(cell, cfg)
 
     -- Optional 3-px band stripe (left edge). Hidden by default; PaintBand reveals it.
     cell.bandStripe = cell:CreateTexture(nil, "ARTWORK", nil, 1)
-    cell.bandStripe:SetSize(3, size - 8)
     cell.bandStripe:SetPoint("LEFT", 2, 0)
     cell.bandStripe:Hide()
 
-    cell:SetSize(size, size)
+    _sizeAnatomy(cell, size, inset)
     cell._anatomyBuilt = true
     return cell
 end
@@ -222,7 +230,12 @@ function M:Create(parent, cfg)
               tostring(merged.cellKind), 2)
     end
 
-    local host, scrollBox, scrollBar = HDG.UI:CreateScrollBoxSkeleton(parent)
+    -- fixedGutter: constant-width scrollbar gutter. A grid that holds an exact
+    -- column count needs it (see M:SetColumns); default off (other grids want
+    -- the reclaim). See CreateScrollBoxSkeleton.
+    local host, scrollBox, scrollBar = HDG.UI:CreateScrollBoxSkeleton(parent, {
+        fixedGutter = merged.fixedGutter,
+    })
     local view = CreateScrollBoxListSequenceView(
         0, 0, 0, 0,
         merged.cellSpacing, merged.rowSpacing
@@ -266,6 +279,46 @@ function M:SetItems(widget, items, retainScroll)
         or  ScrollBoxConstants.DiscardScrollPosition
     widget._scrollBox:SetDataProvider(CreateDataProvider(items or {}), flag)
     HDG.UI.RestoreListScroll(widget, widget._scrollBox)   -- refilled after the window closed
+end
+
+-- Live tile size: the size calculator and every cell init read the merged cfg,
+-- so the next provider set lays the grid out at the new size.
+function M:SetCellSize(widget, size)
+    widget._cardGridCfg.cellSize = size
+end
+
+-- Exact column count, centred: pad both sides so the view's visible width holds
+-- `columns` cells and no more (the sequence view wraps on visible width, and
+-- GetVisibleWidth = box width - left - right padding). Returns true when the
+-- padding moved.
+local function _fitColumns(widget)
+    local cols = widget._cardGridColumns
+    local cfg  = widget._cardGridCfg
+    local used = cols * cfg.cellSize + (cols - 1) * cfg.cellSpacing
+    local side = math.max(0, math.floor((widget._scrollBox:GetWidth() - used) / 2))
+    if side == widget._cardGridSide then return false end
+    widget._cardGridSide = side
+    widget._cardGridView:SetPadding(0, 0, side, side, cfg.cellSpacing, cfg.rowSpacing)
+    return true
+end
+
+-- The window width follows the column setting, so the box only learns its new
+-- width after the layout pass that follows the push; refit on every resize too.
+-- An exact-columns grid must be built with fixedGutter: with the reclaim, the
+-- bar's first show narrows the box from inside Blizzard's FullUpdateInternal,
+-- which has OnSizeChanged switched off, so the refit never hears of it and the
+-- old padding leaves room for one column fewer (companion, XL x 4 showed 3).
+function M:SetColumns(widget, columns)
+    widget._cardGridColumns = columns
+    if not widget._cardGridFitHooked then
+        widget._cardGridFitHooked = true
+        widget._scrollBox:RegisterCallback(BaseScrollBoxEvents.OnSizeChanged, function()
+            if _fitColumns(widget) then
+                widget._scrollBox:FullUpdate(ScrollBoxConstants.UpdateImmediately)
+            end
+        end, widget)
+    end
+    _fitColumns(widget)
 end
 
 function M:Clear(widget)

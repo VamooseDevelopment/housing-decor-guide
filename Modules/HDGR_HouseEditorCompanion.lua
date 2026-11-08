@@ -31,7 +31,8 @@ local H = HDG.HouseEditorCompanion
 
 H._injected = false
 H._launcher = nil
-H._isInside = false   -- HousingObserver:IsInsideHouse() captured on editor open; fixed for the edit session
+
+local COMP = HDG.Constants.COMPANION
 
 local CreateLauncher
 
@@ -86,9 +87,9 @@ local function _companionCellClick(self, button)
     -- indoor-only / outdoor-only decor can be placed from where the player stands.
     local inside = HDG.HousingObserver:IsInsideHouse()
     if inside and not self._placeAllowIndoors then
-        HDG.Log:Notify("warn", '"' .. name .. '" is outdoor only.'); return
+        HDG.Log:Notify("warn", '"' .. name .. '" can only go outside.'); return
     elseif not inside and not self._placeAllowOutdoors then
-        HDG.Log:Notify("warn", '"' .. name .. '" is indoor only.'); return
+        HDG.Log:Notify("warn", '"' .. name .. '" can only go inside.'); return
     end
     if (self._placeQty or 0) < 1 then
         HDG.Log:Notify("warn", 'No "' .. name .. '" available to place.'); return
@@ -97,20 +98,19 @@ local function _companionCellClick(self, button)
 end
 
 -- ============================================================================
--- "Can't place here" border (HDG parity). The player's inside/outside location
--- is FIXED for an edit session (you can't walk in/out mid-edit), so it's
--- captured once in H._isInside on editor open -- no live re-check needed. A cell
--- whose decor can't be placed from where the player stands (indoor-only item
--- while outside, or outdoor-only while inside) gets a warning border. 4 lazy
--- edges tinted via SetColorTexture (block chars don't render -- see
+-- "Can't place here" border + tag. ed.cantHere is stamped by the selector from
+-- session.house.budget.inside (HousingObserver's house tick). A cell whose decor
+-- can't be placed from where the player stands (inside-only while outside, or
+-- outside-only while inside) gets a warning border and an "Inside only" /
+-- "Outside only" tag. 4 lazy edges in the tag's own warning colour, through the
+-- theme so a scheme switch repaints both (block chars don't render -- see
 -- reference_wow_color_swatches).
-local PLACE_BORDER = { 0.95, 0.5, 0.12, 0.9 }   -- warning orange
 local function _ensurePlaceBorder(cell)
     if cell._placeBorder then return cell._placeBorder end
     local e = {}
     for i = 1, 4 do
         e[i] = cell:CreateTexture(nil, "OVERLAY")
-        e[i]:SetColorTexture(PLACE_BORDER[1], PLACE_BORDER[2], PLACE_BORDER[3], PLACE_BORDER[4])
+        HDG.Theme:Register(e[i], "SectionBgTint", { token = "semantic.warning" })
     end
     e[1]:SetPoint("TOPLEFT");     e[1]:SetPoint("TOPRIGHT");     e[1]:SetHeight(2)  -- top
     e[2]:SetPoint("BOTTOMLEFT");  e[2]:SetPoint("BOTTOMRIGHT");  e[2]:SetHeight(2)  -- bottom
@@ -125,6 +125,156 @@ local function _paintPlaceBorder(cell, blocked)
         return
     end
     for _, t in ipairs(_ensurePlaceBorder(cell)) do t:Show() end
+end
+
+-- The tag: an orange pill, top-left (the recent +/- marks own top-right). Words
+-- from L tiles up; smaller tiles, and a tile showing the recent marks, get the
+-- budget glyph alone -- the words would run past the tile or over the marks.
+local function _ensurePlaceTag(cell)
+    if cell._placeTag then return cell._placeTag end
+    local tag = CreateFrame("Frame", nil, cell)
+    tag:SetPoint("TOPLEFT", cell, "TOPLEFT", 3, -3)
+    tag:SetHeight(16)
+    local bg = tag:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    HDG.Theme:Register(bg, "SectionBgTint", { token = "semantic.warning" })
+    -- Dark ink on the orange fill, as the lab's tag: light text on it was unreadable.
+    local ink = COMP.TAG_INK
+    tag._glyph = tag:CreateTexture(nil, "ARTWORK")
+    tag._glyph:SetSize(12, 12)
+    tag._glyph:SetPoint("LEFT", tag, "LEFT", 2, 0)
+    tag._glyph:SetVertexColor(ink.r, ink.g, ink.b, ink.a)  -- scheme-invariant: TAG_INK reads on every scheme's warning fill
+    tag._text = tag:CreateFontString(nil, "OVERLAY")
+    HDG.UI.applyFontRole(tag._text, "small")
+    tag._text:SetTextColor(ink.r, ink.g, ink.b, ink.a)  -- scheme-invariant: TAG_INK reads on every scheme's warning fill
+    tag._text:SetJustifyH("LEFT")
+    tag._text:SetPoint("LEFT", tag._glyph, "RIGHT", 2, 0)
+    cell._placeTag = tag
+    return tag
+end
+
+local function _showsPlaceTag(ed)
+    return ed.cantHere and not ed.isActionStrip
+end
+
+local function _paintPlaceTag(cell, ed, tile)
+    if not _showsPlaceTag(ed) then
+        if cell._placeTag then cell._placeTag:Hide() end
+        return
+    end
+    local tag = _ensurePlaceTag(cell)
+    local insideOnly = ed.allowIndoors and not ed.allowOutdoors
+    tag._glyph:SetAtlas(insideOnly and "house-decor-budget-icon" or "house-decor-exteriorbudget-icon")
+    local marked = (ed.placedCount or 0) > 0 or (ed.removedCount or 0) > 0  -- exception(nullable): only Recent cells carry placed / removed counts
+    local words = tile >= COMP.TAG_TEXT_MIN and not marked
+    tag._text:SetText(words and (insideOnly and "Inside only" or "Outside only") or "")
+    tag._text:SetShown(words)
+    tag:SetWidth(words and (tag._text:GetStringWidth() + 20) or 16)
+    tag:Show()
+end
+
+-- Badge fonts grow with the tile. A tile between sizes (the recent strip's 56px)
+-- takes the largest size that fits it.
+local function _sizeKeyFor(tile)
+    local key = COMP.TILE_SIZES[1]
+    for _, k in ipairs(COMP.TILE_SIZES) do
+        if COMP.TILE_PX[k] <= tile then key = k end
+    end
+    return key
+end
+
+-- Re-fonted only when the tile size changes (pooled cells keep their last).
+local function _sizeBadges(cell, key)
+    if cell._badgeKey == key then return end
+    cell._badgeKey = key
+    local h = COMP.BADGE_GLYPH[key] + 2
+    cell.badge:SetFontObject(COMP.BADGE_FONT[key])
+    cell.badge:SetHeight(h)
+    cell.badge:ClearAllPoints()
+    cell.badge:SetPoint("BOTTOMRIGHT", -5, 4)
+    cell._costFs:SetFontObject(COMP.BADGE_FONT[key])
+    cell._costFs:SetHeight(h)
+end
+
+-- Cost badge: top-left, since the dye mark takes Blizzard's bottom-left spot
+-- (Vamoose 11-08), and on every grid tile so it never jumps between tiles.
+-- Under the "can't go here" tag when that shows (its words fill an L tile's top).
+-- The recent strip has no dye marks and keeps it bottom-left.
+local function _anchorCost(cell, ed)
+    local fs = cell._costFs
+    fs:ClearAllPoints()
+    if ed.isActionStrip then
+        fs:SetPoint("BOTTOMLEFT", 4, 4)
+    elseif _showsPlaceTag(ed) then
+        fs:SetPoint("TOPLEFT", cell._placeTag, "BOTTOMLEFT", 1, -2)
+    else
+        fs:SetPoint("TOPLEFT", 4, -4)
+    end
+end
+
+-- That place's budget icon + the cost, orange when it is more than the budget
+-- has left. Gated by ed.showCost (account setting). Paint after the tag.
+local function _paintCost(cell, ed, key)
+    local cost = ed.placementCost
+    if not (ed.showCost and cost and cost > 0) then
+        cell._costFs:Hide()
+        return
+    end
+    _anchorCost(cell, ed)
+    local g = COMP.COST_GLYPH[key]
+    cell._costFs:SetText(("|A:%s:%d:%d|a%d"):format(ed.costAtlas, g, g, cost))
+    HDG.Theme:Register(cell._costFs, ed.overBudget and "TextWarning" or "Text")
+    cell._costFs:Show()
+end
+
+-- Dye mark (bottom-left, Blizzard's art and spot, Vamoose 11-08): a palette on
+-- decor you can dye that isn't dyed (ed.canCustomize), one drop per dye on a
+-- dyed copy (ed.dyeColorIDs, filled slots only), painted the dye's swatch colour.
+-- The palette greys with the icon on a tile you have none of, as Blizzard's.
+local function _ensureDyeMark(cell)
+    if cell._dyePalette then return end
+    cell._dyePalette = cell:CreateTexture(nil, "OVERLAY")
+    cell._dyePalette:SetAtlas("housing-dyable-palette-icon")
+    cell._dyePalette:SetPoint("BOTTOMLEFT", 4, 4)
+    cell._dyeDrops = {}
+    for i = 1, 3 do   -- Blizzard's three dye slots
+        cell._dyeDrops[i] = cell:CreateTexture(nil, "OVERLAY")
+        cell._dyeDrops[i]:SetAtlas("dye-drop_32")
+    end
+end
+
+local PLAIN_DROP = { r = 1, g = 1, b = 1 }   -- the drop art untinted (white)
+
+local function _hideDyeMark(cell)
+    if not cell._dyePalette then return end
+    cell._dyePalette:Hide()
+    for _, d in ipairs(cell._dyeDrops) do d:Hide() end
+end
+
+local function _paintDrop(d, dyeColorID, i, g)
+    d:SetSize(g, g)
+    d:ClearAllPoints()
+    d:SetPoint("BOTTOMLEFT", 4 + (i - 1) * (g - math.floor(g * COMP.DYE_DROP_OVERLAP + 0.5)), 4)
+    local info = HDG.HousingCatalogObserver:GetDyeColorInfo(dyeColorID)
+    local swatch = info and info.swatchColorStart or PLAIN_DROP   -- exception(boundary): C_DyeColor nil on an id it doesn't know
+    HDG.UI._TintTexture(d, swatch)   -- data: the dye's own swatch colour
+    d:Show()
+end
+
+local function _paintDyeMark(cell, ed, key, greyed)
+    local ids = ed.dyeColorIDs
+    if not (ed.canCustomize or ids) then   -- exception(nullable): only dyed-copy cells carry dye colours
+        _hideDyeMark(cell)
+        return
+    end
+    _ensureDyeMark(cell)
+    local g = COMP.BADGE_GLYPH[key]
+    cell._dyePalette:SetSize(g, g)
+    cell._dyePalette:SetDesaturated(greyed)
+    cell._dyePalette:SetShown(ed.canCustomize == true)
+    for i, d in ipairs(cell._dyeDrops) do
+        if ids and ids[i] then _paintDrop(d, ids[i], i, g) else d:Hide() end
+    end
 end
 
 -- Recent-activity +/- corner overlays (HDG parity): communities-chat-icon-plus
@@ -256,43 +406,27 @@ HDG.CardGrid:RegisterCellKind("companionGridCell", {
         -- place count badge below carries ownership (matches HDG's cell).
         cell.label:Hide()
 
-        -- Downsize the shared anatomy's owned-count badge (16pt default reads
-        -- intrusive on a 60px placement cell); match the cost badge's font +
-        -- baseline so the two corners sit on one visual line.
-        if not cell._badgeDownsized then
-            cell._badgeDownsized = true
-            cell.badge:SetFontObject("NumberFontNormalSmall")
-            cell.badge:SetHeight(12)
-            cell.badge:ClearAllPoints()
-            cell.badge:SetPoint("BOTTOMRIGHT", -4, 3)
-        end
-
-        -- Cost badge (bottom-left): gated by ed.showCost, stamped per-cell from
-        -- session.ui.companion.showCost. Pure function of ed; COMPANION_TOGGLE_COST re-pushes.
+        -- Count (bottom-right) + cost (top-left) share one font per tile size.
         if not cell._costFs then
-            cell._costFs = cell:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall")
-            cell._costFs:SetPoint("BOTTOMLEFT", 3, 3)
+            cell._costFs = cell:CreateFontString(nil, "OVERLAY")   -- anchored per paint (_anchorCost)
         end
-        local cost = ed.placementCost
-        if ed.showCost and cost and cost > 0 then
-            cell._costFs:SetText(_G.CreateAtlasMarkup("house-decor-budget-icon", 11, 11) .. cost)
-            cell._costFs:Show()
-        else
-            cell._costFs:Hide()
-        end
+        local sizeKey = _sizeKeyFor(cfg.cellSize)
+        _sizeBadges(cell, sizeKey)
 
         -- Owned-to-place count badge; gray the icon when 0 copies free.
         -- per-action STRIP hides it (each card is one action, not a count).
         local qty = ed.ownedQty or 0
+        local greyed = not ed.isActionStrip and ed.entryID ~= nil and qty < 1
         if ed.isActionStrip then
             HDG.CardGrid:PaintBadge(cell, nil)
         else
             HDG.CardGrid:PaintBadge(cell, qty > 0 and tostring(qty) or nil)
-            if ed.entryID and qty < 1 then
+            if greyed then
                 cell.icon:SetDesaturated(true)
                 cell.icon:SetAlpha(0.45)
             end
         end
+        _paintDyeMark(cell, ed, sizeKey, greyed)
 
         -- Stamp the placement payload the click handler + tooltip read.
         cell._placeEntryID      = ed.entryID
@@ -301,8 +435,8 @@ HDG.CardGrid:RegisterCellKind("companionGridCell", {
         cell._placeQty          = qty
         cell._placeAllowIndoors = ed.allowIndoors
         cell._placeAllowOutdoors = ed.allowOutdoors
-        cell._placeWhere = (ed.allowIndoors and not ed.allowOutdoors and "Indoor only")
-            or (ed.allowOutdoors and not ed.allowIndoors and "Outdoor only") or nil
+        cell._placeWhere = (ed.allowIndoors and not ed.allowOutdoors and "Inside only")
+            or (ed.allowOutdoors and not ed.allowIndoors and "Outside only") or nil
         cell._placeCost = ed.placementCost
         cell._placeNumPlaced = ed.numPlaced   -- "Placed:" tooltip line (nil for dyed variants -> storage-only)
         -- Recent-mode session activity (nil in other modes).
@@ -313,13 +447,12 @@ HDG.CardGrid:RegisterCellKind("companionGridCell", {
         -- grid shows the count number (accent); the per-action strip = direction only.
         _paintRecentBadges(cell, ed.placedCount, ed.removedCount, not ed.isActionStrip)
 
-        -- Orange border when this owned decor can't be placed from where the
-        -- player stands (indoor-only while outside, or vice versa). Only
-        -- placeable cells (entryID present) qualify; the recent strip's
-        -- non-placeable cells carry no entryID so they never border.
-        _paintPlaceBorder(cell, ed.entryID ~= nil
-            and ((H._isInside and not ed.allowIndoors)
-              or (not H._isInside and not ed.allowOutdoors)))
+        -- Orange border + tag when this decor can't be placed from where the
+        -- player stands (ed.cantHere). The recent strip shows neither: each of
+        -- its cards is a past action, not an offer.
+        _paintPlaceBorder(cell, _showsPlaceTag(ed))
+        _paintPlaceTag(cell, ed, cfg.cellSize)
+        _paintCost(cell, ed, sizeKey)   -- after the tag: the cost sits under it
 
         cell:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         cell:SetScript("OnClick", _companionCellClick)
@@ -343,6 +476,8 @@ HDG.CardGrid:RegisterCellKind("companionGridCell", {
         cell.hoverBg:Hide()
         if cell.badge then cell.badge:Hide() end
         if cell._costFs then cell._costFs:Hide() end
+        if cell._placeTag then cell._placeTag:Hide() end
+        _hideDyeMark(cell)
         _paintPlaceBorder(cell, false)
         _paintRecentBadges(cell, 0, 0)
         if cell.icon then cell.icon:SetDesaturated(false); cell.icon:SetAlpha(1) end
@@ -405,10 +540,6 @@ end
 -- does this on tab-activate; editor-only open never would -> "?" placeholder icons).
 -- Sweep is async + idempotent; completion bumps sweepGeneration -> companion re-resolves.
 local function _onEditorShown()
-    -- Capture inside/outside ONCE per editor open (fixed for the edit session) so
-    -- grid cells can border decor that can't be placed from here. Via HousingObserver
-    -- (owner of C_Housing).
-    H._isInside = HDG.HousingObserver:IsInsideHouse()
     HDG.HousingCatalogObserver:RequestLoad("house-editor")
     -- Search box on Blizzard's own Placed Decor panel (dim-only; see that module
     -- for why it must never touch their DataProvider). Idempotent.
@@ -419,6 +550,8 @@ local function _onEditorShown()
     -- parent HouseEditorFrame now exists); HDG.Window's reconciler -- already
     -- subscribed at OnEnable -- drives visibility/position/content from there.
     HDG.Window:EnsureCreated("companion")
+    -- The grid opens on a list, not an empty well, when nothing is picked yet.
+    HDG.CompanionController:PickFirstListIfNone()
 end
 
 local function InjectShell()

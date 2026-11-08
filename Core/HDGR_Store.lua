@@ -542,11 +542,11 @@ end
 local function NewCompanionSessionUI()
     return {
         windowShown      = false,    -- launcher click toggles this
-        mode             = "styles", -- "styles"|"shopping"|"snapshots"|"themes"|"collections"|"recent"
+        mode             = "catalog", -- "catalog"|"styles"|"rooms"|"snapshots"|"themes"|"collections"|"recent"; opens on Catalog (owner 11-08)
         search           = "",
-        selectedItemID   = nil,      -- highlighted collection in sidebar (varies by mode)
-        showCost         = true,     -- cost-badge visibility toggle (header budget button)
-        ioFilter         = "all",    -- "all"|"indoor"|"outdoor" -- 3-state grid filter
+        selectedItemID   = nil,      -- the list shown in the grid (varies by mode)
+        pickerOpen       = false,    -- the list picker is open over the grid
+        lastPick         = {},       -- [mode] = the list last picked there; a mode reopens on it
     }
 end
 
@@ -562,6 +562,13 @@ local function NewCompanionAccountUI()
         -- until the user says otherwise. Deliberately NOT Browse's set (which is
         -- present = OPEN): the two lists fold independently.
         collapsedGroups = {},   -- [groupKey] = true; keys "loose" | "cat:<n>" | "smartsets"
+        -- Cost-badge toggle (header budget button). Account-wide so a player's
+        -- choice survives /reload, logout and switching characters.
+        showCost = true,
+        -- Grid tile size (a Constants.COMPANION.TILE_PX key) and columns, set by
+        -- the steppers beside the search box. New players start at L x 4.
+        tileSize = "L",
+        columns  = 4,
     }
 end
 
@@ -603,9 +610,11 @@ local function NewHouseSession()
         -- HOUSE_REWARDS_RECEIVED dispatch. Aggregator reads this to
         -- build the nextRewards snapshot field.
         rewardsByLevel         = {},
-        -- Live decor spend bumped by PROJECTS_HOUSE_TICK. Placement caps are
-        -- reward-derived; the live cap API is editor-state-dependent.
-        budget                 = { decorSpent = 0, decorCount = 0 },
+        -- Live decor budget from PROJECTS_HOUSE_TICK: spend + count, and for the
+        -- companion's where-you-are chip the live max and whether you're inside
+        -- (the game answers the budget for where you stand). Projects' caps stay
+        -- reward-derived; see HousingObserver:_PushHouseTick for the max caveat.
+        budget                 = { decorSpent = 0, decorCount = 0, decorMax = 0, inside = false },
         numFloors              = 0,
         editorActive           = false,
         -- Live room catalog snapshotted by HousingCatalogObserver on HOUSING_STORAGE_UPDATED.
@@ -1605,6 +1614,9 @@ local function EnsureStateShape(state)
     state.account.ui.companion.window = state.account.ui.companion.window or { x = nil, y = nil }
     state.account.ui.companion.launcher = state.account.ui.companion.launcher or { x = nil, y = nil }
     state.account.ui.companion.collapsedGroups = state.account.ui.companion.collapsedGroups or {}  -- exception(boundary): SV migration -- companion group folds added post-3.31
+    if state.account.ui.companion.showCost == nil then state.account.ui.companion.showCost = true end  -- exception(boundary): SV migration -- cost toggle moved out of session state (false is a real value)
+    state.account.ui.companion.tileSize = state.account.ui.companion.tileSize or "L"  -- exception(boundary): SV migration -- tile size added 2026-11-07
+    state.account.ui.companion.columns  = state.account.ui.companion.columns  or 4    -- exception(boundary): SV migration -- columns added 2026-11-07
     -- Recent Activity (HDG parity). boundary: SV migration -- guarantees the
     -- slice for saves created before edit-session history existed.
     state.account.recentActivity = state.account.recentActivity or NewRecentActivity()
@@ -3069,40 +3081,61 @@ HDG.Actions:Register{ name = "COMPANION_TOGGLE",
     end }
 
 HDG.Actions:Register{ name = "COMPANION_SET_MODE",
-    persists = false, combatUnsafe = false, 
-    invalidates = { "session.ui.companion.mode", "session.ui.companion.selectedItemID" },
+    persists = false, combatUnsafe = false,
+    invalidates = { "session.ui.companion.mode", "session.ui.companion.selectedItemID",
+                    "session.ui.companion.pickerOpen", "session.ui.companion.lastPick" },
     reduce = function(state, payload)
-        local m = payload.mode
-        if m then
-            state.session.ui.companion.mode = m
-            -- Clear selection when switching modes (different collection sets).
-            state.session.ui.companion.selectedItemID = nil
-        end
+        -- Each mode keeps the list last picked there (different collection sets);
+        -- a mode never visited opens with nothing picked and the controller
+        -- picks its first list.
+        local ui = state.session.ui.companion
+        ui.lastPick[ui.mode] = ui.selectedItemID
+        ui.mode = payload.mode
+        ui.selectedItemID = ui.lastPick[payload.mode]
+        ui.pickerOpen = false
     end }
 
+-- Picking a list (picker row or the prev / next arrows) shows it and closes the
+-- picker. keepOpen leaves it open: a Catalog category with subcategories opens
+-- them in the picker, so the player can go on to one.
 HDG.Actions:Register{ name = "COMPANION_SELECT_ITEM",
-    persists = false, combatUnsafe = false, 
-    invalidates = { "session.ui.companion.selectedItemID" },
+    persists = false, combatUnsafe = false,
+    invalidates = { "session.ui.companion.selectedItemID", "session.ui.companion.pickerOpen" },
     reduce = function(state, payload)
+        if not payload.keepOpen then state.session.ui.companion.pickerOpen = false end
         state.session.ui.companion.selectedItemID = payload.itemID
     end }
 
 HDG.Actions:Register{ name = "COMPANION_TOGGLE_COST",
-    persists = false, combatUnsafe = false, 
-    invalidates = { "session.ui.companion.showCost" },
+    persists = true, combatUnsafe = false,
+    invalidates = { "account.ui.companion.showCost" },
     reduce = function(state, payload)
-        state.session.ui.companion.showCost =
-            not state.session.ui.companion.showCost
+        state.account.ui.companion.showCost =
+            not state.account.ui.companion.showCost
     end }
 
-HDG.Actions:Register{ name = "COMPANION_CYCLE_IO",
-    persists = false, combatUnsafe = false, 
-    invalidates = { "session.ui.companion.ioFilter" },
+-- Tile size and columns: the steppers clamp and step in the controller; the
+-- reducer stores the value it is handed. Saved, so the grid opens as left.
+HDG.Actions:Register{ name = "COMPANION_SET_TILE_SIZE",
+    persists = true, combatUnsafe = false,
+    invalidates = { "account.ui.companion.tileSize" },
     reduce = function(state, payload)
-        -- 3-state cycle: all -> indoor -> outdoor -> all.
-        local cur = state.session.ui.companion.ioFilter
-        state.session.ui.companion.ioFilter =
-            (cur == "all" and "indoor") or (cur == "indoor" and "outdoor") or "all"
+        state.account.ui.companion.tileSize = payload.size
+    end }
+
+HDG.Actions:Register{ name = "COMPANION_SET_COLUMNS",
+    persists = true, combatUnsafe = false,
+    invalidates = { "account.ui.companion.columns" },
+    reduce = function(state, payload)
+        state.account.ui.companion.columns = payload.columns
+    end }
+
+HDG.Actions:Register{ name = "COMPANION_TOGGLE_PICKER",
+    persists = false, combatUnsafe = false,
+    retainsScroll = true,  -- opening the picker over the grid must not move the grid under it
+    invalidates = { "session.ui.companion.pickerOpen" },
+    reduce = function(state, payload)
+        state.session.ui.companion.pickerOpen = not state.session.ui.companion.pickerOpen
     end }
 
 HDG.Actions:Register{ name = "COMPANION_SET_POSITION",
@@ -4559,7 +4592,8 @@ HDG.Actions:Register{ name = "STYLES_PLACED_DECOR_CLEAR",
 
 HDG.Actions:Register{ name = "RECENT_SESSION_START",
     persists = true, combatUnsafe = false,
-            invalidates = { "account.recentActivity" },
+            invalidates = { "account.recentActivity", "session.ui.companion.selectedItemID",
+                            "session.ui.companion.lastPick" },
     reduce = function(state, payload)
         -- Seal the active (newest, unsealed) session, open a fresh one. Keyed
         -- by the stable faction house id. Caps history at RECENT_SESSION_CAP.
@@ -4573,6 +4607,12 @@ HDG.Actions:Register{ name = "RECENT_SESSION_START",
         local house = ra.houses[key]
         if not house then house = { sessionOrder = {}, sessions = {} }; ra.houses[key] = house end
         _openNewRecentSession(house)
+        -- A new edit session puts the companion's Recent back on the newest
+        -- session: a session picked last time is sealed now, and holding it would
+        -- hide everything placed from here on.
+        local comp = state.session.ui.companion
+        comp.lastPick.recent = nil
+        if comp.mode == "recent" then comp.selectedItemID = nil end
     end }
 
 HDG.Actions:Register{ name = "RECENT_DECOR_PLACED",
@@ -5594,7 +5634,8 @@ HDG.Actions:Register{ name = "PROJECTS_CAPTURE_COMMIT",
     end }
 
 HDG.Actions:Register{ name = "PROJECTS_HOUSE_TICK",
-    persists = false, combatUnsafe = false, 
+    persists = false, combatUnsafe = false,
+    retainsScroll = true,  -- the companion grid reads the budget: each placement re-pushes it in place (Discord 2026-09-06)
     invalidates = { "session.house.budget", "session.house.numFloors", "session.house.editorActive" },
     reduce = function(state, payload)
         -- Partial patch from HousingObserver; each event updates the subset it knows.

@@ -108,12 +108,15 @@ function W:_CreateOne(name, win)
     -- shows + stamps chrome.windowBorder when the scheme declares it, else hides.
     HDG.UI.AttachWindowFrameBorder(frame)
 
-    -- Interest set: shown + position binding + all widget read-closures.
-    -- Reconciler short-circuits when invalidation doesn't intersect.
+    -- Interest set: shown + position binding + the layout's own selectors
+    -- (dynamicColumns / visible) + all widget read-closures. Reconciler
+    -- short-circuits when invalidation doesn't intersect. Without the layout
+    -- part a window whose width or sections follow state never re-laid out.
     local interest = HDG.Selectors:GetReads(win.shown)
     if win.position and win.position.binding then
         interest = HDG.Paths.Union(interest, HDG.Selectors:GetReads(win.position.binding))
     end
+    interest = HDG.Paths.Union(interest, HDG.Layout:WindowInterest(HDG.LayoutConfig, name, state))
     if interest ~= "*" and frame.widgets then
         for _, widget in pairs(frame.widgets) do
             if widget._hdgrReadsClosure then

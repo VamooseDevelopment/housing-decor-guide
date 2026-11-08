@@ -265,6 +265,8 @@ HDG.Locale:Register("ruRU", {
     TAB_DECOR = "Декор",
     TIP_CLOSE = "Закрыть",
     TIP_COFFEE_TITLE = "Угостить меня кофе",
+    TIP_COMPANION_CATALOG_BODY = "Весь декор в игре, ваш или нет, по категориям Blizzard.",
+    TIP_COMPANION_CATALOG_TITLE = "Категории",
     TIP_COMPANION_COLLECTIONS_BODY = "Просматривать декор по категориям -- Недавно изученные, Окрашиваемые и по стоимости размещения.",
     TIP_COMPANION_COLLECTIONS_TITLE = "Коллекции",
     TIP_COMPANION_RECENT_BODY = "Декор, который вы разместили или убрали в этой сессии редактирования.",

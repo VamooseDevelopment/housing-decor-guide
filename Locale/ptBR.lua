@@ -266,6 +266,8 @@ HDG.Locale:Register("ptBR", {
     TAB_DECOR = "Decoração",
     TIP_CLOSE = "Fechar",
     TIP_COFFEE_TITLE = "Pague um café",
+    TIP_COMPANION_CATALOG_BODY = "Toda a decoração do jogo, sua ou não, organizada pelas categorias da Blizzard.",
+    TIP_COMPANION_CATALOG_TITLE = "Categorias",
     TIP_COMPANION_COLLECTIONS_BODY = "Navegue pela decoração por categoria -- Aprendidos Recentemente, Tingiveis, e por custo de colocação.",
     TIP_COMPANION_COLLECTIONS_TITLE = "Coleções",
     TIP_COMPANION_RECENT_BODY = "Decoração que você colocou ou removeu nesta sessão de edição.",

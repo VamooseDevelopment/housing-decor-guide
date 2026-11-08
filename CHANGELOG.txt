@@ -1,3 +1,39 @@
+## [3.43.0] - 2026-11-08 (November 2026)
+
+### Added
+- **Categories in the house editor companion.** A new button at the top of the rail lists
+  Blizzard's own decor categories with Blizzard's icons: All, then Furnishings, Accents,
+  Structural, Lighting, Nature, Functional and Miscellaneous. Pick a category to see all of its
+  decor, or open it to pick a subcategory. Everything is there, owned or not: decor you don't
+  have shows greyed out, and a right-click adds it to a shopping list. The companion now opens on
+  Categories. Decor that Blizzard files under two subcategories shows under the first one only.
+- **Dye marks on the house editor companion's tiles,** in Blizzard's own art and spot, bottom
+  left. Decor you can dye shows a palette; a dyed copy shows a drop in each of its dye colours.
+  The placement cost moves to the top left to make room.
+
+### Changed
+- **A new look for the house editor companion.** Down the left is a rail: Categories,
+  Styles, Designs, Placed, Themes, Collections and Recent. The decor grid takes the rest of the
+  window. The list you're looking at is named above the grid; click the name to pick another
+  (long lists scroll), or step through them with the arrows either side. Each rail button
+  remembers the list it last showed.
+- **Bigger decor tiles, and you choose the size.** Next to the search box, pick the tile size
+  (small, medium, large or extra large) and how many columns (2 to 6). The window resizes to fit,
+  and both settings are remembered. New installs start at large tiles, 4 across.
+- **Your decor budget in the title bar.** The Indoor and Outdoor filter is gone. In its place the
+  title bar shows the budget for where you are, inside or outside, as used out of your limit; it
+  turns orange when you're close to the limit. Placement costs show the matching inside or
+  outside budget icon, and turn orange when an item costs more than you have left. The few items
+  that can't go where you are carry an orange "Inside only" or "Outside only" tag.
+
+### Fixed
+- **Provisioner Fray's map pin and waypoint now point to Boralus.** They sent you out into
+  Tiragarde Sound.
+- **The house editor companion remembers whether you hide placement costs.** Turn the cost
+  badges off and they stay off after a reload, a logout or a switch to another character.
+- **Section headings in the house editor companion's lists no longer show a room's picture.**
+  Going from Designs to Themes or Collections could leave a room's floor plan on a heading.
+
 ## [3.42.0] - 2026-11-06 (November 2026)
 
 ### Added

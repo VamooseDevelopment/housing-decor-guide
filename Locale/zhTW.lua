@@ -266,6 +266,8 @@ HDG.Locale:Register("zhTW", {
     TAB_DECOR = "裝飾",
     TIP_CLOSE = "關閉",
     TIP_COFFEE_TITLE = "請我喝杯咖啡",
+    TIP_COMPANION_CATALOG_BODY = "遊戲中的所有裝飾，無論是否擁有，依暴雪的分類排列。",
+    TIP_COMPANION_CATALOG_TITLE = "目錄",
     TIP_COMPANION_COLLECTIONS_BODY = "依分類瀏覽裝飾 -- 最近學習、可染色及依放置費用。",
     TIP_COMPANION_COLLECTIONS_TITLE = "收藏",
     TIP_COMPANION_RECENT_BODY = "本次編輯工作階段中放置或移除的裝飾。",

@@ -1008,11 +1008,13 @@ HDG.Constants = {
         -- ===== HouseEditor companion =====
         -- Taint-safe standalone window; parents to HouseEditorFrame for visibility cascade.
         COMPANION_TOGGLE             = "HDGR_COMPANION_TOGGLE",
-        COMPANION_SET_MODE           = "HDGR_COMPANION_SET_MODE",           -- payload: { mode = "styles"|"rooms"|"snapshots"|"themes"|"collections"|"recent" }
-        COMPANION_SELECT_ITEM        = "HDGR_COMPANION_SELECT_ITEM",        -- payload: { itemID = number|string }
+        COMPANION_SET_MODE           = "HDGR_COMPANION_SET_MODE",           -- payload: { mode = "catalog"|"styles"|"rooms"|"snapshots"|"themes"|"collections"|"recent" }
+        COMPANION_SELECT_ITEM        = "HDGR_COMPANION_SELECT_ITEM",        -- payload: { itemID = number|string, keepOpen = bool? }
         COMPANION_SET_POSITION       = "HDGR_COMPANION_SET_POSITION",       -- payload: { x, y } -- persists window placement
         COMPANION_TOGGLE_COST        = "HDGR_COMPANION_TOGGLE_COST",        -- flips the cost-badge visibility
-        COMPANION_CYCLE_IO           = "HDGR_COMPANION_CYCLE_IO",           -- cycles ioFilter all->indoor->outdoor
+        COMPANION_SET_TILE_SIZE      = "HDGR_COMPANION_SET_TILE_SIZE",      -- payload: { size = "S"|"M"|"L"|"XL" } -- saved
+        COMPANION_SET_COLUMNS        = "HDGR_COMPANION_SET_COLUMNS",        -- payload: { columns = 2..6 } -- saved
+        COMPANION_TOGGLE_PICKER      = "HDGR_COMPANION_TOGGLE_PICKER",      -- opens / closes the list picker over the grid
         COMPANION_SET_LAUNCHER_POSITION = "HDGR_COMPANION_SET_LAUNCHER_POSITION", -- payload: { x, y }
         COMPANION_TOGGLE_GROUP       = "HDGR_COMPANION_TOGGLE_GROUP",       -- payload: { key = "loose"|"cat:<n>"|"smartsets" } -- folds a sidebar group
 
@@ -1320,11 +1322,13 @@ HDG.Constants = {
     -- ===== UI sizing constants =====
     -- Per CLAUDE.md rule #9: hardcoded sizes / spacing go here, not inlined.
     STYLE = {
+        SCROLLBAR_RESERVE = 6,  -- px a ScrollBox keeps on its right for the MinimalScrollBar (HDG.UI.SCROLLBOX_SCROLLBAR_RESERVE)
         CARD_GRID = {
             CELL_SIZE     = 80,
             CELLS_PER_ROW = 6,
             CELL_SPACING  = 1,
             ROW_SPACING   = 1,
+            ICON_INSET    = 8,     -- icon = cell - 2 x inset
         },
         CARD_GRID_DETAIL  = { CELLS_PER_ROW = 8, CELL_SIZE = 80 },
         CARD_GRID_PREVIEW = { CELLS_PER_ROW = 8, CELL_SIZE = 80 },
@@ -1334,6 +1338,60 @@ HDG.Constants = {
             ROW_HEIGHT  = 22,
             ROW_SPACING = 1,
         },
+    },
+
+    -- ===== House-editor companion: Blizzard's catalog layout (Vamoose, 2026-11-07) =====
+    -- Lab: docs/mockups/hdgr-companion-redesign.html. Blizzard numbers from
+    -- Blizzard_HouseEditorStorageFrame.xml / Blizzard_HousingCatalogEntry.xml (12.1.5).
+    COMPANION = {
+        TILE_SIZES   = { "S", "M", "L", "XL" },                -- stepper order
+        TILE_PX      = { S = 60, M = 78, L = 97, XL = 124 },   -- L = Blizzard's catalog tile
+        TILE_NAMES   = { S = "Small", M = "Medium", L = "Large", XL = "Extra large" },
+        -- Count + cost badge font per tile size, and the glyph size the badge line and
+        -- dye mark are built on (grow with the tile).
+        BADGE_FONT   = { S = "NumberFontNormalSmall", M = "NumberFontNormal",
+                         L = "GameFontHighlightLarge", XL = "GameFontHighlightHuge" },
+        BADGE_GLYPH  = { S = 11, M = 13, L = 16, XL = 19 },
+        -- The cost's budget icon stands as tall as its number's digits (Vamoose 11-08: at
+        -- BADGE_GLYPH it read too big). Digits are ~0.65 of the font size (Friz 20 at XL
+        -- measured 13px) and the icon art fills ~0.92 of its box.
+        COST_GLYPH   = { S = 9, M = 11, L = 12, XL = 14 },
+        TAG_TEXT_MIN = 97,    -- the "Inside only" tag shows its words from L up: at M (78) "Inside only" ran past the tile
+        -- Dye mark (bottom-left, Blizzard's art and spot): the palette and each drop are
+        -- BADGE_GLYPH square; drops overlap by this share of their size (Blizzard: 16px, 6px).
+        DYE_DROP_OVERLAP = 0.375,
+        -- The tag's ink on its semantic.warning fill: #1a0f00 reads at 5.0:1 or better on
+        -- every scheme's warning colour (lowest: #b57614), where light text read at ~1.5:1.
+        TAG_INK      = { r = 0.102, g = 0.059, b = 0, a = 1 },
+        COLUMNS_MIN  = 2,
+        COLUMNS_MAX  = 6,
+        TILE_GAP     = 5,     -- between tiles, both axes
+        ICON_INSET   = 5,     -- Blizzard's catalog tile insets its icon 5px
+        RAIL_WIDTH   = 75,    -- Blizzard's category rail
+        MIN_WIDTH    = 415,   -- Blizzard's storage frame minimum (whole window)
+        GRID_SLACK   = 3,     -- UI-scale rounding guard so the last column never wraps
+        FLYOUT_WIDTH = 250,
+        -- The heading's "N decor" count: fixed, so the picker and its arrow keep their
+        -- place as the count changes ("9999 decor" fits in the small font).
+        TOTAL_WIDTH  = 64,
+        LOW_BUDGET   = 10,    -- the where-you-are chip turns orange below this many left
+        -- One sprite sheet for the rail icons + the two stepper glyphs: 512x512,
+        -- 4 x 4 cells (the last row spare), white on transparent, tinted in code.
+        -- Cell = 0-based, row-major. Source:
+        -- docs/mockups/hdg_companion_refs/hdgr_companion_rail_sprite.svg.
+        SPRITE       = "Interface\\AddOns\\HousingDecorGuide\\textures\\HDGR_CompanionRail",
+        SPRITE_COLS  = 4,
+        SPRITE_ROWS  = 4,
+        SPRITE_CELL  = { styles = 0, rooms = 1, snapshots = 2, themes = 3,
+                         collections = 4, recent = 5, tileSize = 6, columns = 7,
+                         catalog = 8 },
+        -- Blizzard's Featured category is its shop (bundles for real money), not decor
+        -- you can own, so Catalog leaves it out. Same value as Blizzard's
+        -- Constants.HousingCatalogConsts.HOUSING_CATALOG_FEATURED_CATEGORY_ID.
+        FEATURED_CATEGORY_ID = 17,
+        RAIL_BUTTON  = 64,    -- Blizzard's rail button width
+        RAIL_BUTTON_H = 58,
+        RAIL_ICON    = 28,
     },
 }
 

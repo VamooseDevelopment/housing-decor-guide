@@ -12,15 +12,14 @@
 
 ---
 
-## What's New in v3.42.0
+## What's New in v3.43.0
 
-- **Winter Veil theme.** A new colour theme: snowflake text on pine green, with berry red title bars and a frost blue accent. With it picked, snow, holly and a garland of baubles decorate the window; turn them off with Theme decorations in Settings. The first time you open HDG during the Feast of Winter Veil, it offers you the theme once.
-- **Your shopping lists beside the vendor.** When a vendor sells something on any of your shopping lists, your lists open beside the vendor window, with everything your active list wants there, what it costs, and Buy All. Click an item to choose how many. The X hides it until the next vendor, and Helpers, Vendors turns it off.
-- **Buy with any currency.** Buy All and the quantity picker take gold, Community Coupons, any other currency, items a vendor takes as payment, or a mix. Buy All asks once for the whole run and says what it spends of each.
-- **A new quantity picker.** Right-click a vendor's decor to open it beside the vendor window. It shows your House Chest against the limit in the game's own words, opens on what your active list wants, and shows how long a buy has left. A full storage no longer greys out Buy: the picker warns that what doesn't fit goes to your bags. ESC closes it.
-- **Buying counts every item.** One item goes out at a time, and each is counted whether it lands in your House Chest or your bags. Stop no longer buys one too many, buying stops when the vendor closes, and right-click opens the picker with Krowi's Extended Vendor UI too.
-- **Settings cogs** on the Zone Scanner, Shopping List, Quest Tracker, Lumber Tracker and vendor sidebar open HDG's settings at that window's section.
-- **Blueprints: Missing keeps the rooms,** so you can see which rooms a blueprint needs.
+- **A new look for the House Editor companion.** A rail down the left holds Categories, Styles, Designs, Placed, Themes, Collections and Recent, and the decor grid takes the rest of the window. The list you're looking at is named above the grid: click the name to pick another, or step through them with the arrows either side.
+- **Categories.** Every decor in the game, sorted into Blizzard's own categories with Blizzard's icons. Pick a category to see all of it, or open it to pick a subcategory. Decor you don't have shows greyed out, and a right-click adds it to a shopping list.
+- **Pick your tile size.** Next to the search box, choose small, medium, large or extra large tiles and 2 to 6 columns. The window resizes to fit, and both settings are remembered.
+- **Your decor budget in the title bar.** It shows the budget for where you are, inside or outside, and turns orange when you're close to the limit. This replaces the Indoor and Outdoor filter. Placement costs turn orange when an item costs more than you have left, and the few items that can't go where you are carry an orange "Inside only" or "Outside only" tag.
+- **Dye marks on the companion's tiles,** in Blizzard's own art: a palette on decor you can dye, and a drop in each dye colour on a dyed copy.
+- **Fixes:** the companion remembers when you hide placement costs; Provisioner Fray's map pin and waypoint point to Boralus; section headings no longer show a room's floor plan.
 
 ## The Decor Catalog
 
@@ -87,7 +86,7 @@ A personal dashboard: decorator profile with house level, favor, and Collector t
 
 ## Right inside the House Editor
 
-A companion window injects into Blizzard's House Editor so you can **place decor with one click** -- browse by your designs (each room's plan), your styles (grouped under your categories, each folding with a click), shopping lists, snapshots, room concepts, or what you've placed recently. Tooltips show ownership, placement cost, and the vendor that sells each piece; right-click sends a piece to your shopping list without leaving the editor. Indoor/outdoor filtering and dye variants are all handled for you.
+A companion window injects into Blizzard's House Editor so you can **place decor with one click**. A rail down the left browses every decor by Blizzard's categories, your styles, your designs (each room's plan), what you've placed and your saved snapshots, room concepts, collections such as dyeable decor, or what you've placed recently. Pick the tile size and how many columns; the title bar shows the decor budget for where you are, and each tile shows its placement cost and a dye mark. Tooltips show ownership, placement cost, and the vendor that sells each piece; right-click sends a piece to your shopping list without leaving the editor.
 
 ## Tools
 
@@ -117,7 +116,7 @@ A companion window injects into Blizzard's House Editor so you can **place decor
 ---
 
 **Author:** Vamoose
-**Version:** 3.42.0
+**Version:** 3.43.0
 **Game Version:** 12.1.5 (Midnight)
 **Source / Issues:** https://github.com/VamooseDevelopment/housing-decor-guide
 **Discord:** https://discord.gg/RWZaxJaHFP

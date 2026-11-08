@@ -143,7 +143,7 @@ HDGR_VendorAugment = {
     [127518] = { name = "Adjutant Vortus", zone = "Antoran Wastes", mapID = 885, x = 78.0, y = 39.2, faction = "N", exp = "Legion" },
     [135459] = { name = "Provisioner Lija", zone = "Nazmir", mapID = 863, x = 39.1, y = 79.5, faction = "H", exp = "Battle for Azeroth" },
     [135804] = { name = "Hoarder Jena", zone = "Vol'dun", mapID = 864, x = 56.6, y = 49.8, faction = "H", exp = "Battle for Azeroth" },
-    [135808] = { name = "Provisioner Fray", zone = "Boralus", mapID = 895, x = 67.5, y = 21.5, faction = "A", exp = "Battle for Azeroth" },
+    [135808] = { name = "Provisioner Fray", zone = "Boralus", mapID = 1161, x = 67.7, y = 21.6, faction = "A", exp = "Battle for Azeroth" },
     [143244] = { name = "Victor Esquivias", zone = "Boralus", mapID = 1161, x = 71.4, y = 15.4, faction = "A", exp = "Battle for Azeroth" },
     [143325] = { name = "Jeni", zone = "Vol'dun", mapID = 864, x = 56.4, y = 50.4, faction = "N", exp = "Battle for Azeroth" },
     [144129] = { name = "Plugger Spazzring", zone = "Searing Gorge", mapID = 32, x = 34.8, y = 83.5, faction = "N", exp = "Classic", note = "Use Dark Iron Dwarf racial Mole Machine -> Eastern Kingdom -> Shadowforge City, run up the ramp to the bar" },

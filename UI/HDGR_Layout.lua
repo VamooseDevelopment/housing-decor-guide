@@ -48,6 +48,10 @@ local CHROME_TEMPLATES = {
     -- cardBorder: same fill as card, but a 1px border.default edge all round and NO
     -- accent stripe -- a self-contained bordered card.
     cardBorder = false,
+    -- popover: a solid surface.panel fill with cardBorder's 1px edge, for a section
+    -- that opens OVER other content (the companion's list picker). card's fill is a
+    -- 12% tint, so content under a cardBorder popover showed through it.
+    popover    = false,
     inset      = false,
     tooltip    = "TooltipBorderedFrameTemplate",
 }
@@ -1318,6 +1322,7 @@ end
 local CHROME_BG_TOKEN = {
     card       = "surface.hover",    -- accent-washed detail fill (~10%) under the 3px accent bar (a contained detail block, not a lone stripe) -- via _attachChromeBgTint
     cardBorder = "surface.hover",    -- same fill as card; border (not stripe) drawn in _attachChromeBgTint
+    popover    = "surface.panel",    -- solid: it covers what is under it; border as cardBorder
     tooltip    = "surface.panel_soft",
     inset      = "surface.sunken",
 }
@@ -1452,7 +1457,7 @@ local function _attachChromeBgTint(sectionFrame, chrome)
         bar:SetWidth(3)
         HDG.Theme:Register(bar, "SectionBgTint", { token = "semantic.accent" })
         sectionFrame._hdgrAccentBar = bar
-    elseif chrome == "cardBorder" then
+    elseif chrome == "cardBorder" or chrome == "popover" then
         -- 1px border.default edge on all four sides (no accent stripe). Each edge is a
         -- texture registered with the SectionBgTint skinner so it re-tints on theme switch.
         local function _edge(p1, p2, w, h)

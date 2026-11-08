@@ -266,6 +266,8 @@ HDG.Locale:Register("deDE", {
     TAB_DECOR = "Deko",
     TIP_CLOSE = "Schließen",
     TIP_COFFEE_TITLE = "Kauf mir einen Kaffee",
+    TIP_COMPANION_CATALOG_BODY = "Jede Deko im Spiel, ob in deinem Besitz oder nicht, sortiert nach Blizzards Kategorien.",
+    TIP_COMPANION_CATALOG_TITLE = "Kategorien",
     TIP_COMPANION_COLLECTIONS_BODY = "Deko nach Kategorie durchsuchen -- Zuletzt gelernt, Färbbar und nach Platzierungskosten.",
     TIP_COMPANION_COLLECTIONS_TITLE = "Sammlungen",
     TIP_COMPANION_RECENT_BODY = "Deko, die du in dieser Bearbeitungssitzung platziert oder entfernt hast.",
