@@ -36,7 +36,7 @@ HDG.Locale:Register("enUS", {
     DECOR_CLICK_AN_ITEM    = "Click an item",
     DECOR_EXPANSION_LABEL  = "Expansion:",
     DECOR_ITEM_ID_LABEL    = "itemID:",
-    DECOR_SEARCH_PLACEHOLDER = "Search decor by name...",
+    DECOR_SEARCH_PLACEHOLDER = "Search name, colour, material, style...",
     -- Filter strip
     DECOR_FILTER_LABEL     = "Filter:",
     DECOR_TAGS_LABEL       = "Tags:",

@@ -12,18 +12,27 @@
 
 ---
 
-## What's New in v3.43.0
+## What's New in v3.44.0
 
-- **A new look for the House Editor companion.** A rail down the left holds Categories, Styles, Designs, Placed, Themes, Collections and Recent, and the decor grid takes the rest of the window. The list you're looking at is named above the grid: click the name to pick another, or step through them with the arrows either side.
-- **Categories.** Every decor in the game, sorted into Blizzard's own categories with Blizzard's icons. Pick a category to see all of it, or open it to pick a subcategory. Decor you don't have shows greyed out, and a right-click adds it to a shopping list.
-- **Pick your tile size.** Next to the search box, choose small, medium, large or extra large tiles and 2 to 6 columns. The window resizes to fit, and both settings are remembered.
-- **Your decor budget in the title bar.** It shows the budget for where you are, inside or outside, and turns orange when you're close to the limit. This replaces the Indoor and Outdoor filter. Placement costs turn orange when an item costs more than you have left, and the few items that can't go where you are carry an orange "Inside only" or "Outside only" tag.
-- **Dye marks on the companion's tiles,** in Blizzard's own art: a palette on decor you can dye, and a drop in each dye colour on a dyed copy.
-- **Fixes:** the companion remembers when you hide placement costs; Provisioner Fray's map pin and waypoint point to Boralus; section headings no longer show a room's floor plan.
+**Descriptive search.** The Decor tab's search box now finds decor by what it looks like, not only by its name.
+
+- **Type what you are picturing.** A colour, a material, a style, a culture, a shape, where it sits or where it is from: "red velvet chair", "wrought iron lamp", "round rug", "stormwind table".
+- **Every word has to fit the piece,** so adding a word narrows the list.
+- **Names still match as you type.** Other words match whole words, so "bed" lists beds and not everything that suits a bedroom.
+- **Blizzard's own tags match in your game's language.** The colour, material and shape words are English.
+- **2,346 of the 2,512 decor are described this way.** The rest are found by their name and Blizzard's tags.
+
+**Also in this release:**
+
+- **Style tags now cover the newer decor.** 684 newer pieces that were matched on their name alone now carry the full set of tags, so Filtered Sets and the preset styles find them.
+- **Colours are more accurate.** A dark piece is tagged dark, and a coloured flame or glow counts as one of a piece's colours. A Filtered Set that uses colour, palette, condition or formality tags will list different decor than before.
+- **The Horde and Alliance styles follow Blizzard's own faction tags.** Each lists the decor Blizzard marks for that faction first, then other decor of its cultures.
+- **New tags in the Smart Set Builder:** boat, mask, doghouse and garland under Subject, and wax under Material.
 
 ## The Decor Catalog
 
 - **Every piece from the in-game Housing Catalog** in one searchable list -- favorites, a collected check, a craftable-recipe star, and dye-variant color dots at a glance.
+- **Descriptive search** -- type what a piece looks like ("red velvet chair", "wrought iron lamp", "round rug") and the list narrows to the decor that fits every word: colour, material, style, culture, shape, where it sits and where it is from.
 - **Compose filters** across Crafted (by profession), Size (footprint tags plus placement-cost chips), Styles, Expansions, Sources (vendor / quest / achievement / reputation / crafted / ...), and more -- with a live "collected / shown" status readout and one-click Reset.
 - **"New in <patch>"** -- when a patch or hotfix adds decor to the catalog, a New chip appears in the filter row so you can browse exactly what was added (and what you're still missing, via the Uncollected toggle).
 - **Hide PvP decor** -- a setting that takes the decor bought with Honor or Marks of Honor out of the lists.
@@ -116,7 +125,7 @@ A companion window injects into Blizzard's House Editor so you can **place decor
 ---
 
 **Author:** Vamoose
-**Version:** 3.43.0
+**Version:** 3.44.0
 **Game Version:** 12.1.5 (Midnight)
 **Source / Issues:** https://github.com/VamooseDevelopment/housing-decor-guide
 **Discord:** https://discord.gg/RWZaxJaHFP

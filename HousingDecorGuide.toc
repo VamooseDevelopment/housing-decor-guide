@@ -2,7 +2,7 @@
 ## Title: Vamoose's Housing Decor Guide
 ## Notes: Track, craft, preview, and acquire housing decorations across all professions
 ## Author: Vamoose
-## Version: 3.43.0
+## Version: 3.44.0
 ## SavedVariables: HDG_DB
 ## SavedVariablesPerCharacter: HDG_DB_CURRENT_PROFILE
 ## IconTexture: Interface\AddOns\HousingDecorGuide\textures\Vamoose_HDG_400_trans
@@ -121,6 +121,8 @@ UI\HDGR_BindingEngine.lua
 UI\HDGR_Selectors.lua
 # Shared pure builder for the Blizzard category/subcategory icon nav (Curator + picker).
 UI\HDGR_CategoryNav.lua
+# Shared pure builder: what a decor search box matches (name, Blizzard tags, facets, vision words).
+UI\HDGR_DecorSearch.lua
 # Debug instrumentation: runtime selector call-count logger.
 # Inert when not enabled (/hdgrsl start) -- safe to leave loaded.
 # Validates the audit's "dead selectors" list against real runtime usage.
@@ -159,6 +161,8 @@ data\HDGR_VendorAugment.lua
 data\HDGR_RecipeSourceAugment.lua
 data\HDGR_DecorQuestIndex.lua
 data\HDGR_FacetDB.lua
+# The words of each decor's free-text vision tags, for the Decor search (UI\HDGR_DecorSearch.lua).
+data\HDGR_DecorSearchDB.lua
 data\HDGR_ReagentsDB.lua
 data\HDGR_ProfessionsDB.lua
 data\HDGR_TrainersDB.lua

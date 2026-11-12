@@ -23,6 +23,7 @@
 --   HDGR_FacetDB               -> Facets:Get / GetAll
 --   HDGR_FacetVocab            -> Facets:GetVocab
 --   HDGR_FacetAxes             -> Facets:GetAxes
+--   HDGR_DecorSearchDB         -> SearchWords:GetAll
 --   HDGR_PetSizeDB             -> PetSizes:Get  (sparse; nil = never measured)
 --   HDGR_StyleDefinitions      -> Styles:GetDefinitions
 --   HDGR_CollectionDefinitions -> Collections:GetDefinitions
@@ -808,6 +809,20 @@ end
 -- in GetVocab()[axis]. Layout written by housingdecorguide-tools/facetdb/export_facetdb.py.
 function S.Facets:GetAxes()
     return _table("HDGR_FacetAxes")
+end
+
+-- ============================================================================
+-- SearchWords  (HDGR_DecorSearchDB)
+-- ============================================================================
+-- The words of a decor's free-text vision tags, for the Decor search
+-- (UI/HDGR_DecorSearch.lua): one string per itemID, each word between single
+-- spaces. Only decor with a vision row has an entry.
+
+---@class HDG.StaticData.SearchWords
+S.SearchWords = S.SearchWords or {}
+
+function S.SearchWords:GetAll()
+    return _table("HDGR_DecorSearchDB")
 end
 
 -- ============================================================================

@@ -1,3 +1,32 @@
+## [3.44.0] - 2026-11-13 (November 2026)
+
+### Added
+- **Search decor by what it looks like.** The Decor tab's search box now finds a piece by its
+  colour, material, style, culture, shape, where it sits and where it is from, as well as by its
+  name. Try "red velvet chair", "wrought iron lamp", "round rug" or "stormwind table". Every word
+  you type has to fit the piece. Names still match as you type; everything else matches whole
+  words, so "bed" lists beds and not everything that suits a bedroom. Blizzard's own tags match
+  in your game's language; the colour, material and shape words are English. 2,346 of the 2,512
+  decor are described this way; the rest are found by their name and Blizzard's tags.
+
+### Changed
+- **Style tags now cover the newer decor.** 684 newer pieces were matched on their name alone.
+  They now carry the full set of tags (room, mood, material, colour and the rest), so Filtered
+  Sets and the preset styles find them.
+- **Colours on every piece are more accurate.** A dark piece is tagged dark (black iron is
+  black, not grey), and a coloured flame or glow counts as one of a piece's colours, so a sconce
+  with green fire answers "green". A Filtered Set that uses colour, palette, condition or
+  formality tags will list different decor than before.
+- **New tags in the Smart Set Builder:** boat, mask, doghouse and garland under Subject, and wax
+  under Material.
+- **The Horde and Alliance styles now follow Blizzard's own faction tags.** Each lists the decor
+  Blizzard marks for that faction first, then other decor of its cultures. Before, almost
+  nothing counted as a signature piece of either.
+- **Several preset styles list more of what fits them:** Dark Sanctum, Witch's Den, Arcane Study,
+  Sacred Shrine and Seafarer's Haven.
+- **A piece with no clear culture of its own now carries the one Blizzard names for it,** so a
+  Filtered Set built on culture finds it.
+
 ## [3.43.0] - 2026-11-08 (November 2026)
 
 ### Added

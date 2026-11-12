@@ -44,11 +44,22 @@ Selectors:Register("decor.filterQuery", {
     end,
 })
 
+-- fn(row) -> true when the row answers every word in the search box: by name,
+-- Blizzard tag, facet or vision word (UI/HDGR_DecorSearch.lua). An empty box
+-- matches every row.
+Selectors:Register("decor.matchesSearch", {
+    calls = { "decor.filterQuery" },
+    fn = function(state, ctx)
+        return HDG.DecorSearch.Build(Selectors:Call("decor.filterQuery", state, ctx))
+    end,
+})
+
 -- (decor.activeProfessions retired -- profession filtering lives in the tag-row
 --  system under topFilter='crafted'; state slot + chips had no consumers.)
 
 -- Shown items: allItems through every active filter (AND-composed).
--- Filter axes: search query, top-filter bucket, active tag, onlyUncollected, onlyStored.
+-- Filter axes: search query (descriptive: decor.matchesSearch), top-filter bucket, active tag,
+-- onlyUncollected, onlyStored.
 -- Data-state gates (catalog Section B):
 --   hasItems: catalog ready AND filtered list non-empty -> show list.
 --   isBlank:  catalog ready AND filtered list empty     -> "no results".
@@ -74,7 +85,7 @@ Selectors:Register("decor.isBlank", {
 -- Filter gate. f.* predicates are closure-returning selectors (always functions).
 local function _decorRowPasses(item, f)
     local id = item.itemID
-    if f.needle and not item.name:lower():find(f.needle, 1, true) then return false end
+    if not f.matchSearch(item) then return false end
     if not f.matchTag(id) then return false end
     if f.onlyUncollected and f.isCollected(id) then return false end
     if f.onlyStored and not f.isStored(id) then return false end
@@ -185,7 +196,7 @@ Selectors:Register("decor.matchingRows", {
     reads = { "session.resolvers.catalog.tick" },
     calls = {
         "decor.allItems",
-        "decor.filterQuery",
+        "decor.matchesSearch",
         "decor.onlyUncollected",
         "decor.onlyStored",
         "decor.matchesTag",
@@ -204,7 +215,6 @@ Selectors:Register("decor.matchingRows", {
     },
     fn = function(state, ctx)
         local all = Selectors:Call("decor.allItems",   state, ctx)
-        local q   = Selectors:Call("decor.filterQuery", state, ctx)
         -- Resolve all per-item predicates once (not per row) and bundle into `f`.
         local f = {
             onlyUncollected  = Selectors:Call("decor.onlyUncollected",  state, ctx),
@@ -217,7 +227,7 @@ Selectors:Register("decor.matchingRows", {
             craftableState   = Selectors:Call("decor.craftableState",   state, ctx),
             destroyableCount = Selectors:Call("decor.destroyableCount", state, ctx),
             isHiddenPvp      = Selectors:Call("decor.isHiddenPvp",      state, ctx),
-            needle          = q ~= "" and q:lower() or nil,
+            matchSearch      = Selectors:Call("decor.matchesSearch",    state, ctx),
         }
 
         local out = {}

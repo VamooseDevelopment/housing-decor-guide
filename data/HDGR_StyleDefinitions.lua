@@ -59,8 +59,8 @@ HDGR_StyleDefinitions = {
             room = { "bedroom", "kitchen", "lounge", "dining-room", "nursery" },
             material = { "woven-fabric", "rough-wood", "wicker-rattan", "leather", "ceramic" },
             condition = { "pristine", "worn" },
-            color = { "tan", "brown", "ivory", "amber", "red" },
-            motif = { "floral", "food-drink" },
+            color = { "tan", "brown", "ivory", "amber", "red", "dark-brown", "dark-red" },
+            motif = { "floral", "food-drink", "animal" },
             light = { "candle-flame", "lantern" },
         },
         anti = {
@@ -90,11 +90,11 @@ HDGR_StyleDefinitions = {
         minScore = 1.0,
         query = { mood = { "scholarly", "arcane" } },
         boost = {
-            room = { "library", "study" },
-            material = { "crystal", "polished-wood", "stained-glass", "glass" },
+            room = { "library", "study", "laboratory" },
+            material = { "crystal", "polished-wood", "stained-glass", "glass", "paper-parchment", "gold-gilt" },
             motif = { "runic", "celestial" },
             formality = { "refined" },
-            color = { "purple", "blue", "teal", "gold", "violet" },
+            color = { "purple", "blue", "teal", "gold", "violet", "dark-purple", "dark-blue" },
             light = { "crystal-glow", "magical-glow" },
         },
         anti = {
@@ -126,9 +126,9 @@ HDGR_StyleDefinitions = {
         boost = {
             formality = { "common", "refined", "opulent" },
             room = { "great-hall", "dining-room", "tavern" },
-            material = { "polished-wood", "gold-gilt", "polished-metal" },
+            material = { "polished-wood", "gold-gilt", "polished-metal", "silk-velvet", "polished-stone" },
             motif = { "heraldic", "food-drink" },
-            color = { "gold", "red", "purple", "dark-red" },
+            color = { "gold", "red", "purple", "dark-red", "dark-purple" },
         },
         anti = {
             mood = { "gothic", "void", "industrial", "primitive", "holy" },
@@ -157,12 +157,12 @@ HDGR_StyleDefinitions = {
         minScore = 1.0,
         query = { mood = { "industrial" } },
         boost = {
-            room = { "workshop" },
-            material = { "wrought-iron", "rough-wood", "bronze-copper", "polished-metal" },
+            room = { "workshop", "laboratory", "construction", "armory" },
+            material = { "wrought-iron", "rough-wood", "bronze-copper", "polished-metal", "glass" },
             motif = { "mechanical", "flame-fire" },
             condition = { "worn", "weathered" },
-            color = { "black", "dark-brown", "gray", "amber", "dark-gray" },
-            formality = { "crude", "humble" },
+            color = { "black", "dark-brown", "gray", "amber", "dark-gray", "bronze", "copper" },
+            formality = { "crude", "humble", "common" },
         },
         anti = {
             mood = { "royal", "arcane", "holy", "whimsical" },
@@ -191,12 +191,12 @@ HDGR_StyleDefinitions = {
         minScore = 1.0,
         query = { mood = { "holy" } },
         boost = {
-            room = { "shrine" },
+            room = { "shrine", "great-hall" },
             motif = { "holy-symbol", "celestial" },
-            material = { "polished-stone", "carved-stone", "stained-glass", "gold-gilt" },
+            material = { "polished-stone", "carved-stone", "stained-glass", "gold-gilt", "crystal" },
             formality = { "refined", "opulent" },
-            color = { "gold", "white", "purple", "ivory" },
-            light = { "candle-flame", "crystal-glow" },
+            color = { "gold", "white", "purple", "ivory", "amber", "yellow", "dark-purple" },
+            light = { "candle-flame", "crystal-glow", "magical-glow" },
         },
         anti = {
             mood = { "gothic", "void", "industrial", "military" },
@@ -228,7 +228,7 @@ HDGR_StyleDefinitions = {
             room = { "garden", "greenhouse", "balcony" },
             material = { "organic-plant", "rough-stone", "carved-stone", "wicker-rattan" },
             motif = { "vine-leaf", "floral", "animal" },
-            color = { "green", "dark-green", "teal", "brown", "ivory" },
+            color = { "green", "dark-green", "teal", "brown", "ivory", "dark-brown" },
             category = { "plant", "outdoor" },
         },
         anti = {
@@ -257,9 +257,9 @@ HDGR_StyleDefinitions = {
         minScore = 1.0,
         query = { mood = { "military" } },
         boost = {
-            room = { "armory", "trophy-room" },
-            material = { "wrought-iron", "polished-metal", "leather", "rough-wood" },
-            motif = { "heraldic", "dragon" },
+            room = { "armory", "trophy-room", "great-hall" },
+            material = { "wrought-iron", "polished-metal", "leather", "rough-wood", "bone-horn" },
+            motif = { "heraldic", "dragon", "skull-bone" },
             formality = { "crude", "humble", "common" },
             color = { "dark-red", "black", "dark-gray", "red", "silver" },
             category = { "weapon-armor", "trophy" },
@@ -291,10 +291,10 @@ HDGR_StyleDefinitions = {
         minScore = 1.0,
         query = { mood = { "seafaring" } },
         boost = {
-            room = { "tavern", "balcony" },
+            room = { "tavern", "balcony", "cellar" },
             material = { "rope-twine", "rough-wood", "bronze-copper", "glass" },
             motif = { "wave-water", "animal" },
-            color = { "blue", "dark-blue", "teal", "sky-blue", "tan" },
+            color = { "blue", "dark-blue", "teal", "sky-blue", "tan", "dark-brown", "amber" },
             condition = { "worn", "weathered" },
         },
         anti = {
@@ -324,10 +324,10 @@ HDGR_StyleDefinitions = {
         minScore = 1.0,
         query = { mood = { "gothic", "void" } },
         boost = {
-            room = { "cellar", "shrine" },
-            material = { "bone-horn", "carved-stone", "crystal", "wrought-iron" },
-            motif = { "skull-bone", "eye-tentacle", "demonic", "web-spider" },
-            color = { "dark-purple", "purple", "black", "dark-gray", "violet" },
+            room = { "cellar", "shrine", "laboratory", "armory" },
+            material = { "bone-horn", "carved-stone", "crystal", "wrought-iron", "polished-metal" },
+            motif = { "skull-bone", "eye-tentacle", "demonic", "web-spider", "runic" },
+            color = { "dark-purple", "purple", "black", "dark-gray", "violet", "blue", "dark-blue" },
             culture = { "forsaken", "nerubian", "void-elf" },
             light = { "magical-glow", "crystal-glow" },
             condition = { "damaged", "weathered" },
@@ -364,7 +364,7 @@ HDGR_StyleDefinitions = {
             material = { "crystal", "rough-stone", "carved-stone", "bone-horn", "organic-plant", "bronze-copper", "glass" },
             motif = { "tribal", "runic", "flame-fire", "vine-leaf", "celestial", "wave-water" },
             culture = { "tauren", "troll", "draenei", "zandalari", "draconic", "haranir", "ethereal", "titan-forged" },
-            color = { "blue", "sky-blue", "teal", "white", "silver", "violet", "purple", "amber", "orange" },
+            color = { "blue", "sky-blue", "teal", "white", "silver", "violet", "purple", "amber", "orange", "dark-blue", "dark-purple" },
             light = { "magical-glow", "crystal-glow", "brazier" },
             formality = { "crude", "humble", "common", "refined" },
         },
@@ -399,10 +399,10 @@ HDGR_StyleDefinitions = {
         minScore = 1.0,
         query = { mood = { "mysterious" } },
         boost = {
-            room = { "cellar", "kitchen", "greenhouse" },
-            material = { "ceramic", "glass", "organic-plant", "carved-wood", "bone-horn" },
-            motif = { "eye-tentacle", "vine-leaf", "animal" },
-            color = { "purple", "dark-green", "teal", "dark-purple", "violet" },
+            room = { "cellar", "kitchen", "greenhouse", "shrine", "laboratory", "trophy-room" },
+            material = { "ceramic", "glass", "organic-plant", "carved-wood", "bone-horn", "crystal", "carved-stone" },
+            motif = { "eye-tentacle", "vine-leaf", "animal", "skull-bone", "runic", "tribal" },
+            color = { "purple", "dark-green", "teal", "dark-purple", "violet", "green" },
             category = { "book-scroll", "plant", "container" },
             light = { "magical-glow", "candle-flame" },
         },
@@ -433,11 +433,11 @@ HDGR_StyleDefinitions = {
         minScore = 1.0,
         query = { mood = { "primitive" } },
         boost = {
-            room = { "great-hall", "trophy-room", "stable" },
-            material = { "fur-pelt", "bone-horn", "rough-wood", "leather", "rough-stone" },
-            motif = { "tribal", "animal", "flame-fire" },
+            room = { "great-hall", "trophy-room", "stable", "shrine", "tavern" },
+            material = { "fur-pelt", "bone-horn", "rough-wood", "leather", "rough-stone", "rope-twine" },
+            motif = { "tribal", "animal", "flame-fire", "skull-bone" },
             culture = { "tauren", "troll", "zandalari", "vulpera" },
-            color = { "brown", "dark-brown", "tan", "red", "amber" },
+            color = { "brown", "dark-brown", "tan", "red", "amber", "dark-red", "orange", "ivory" },
             formality = { "crude", "humble" },
             condition = { "weathered", "worn" },
         },
@@ -505,10 +505,10 @@ HDGR_StyleDefinitions = {
         boost = {
             culture = { "zandalari", "troll", "tauren", "vulpera" },
             mood = { "festive" },
-            room = { "nursery", "garden", "lounge", "shrine" },
+            room = { "nursery", "garden", "lounge", "shrine", "greenhouse" },
             material = { "woven-fabric", "carved-stone", "gold-gilt", "organic-plant", "rough-wood", "bone-horn", "fur-pelt", "ceramic" },
             motif = { "animal", "tribal", "vine-leaf", "food-drink", "floral" },
-            color = { "gold", "teal", "green", "amber", "orange", "red", "tan" },
+            color = { "gold", "teal", "green", "amber", "orange", "red", "tan", "dark-green", "dark-red" },
             formality = { "humble", "common", "crude" },
             light = { "brazier", "candle-flame", "lantern" },
             condition = { "pristine", "worn" },
@@ -543,13 +543,15 @@ HDGR_StyleDefinitions = {
         color = { r = 0.2, g = 0.4, b = 0.8 },
         description = "Stone keeps, stained glass windows, and the banners of seven proud peoples. From Stormwind's marble halls to Ironforge's fiery depths, the Alliance builds to last.",
         minScore = 0.3,
-        query = { culture = { "human", "dwarf", "gnome", "night-elf", "draenei", "worgen" } },
+        -- Blizzard's own Alliance tag decides membership. The six cultures were the query until
+        -- 2026-11-13: a decor has one culture, so asking for six at once matched nothing in full
+        -- and the style had no signature decor. Culture is now the one boost: it lists untagged
+        -- pieces of those cultures after the tagged ones. The motif, formality, material, colour
+        -- and mood boosts are gone with the culture query: a decor with no faction tag loses
+        -- nothing for missing the query, so any one of them listed it (1,348 decor on this page).
+        query = { faction = { "alliance" } },
         boost = {
-            motif = { "heraldic", "holy-symbol" },
-            formality = { "common", "refined" },
-            material = { "polished-stone", "carved-stone", "polished-wood", "stained-glass" },
-            color = { "blue", "gold", "white", "silver" },
-            mood = { "royal", "scholarly", "holy" },
+            culture = { "human", "dwarf", "gnome", "night-elf", "draenei", "worgen" },
         },
         anti = {
             culture = { "orc", "troll", "tauren", "forsaken", "goblin", "blood-elf", "zandalari", "vulpera" },
@@ -575,13 +577,10 @@ HDGR_StyleDefinitions = {
         color = { r = 0.8, g = 0.2, b = 0.2 },
         description = "Spikes on everything, red banners over iron gates, and the drumbeat of a war machine that never sleeps. From Orgrimmar's steel towers to Zandalar's golden pyramids, strength is the only currency.",
         minScore = 0.3,
-        query = { culture = { "orc", "troll", "tauren", "forsaken", "goblin", "blood-elf", "zandalari", "vulpera" } },
+        -- Blizzard's own Horde tag decides membership; culture is the one boost (see "alliance").
+        query = { faction = { "horde" } },
         boost = {
-            motif = { "tribal", "skull-bone", "dragon" },
-            formality = { "crude", "humble", "common" },
-            material = { "wrought-iron", "rough-wood", "bone-horn", "leather" },
-            color = { "red", "dark-red", "black", "bronze" },
-            mood = { "military", "primitive", "gothic" },
+            culture = { "orc", "troll", "tauren", "forsaken", "goblin", "blood-elf", "zandalari", "vulpera" },
         },
         anti = {
             culture = { "human", "dwarf", "gnome", "night-elf", "draenei", "worgen" },
