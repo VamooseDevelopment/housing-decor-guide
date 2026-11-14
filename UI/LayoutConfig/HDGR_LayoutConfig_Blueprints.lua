@@ -116,6 +116,7 @@ LC.widgets["blueprintsListPanel.footerSpacer"] = {
 LC.widgets["blueprintsListPanel.saveBtn"] = {
     tooltip = { recipe = "BlueprintSave" }, kind = "button", ["in"] = "blueprintsListPanel.footerRow",
     font = "body", text = "locale:BP_SAVE", width = 118, height = 22, order = 10,
+    variant = "primary",   -- writes a blueprint to the catalog (UI review 2026-11-15)
 }
 
 -- ===== Right: inspector ======================================================
@@ -141,7 +142,7 @@ LC.sections["blueprintsDetailPanel.codeRow"] = {
 }
 LC.widgets["blueprintsDetailPanel.codeBox"] = {
     tooltip = { recipe = "BlueprintCopyCode" }, kind = "editbox", ["in"] = "blueprintsDetailPanel.codeRow",
-    font = "small", height = 20, width = 200, order = 5, multiline = false,
+    font = "small", height = 20, width = 200, order = 15, multiline = false,
 }
 -- Refresh: dim while the manifest is current; lit and reworded the moment
 -- decor storage changes under it, so a player working through several codes
@@ -155,11 +156,11 @@ LC.widgets["blueprintsDetailPanel.refreshBtn"] = {
 LC.widgets["blueprintsDetailPanel.renameLabel"] = {
     tooltip = false, kind = "label", ["in"] = "blueprintsDetailPanel.codeRow",
     text = "locale:BP_RENAME_LABEL", font = "small", role = "TextDim",
-    width = "auto", height = 14, order = 9,
+    width = "auto", height = 14, order = 3,
 }
 LC.widgets["blueprintsDetailPanel.nameBox"] = {
     tooltip = { recipe = "BlueprintRename" }, kind = "editbox", ["in"] = "blueprintsDetailPanel.codeRow",
-    font = "small", height = 20, width = "fill", order = 10, multiline = false,
+    font = "small", height = 20, width = "fill", order = 5, multiline = false,
     placeholder = "locale:BP_NAME_PLACEHOLDER",
 }
 
@@ -234,7 +235,7 @@ LC.widgets["blueprintsDetailPanel.meterExtBar"] = {
 -- widest label "100 / 100": the 12.1 caps rose to 100 interior / 25 exterior, so
 -- the old 56px clipped the 3-digit interior value to "0 / 1...".
 LC.sections["blueprintsDetailPanel.meterIntPetCol"] = {
-    ["in"] = "blueprintsDetailPanel.meters", layout = "vertical", width = 76, gap = "xs", order = 20,
+    ["in"] = "blueprintsDetailPanel.meters", layout = "vertical", width = 96, gap = "xs", order = 20,
 }
 LC.widgets["blueprintsDetailPanel.meterIntPetText"] = {
     tooltip = false, kind = "label", ["in"] = "blueprintsDetailPanel.meterIntPetCol",
@@ -245,7 +246,7 @@ LC.widgets["blueprintsDetailPanel.meterIntPetBar"] = {
     binding = { progress = "blueprints.meterFracInteriorPet" }, width = "fill", height = 8, order = 10,
 }
 LC.sections["blueprintsDetailPanel.meterExtPetCol"] = {
-    ["in"] = "blueprintsDetailPanel.meters", layout = "vertical", width = 76, gap = "xs", order = 25,
+    ["in"] = "blueprintsDetailPanel.meters", layout = "vertical", width = 96, gap = "xs", order = 25,
 }
 LC.widgets["blueprintsDetailPanel.meterExtPetText"] = {
     tooltip = false, kind = "label", ["in"] = "blueprintsDetailPanel.meterExtPetCol",
@@ -293,6 +294,28 @@ LC.widgets["blueprintsDetailPanel.blank"] = {
     width = "fill", height = 22, order = 18,
 }
 
+-- Column headings for the item list. Widths and offsets come from the same
+-- table the row factory anchors by (Constants.BLUEPRINT_CONTENT_COLUMNS).
+LC.sections["blueprintsDetailPanel.contentCols"] = {
+    ["in"] = "blueprintsDetailPanel", layout = "horizontal", height = 14, gap = 0, order = 19,
+    visible = "blueprints.hasManifest",
+}
+do
+    local x = 0
+    for i, c in ipairs(HDG.Constants.BLUEPRINT_CONTENT_COLUMNS) do
+        LC.widgets["blueprintsDetailPanel.contentColGap_" .. c.col] = {
+            tooltip = false, kind = "spacer", ["in"] = "blueprintsDetailPanel.contentCols",
+            width = c.x - x, height = 14, order = i * 10 - 5,
+        }
+        LC.widgets["blueprintsDetailPanel.contentCol_" .. c.col] = {
+            tooltip = false, kind = "label", ["in"] = "blueprintsDetailPanel.contentCols",
+            text = c.label, font = "caption", justifyH = c.align,
+            width = c.width, height = 14, order = i * 10,
+        }
+        x = c.x + c.width
+    end
+end
+
 -- Content groups (collapsible headers + item rows, flat projection).
 LC.widgets["blueprintsDetailPanel.content"] = {
     tooltip = false, kind = "scrollbox", ["in"] = "blueprintsDetailPanel",
@@ -308,7 +331,6 @@ LC.sections["blueprintsDetailPanel.actions"] = {
 LC.widgets["blueprintsDetailPanel.routeBtn"] = {
     tooltip = { recipe = "BlueprintRoute" }, kind = "button", ["in"] = "blueprintsDetailPanel.actions",
     font = "body", text = "locale:BP_ROUTE_SHOPPING", width = 120, height = 22, order = 5,
-    variant = "primary",   -- the tab's primary CTA (design fact 10; mockup .primary)
     binding = { enabled = "blueprints.hasSelection" },
 }
 LC.widgets["blueprintsDetailPanel.setBtn"] = {
@@ -327,6 +349,7 @@ LC.widgets["blueprintsDetailPanel.architectBtn"] = {
 LC.widgets["blueprintsDetailPanel.importBtn"] = {
     tooltip = { recipe = "BlueprintImportHouse" }, kind = "button", ["in"] = "blueprintsDetailPanel.actions",
     font = "body", text = "locale:BP_IMPORT_HOUSE", width = 108, height = 22, order = 30,
+    variant = "primary",   -- the row's one button that builds the house (UI review 2026-11-15)
     binding = { enabled = "blueprints.hasSelection" },
 }
 LC.widgets["blueprintsDetailPanel.actionsSpacer"] = {
@@ -409,14 +432,16 @@ end
 LC.widgets["blueprintsLibraryPanel.chipsSpacer"] = {
     tooltip = false, kind = "spacer", ["in"] = "blueprintsLibraryPanel.chips", width = "fill", height = 14, order = 50,
 }
+-- Compare CSV: acts on the rows ticked in the table below.
+LC.widgets["blueprintsLibraryPanel.compareBtn"] = {
+    tooltip = { recipe = "BlueprintCompare" }, kind = "button", ["in"] = "blueprintsLibraryPanel.chips",
+    font = "small", width = 150, height = 20, order = 52,
+    binding = { text = "blueprints.compareText", enabled = "blueprints.compareEnabled" },
+}
 LC.widgets["blueprintsLibraryPanel.hideBackups"] = {
     tooltip = { recipe = "BlueprintLibraryHideBackups" }, kind = "checkbox", ["in"] = "blueprintsLibraryPanel.chips",
-    font = "small", text = "locale:BP_LIBRARY_HIDE_BACKUPS", width = 150, height = 20, order = 55,
+    font = "small", text = "locale:BP_LIBRARY_HIDE_BACKUPS", width = 190, height = 20, order = 55,
     binding = { checked = "blueprints.libraryHideBackups" },
-}
-LC.widgets["blueprintsLibraryPanel.chipsHint"] = {
-    tooltip = false, kind = "label", ["in"] = "blueprintsLibraryPanel.chips", role = "TextDim",
-    text = "locale:BP_LIBRARY_SORT_HINT", font = "caption", height = 14, width = "auto", order = 60,
 }
 
 -- Column headers: clickable sort buttons (Goblin idiom). Widths are the SSoT
@@ -424,10 +449,22 @@ LC.widgets["blueprintsLibraryPanel.chipsHint"] = {
 LC.sections["blueprintsLibraryPanel.columns"] = {
     ["in"] = "blueprintsLibraryPanel", layout = "horizontal", height = 18, gap = "sm", order = 10,
 }
+-- Select-all for the compare ticks, standing over the rows' own tick boxes. It
+-- acts on the rows the table is showing, so a chip or the filter narrows it.
+local TICK_ALL_W = HDG.Constants.BLUEPRINT_LIBRARY_TICK_ALL_WIDTH
+local COLUMNS_GAP = 4   -- this section's gap "sm"
+LC.widgets["blueprintsLibraryPanel.tickAll"] = {
+    tooltip = { recipe = "BlueprintCompareAll" }, kind = "checkbox", ["in"] = "blueprintsLibraryPanel.columns",
+    font = "small", text = "", width = TICK_ALL_W, height = 16, order = 5,
+    checkSize = 18,   -- the rows' own tick size (the shared checkbox defaults to 24)
+    binding = { checked = "blueprints.compareAllTicked" },
+}
 for i, c in ipairs(HDG.Constants.BLUEPRINT_LIBRARY_COLUMNS) do
     LC.widgets["blueprintsLibraryPanel.col_" .. c.col] = {
         tooltip = false, kind = "button", ["in"] = "blueprintsLibraryPanel.columns", variant = "tertiary",
-        font = "small", width = c.width, height = 16, order = i * 10,
+        -- Name gives the tick its room, so every later heading stays over its column
+        font = "small", width = (c.col == "name") and (c.width - TICK_ALL_W - COLUMNS_GAP) or c.width,
+        height = 16, order = i * 10,
         binding = { text = "blueprints.librarySortHeader_" .. c.col, active = "blueprints.librarySortActive_" .. c.col },
     }
 end
@@ -440,7 +477,7 @@ LC.widgets["blueprintsLibraryPanel.table"] = {
 
 -- Detail strip for the selected row: name/label + code + meta | notes | actions.
 LC.sections["blueprintsLibraryPanel.detail"] = {
-    ["in"] = "blueprintsLibraryPanel", layout = "horizontal", height = 86, gap = "lg", order = 20,
+    ["in"] = "blueprintsLibraryPanel", layout = "horizontal", height = 102, gap = "lg", order = 20,
     chrome = "card", padding = { top = "sm", right = "lg", bottom = "sm", left = "lg" },
     visible = "blueprints.libraryHasDetail",
 }
@@ -467,6 +504,10 @@ LC.widgets["blueprintsLibraryPanel.nameBox"] = {
 -- An EDITBOX, not a button: there is no addon-callable clipboard API, so the
 -- share code is copied the way every WoW addon copies one -- click to select
 -- all, Ctrl+C. Read-only in practice; the controller reverts user edits.
+LC.widgets["blueprintsLibraryPanel.codeLabel"] = {
+    tooltip = false, kind = "label", ["in"] = "blueprintsLibraryPanel.detailLeft", role = "TextDim",
+    text = "locale:BP_LIBRARY_CODE_LABEL", font = "caption", height = 12, width = "fill", order = 13,
+}
 LC.widgets["blueprintsLibraryPanel.code"] = {
     tooltip = { recipe = "BlueprintCopyCode" }, kind = "editbox", ["in"] = "blueprintsLibraryPanel.detailLeft",
     binding = { text = "blueprints.libraryDetailCode" }, font = "small", height = 18, width = "fill",
@@ -499,6 +540,11 @@ LC.widgets["blueprintsLibraryPanel.inspectBtn"] = {
 LC.widgets["blueprintsLibraryPanel.linkBtn"] = {
     tooltip = { recipe = "BlueprintLink" }, kind = "button", ["in"] = "blueprintsLibraryPanel.detailActions",
     font = "body", text = "locale:BP_LINK_LONG", width = "fill", height = 22, order = 10,
+}
+-- Slack between the two harmless buttons and the one that removes something.
+LC.widgets["blueprintsLibraryPanel.actionsGap"] = {
+    tooltip = false, kind = "spacer", ["in"] = "blueprintsLibraryPanel.detailActions",
+    width = "fill", height = "fill", order = 12,
 }
 LC.widgets["blueprintsLibraryPanel.removeBtn"] = {
     tooltip = false, kind = "button", ["in"] = "blueprintsLibraryPanel.detailActions",

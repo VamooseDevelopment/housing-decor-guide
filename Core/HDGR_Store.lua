@@ -758,6 +758,9 @@ local function NewBlueprintsSessionUI()
     -- means Forget or Delete.
     return { missingOnly = false, collapsedGroups = {}, pasteError = false,
              exportNeighborhood = "",
+             -- Compare CSV (Library): the share codes ticked for comparison, and
+             -- whether a compare is waiting on contents it had to ask for.
+             compareTicks = {}, compareWaiting = false,
              subView = "inspect", libraryQuery = "", libraryChip = "all",
              librarySortCol = "date", librarySortDir = "desc",
              librarySelectedKey = nil }
@@ -1630,6 +1633,7 @@ local function EnsureStateShape(state)
     state.account.blueprints.factions    = state.account.blueprints.factions    or {}  -- exception(boundary): SV migration (shareCode -> "Alliance"|"Horde")
     state.account.blueprints.pastedAt    = state.account.blueprints.pastedAt    or {}  -- exception(boundary): SV migration (shareCode -> time())
     state.account.blueprints.notes       = state.account.blueprints.notes       or {}  -- exception(boundary): SV migration (shareCode -> note text)
+    state.account.blueprints.gone        = state.account.blueprints.gone        or {}  -- exception(boundary): SV migration (shareCode -> true: the server said it no longer exists)
     -- 3.33.0 shipped an `applied` slice for an apply-history ledger that was
     -- cancelled before anything wrote to it. Drop the orphan rather than carry
     -- an empty table in every SavedVariables file forever.
@@ -5679,7 +5683,7 @@ HDG.Actions:Register{ name = "BLUEPRINT_CONTENTS_REQUESTED", persists = false,
     end }
 
 HDG.Actions:Register{ name = "BLUEPRINT_CONTENTS_RECEIVED", persists = false,
-    invalidates = { "session.blueprints.manifests", "account.blueprints.factions" },
+    invalidates = { "session.blueprints.manifests", "account.blueprints.factions", "account.blueprints.gone" },
     reduce = function(state, payload)
         -- Stale-target guard: the manifest carries its own targetHouseGUID; if a
         -- target is selected and this response is for a different one, a newer
@@ -5687,6 +5691,7 @@ HDG.Actions:Register{ name = "BLUEPRINT_CONTENTS_RECEIVED", persists = false,
         local sb = state.session.blueprints
         if sb.targetHouseGUID and payload.raw.targetHouseGUID ~= sb.targetHouseGUID then return end
         sb.manifests[payload.shareCode] = { status = "received", raw = payload.raw }
+        state.account.blueprints.gone[payload.shareCode] = nil   -- it answered, so it exists
         -- Faction (House/Exterior only) is derived at the observer boundary and
         -- cached persistently, so the list row stays tinted across reloads.
         if payload.faction then
@@ -5694,11 +5699,22 @@ HDG.Actions:Register{ name = "BLUEPRINT_CONTENTS_RECEIVED", persists = false,
         end
     end }
 
-HDG.Actions:Register{ name = "BLUEPRINT_CONTENTS_FAILED", persists = false,
-    invalidates = { "session.blueprints.manifests" },
+-- payload.gone: the server answered that the blueprint no longer exists (its
+-- owner deleted it). That fact is kept across sessions and WRITTEN INTO THE
+-- NOTE (owner ruling 2026-11-15: a real note, not a display-only mark), ahead
+-- of anything the player wrote, so the Library shows it and the player can
+-- choose to forget the code. Written once, when the mark is first set: a note
+-- the player then edits or clears is theirs and is not stamped again.
+HDG.Actions:Register{ name = "BLUEPRINT_CONTENTS_FAILED", persists = true,
+    invalidates = { "session.blueprints.manifests", "account.blueprints.gone", "account.blueprints.notes" },
     reduce = function(state, payload)
         state.session.blueprints.manifests[payload.shareCode] =
             { status = "failed", reasonCode = payload.reasonCode, timedOut = payload.timedOut }
+        local ab = state.account.blueprints
+        if not payload.gone or ab.gone[payload.shareCode] then return end
+        ab.gone[payload.shareCode] = true
+        local note = ab.notes[payload.shareCode]  -- exception(nullable): no note yet
+        ab.notes[payload.shareCode] = note and (payload.goneNote .. "\n" .. note) or payload.goneNote
     end }
 
 -- Decor storage changed (a purchase, a placement, a crate), so every cached
@@ -5749,6 +5765,7 @@ HDG.Actions:Register{ name = "BLUEPRINT_FORGET", persists = true,
     invalidates = { "account.blueprints.pasted", "account.blueprints.pastedTypes",
                     "account.blueprints.labels", "account.blueprints.factions",
                     "account.blueprints.pastedAt", "account.blueprints.notes",
+                    "account.blueprints.gone",
                     "session.blueprints.selectedCode", "session.blueprints.manifests" },
     reduce = function(state, payload)
         local ab, sb, np = state.account.blueprints, state.session.blueprints, {}
@@ -5759,6 +5776,7 @@ HDG.Actions:Register{ name = "BLUEPRINT_FORGET", persists = true,
         ab.factions[payload.shareCode] = nil
         ab.pastedAt[payload.shareCode] = nil
         ab.notes[payload.shareCode]    = nil
+        ab.gone[payload.shareCode]     = nil
         sb.manifests[payload.shareCode] = nil
         if sb.selectedCode == payload.shareCode then sb.selectedCode = np[1] end  -- exception(nullable): may be no codes left
     end }

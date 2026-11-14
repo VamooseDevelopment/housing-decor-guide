@@ -275,6 +275,10 @@ do
         x = x + c.width + 4
     end
 end
+-- The compare tick sits inside the name column, ahead of the name, so the
+-- header buttons keep their widths.
+local LIB_TICK_SIZE, LIB_TICK_GAP = 18, 4
+local LIB_REMOVE_CLEARANCE = 22   -- the x button (16) plus its inset from the row edge
 local LIB_SRC_ROLE = { pasted = "TextInfo", mine = "TextSuccess", backup = "TextDim" }
 
 -- One line of the note for the table cell. A note is free text and may carry
@@ -295,10 +299,22 @@ local function _layoutLibraryRow(row)
         return fs
     end
     row._nameFs    = col("name",    "body",    "Text")
+    local tick = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+    tick:SetSize(LIB_TICK_SIZE, LIB_TICK_SIZE)
+    tick:SetPoint("LEFT", row, "LEFT", LIB_COL_X.name.x - 2, 0)
+    tick:SetScript("OnClick", function(self)
+        HDG.Controller_Blueprints:_ToggleCompareTick(self._shareCode)
+    end)
+    row._tick = tick
+    row._nameFs:SetPoint("LEFT", tick, "RIGHT", LIB_TICK_GAP, 0)
+    row._nameFs:SetWidth(LIB_COL_X.name.w - LIB_TICK_SIZE - LIB_TICK_GAP)
     row._srcFs     = col("source",  "caption", "TextDim")
     row._typeFs    = col("type",    "small",   "TextMuted")
     row._dateFs    = col("date",    "small",   "TextDim")
     row._noteFs    = col("note",    "small",   "TextMuted")
+    -- the row's x sits over the end of this column: stop the note short of it
+    -- so a long one truncates cleanly instead of running under the button
+    row._noteFs:SetWidth(LIB_COL_X.note.w - LIB_REMOVE_CLEARANCE)
     local removeBtn = CreateFrame("Button", nil, row)
     removeBtn:SetSize(16, 16)
     removeBtn:SetPoint("RIGHT", row, "RIGHT", -6, 0)
@@ -334,15 +350,21 @@ local function _paintLibraryRow(row, ed)
     row._dateFs:SetText(HDG.Format.ShortDate(ed.date) or "--")  -- exception(nullable): undated paste; the strip's meta line says pasted/saved
     -- Blank, not "--": an absent note is nothing to report, where an undated
     -- paste (the "--" above) is a fact we genuinely do not have.
+    -- A code the server no longer has carries that in its note (the reducer
+    -- wrote it there); the warning colour makes the row stand out in the table.
     row._noteFs:SetText(_notePreview(ed.note))
-    -- Same rule as blueprints.libraryCanRemove, which gates the strip's button:
-    -- backups are read-only, and a catalog row with no id has nothing to delete BY.
-    row._removeBtn:SetShown(ed.src == "pasted" or (ed.src == "mine" and ed.blueprintID ~= nil))  -- exception(nullable): blueprintID nil on pre-68569 catalog rows
+    HDG.Theme:Register(row._noteFs, ed.gone and "TextWarning" or "TextMuted")
+    -- Pasted rows only: forgetting a code is undone by pasting it again, where
+    -- an own blueprint's x was a real catalog delete one stray click from the
+    -- scrollbar. Deleting your own goes through the detail strip's button.
+    row._removeBtn:SetShown(ed.src == "pasted")
     row._removeBtn._shareCode   = ed.shareCode
     row._removeBtn._src         = ed.src
     row._removeBtn._blueprintID = ed.blueprintID  -- exception(nullable): pasted rows carry no catalog id
     row._removeBtn._name        = ed.name
     HDG.Theme:Register(row, "RowChrome", { selected = ed.isSelected })
+    row._tick:SetChecked(ed.isTicked)
+    row._tick._shareCode = ed.shareCode
     row._shareCode = ed.shareCode
     row._entryKey  = ed.key
 end
@@ -369,6 +391,8 @@ local function _resetLibraryRow(row)
     row._removeBtn:Hide()
     row._removeBtn._shareCode, row._removeBtn._src = nil, nil
     row._removeBtn._blueprintID, row._removeBtn._name = nil, nil
+    row._tick:SetChecked(false)
+    row._tick._shareCode = nil
     row._shareCode, row._entryKey = nil, nil
 end
 
@@ -391,8 +415,8 @@ HDG.Rows:Register("blueprintLibraryRow", {
 
 -- ===== Row factory: blueprintContentRow =====================================
 -- Two shapes (ed.kind): "header" collapsible group bar / "item" manifest entry
--- (name | have/total | need-badge | source chip). Chip colors come from the
--- existing SOURCE_KINDS system via Format.SourceChip -- no new roles.
+-- (name | have/total | need | source name), under the headed columns of
+-- Constants.BLUEPRINT_CONTENT_COLUMNS.
 
 local function _toggleGroupCollapse(ct)
     -- Immutable copy-update: never mutate the table a selector handed out.
@@ -404,39 +428,35 @@ local function _toggleGroupCollapse(ct)
         payload = { view = "blueprints", key = "collapsedGroups", value = next_ } })
 end
 
+-- Columns sit at fixed offsets from the row's left edge
+-- (Constants.BLUEPRINT_CONTENT_COLUMNS), which the header labels above the
+-- list share -- so a heading stands over its column.
+local CONTENT_COL = {}
+for _, c in ipairs(HDG.Constants.BLUEPRINT_CONTENT_COLUMNS) do CONTENT_COL[c.col] = c end
+
+local function _contentCell(row, col, fontRole, textRole)
+    local c = CONTENT_COL[col]
+    local fs = HDG.UI.RowText(row, fontRole, textRole, c.align)
+    fs:SetPoint("LEFT", row, "LEFT", c.x, 0)
+    fs:SetWidth(c.width)
+    fs:SetWordWrap(false)   -- long names truncate, never wrap into the next row
+    return fs
+end
+
 local function _layoutContentRow(row)
     HDG.UI:EnsureRowChrome(row)
     local headerFs = HDG.UI.RowText(row, "body", "TextStatus", "LEFT")
     headerFs:SetPoint("LEFT", row, "LEFT", 8, 0)
     headerFs:SetPoint("RIGHT", row, "RIGHT", -8, 0)
-    headerFs:SetWordWrap(false)   -- long names truncate, never wrap into the next row
+    headerFs:SetWordWrap(false)
     row._headerFs = headerFs
 
-    local chipFs = HDG.UI.RowText(row, "caption", "TextDim", "RIGHT")
-    chipFs:SetPoint("RIGHT", row, "RIGHT", -8, 0)
-    chipFs:SetWidth(190)
-    chipFs:SetWordWrap(false)
-    row._chipFs = chipFs
-
-    local needFs = HDG.UI.RowText(row, "caption", "TextDim", "RIGHT")
-    needFs:SetPoint("RIGHT", chipFs, "LEFT", -6, 0)
-    needFs:SetWidth(52)
-    needFs:SetWordWrap(false)
-    row._needFs = needFs
-
+    row._nameFs = _contentCell(row, "name",   "body",    "Text")
     -- 56 fits a four-figure build total ("1043/1128"): one captured
     -- blueprint used 1128 dyes.
-    local ownFs = HDG.UI.RowText(row, "caption", "TextDim", "RIGHT")
-    ownFs:SetPoint("RIGHT", needFs, "LEFT", -6, 0)
-    ownFs:SetWidth(56)
-    ownFs:SetWordWrap(false)
-    row._ownFs = ownFs
-
-    local nameFs = HDG.UI.RowText(row, "body", "Text", "LEFT")
-    nameFs:SetPoint("LEFT", row, "LEFT", 16, 0)
-    nameFs:SetPoint("RIGHT", ownFs, "LEFT", -4, 0)
-    nameFs:SetWordWrap(false)
-    row._nameFs = nameFs
+    row._ownFs  = _contentCell(row, "have",   "caption", "TextDim")
+    row._needFs = _contentCell(row, "need",   "caption", "TextDim")
+    row._chipFs = _contentCell(row, "source", "caption", "TextDim")
 
     -- Attached once per pooled frame; the recipe reads the ed stamped on paint,
     -- so a re-acquired row can never show the previous entry's hover.
@@ -445,14 +465,23 @@ local function _layoutContentRow(row)
     row._laidOut = true
 end
 
+-- The Source column is headed, so the cell is the name alone -- the vendor, the
+-- zone, the profession. A source that names nothing beyond its kind (the shop,
+-- a promotion) shows the kind.
+local function _sourceCell(ed)
+    if ed.srcKind then
+        if ed.srcName and ed.srcName ~= "" then return ed.srcName end  -- exception(nullable): kinds that name nothing
+        return HDG.Constants.SOURCE_KIND_BY_KEY[ed.srcKind].label
+    end
+    if ed.need > 0 and ed.itemID then return "resolves at vendor" end
+    return ""
+end
+
 local function _paintContentRow(row, ed)
     if ed.kind == "header" then
         row._headerFs:Show()
         row._nameFs:Hide(); row._ownFs:Hide(); row._needFs:Hide(); row._chipFs:Hide()
-        -- Entry count + piece sum, same shape as the counts label above the list.
-        local suffix = (ed.missing > 0)
-            and ("  --  %d missing (%d piece%s)"):format(ed.missing, ed.missingPieces, ed.missingPieces == 1 and "" or "s")
-            or ""
+        local suffix = (ed.missingText ~= "") and ("  --  " .. ed.missingText) or ""
         row._headerFs:SetText(HDG.UI.CollapsePrefix(ed.collapsed) .. ed.label .. "  (" .. ed.count .. ")" .. suffix)
         -- Headers carrying missing items escalate so a scroll down the group
         -- bars alone shows where the gaps are (UX review #12).
@@ -465,20 +494,14 @@ local function _paintContentRow(row, ed)
         HDG.Theme:Register(row._nameFs, ed.invalid and "TextError" or (ed.need > 0 and "Text" or "TextDim"))
         row._ownFs:SetText(ed.have .. "/" .. ed.total)
         if ed.need > 0 then
-            row._needFs:SetText("need " .. ed.need)
+            row._needFs:SetText(ed.need)   -- the column is headed "Need"
             HDG.Theme:Register(row._needFs, "TextWarning")
         else
             -- Owned: the same green check the Decor/Acquire collected marks use.
             row._needFs:SetText("|A:common-icon-checkmark:12:12|a")
             HDG.Theme:Register(row._needFs, "TextDim")
         end
-        if ed.srcKind then
-            row._chipFs:SetText(HDG.Format.SourceChip(ed.srcKind, ed.need == 0) .. " " .. (ed.srcName or ""))
-        elseif ed.need > 0 and ed.itemID then
-            row._chipFs:SetText("resolves at vendor")
-        else
-            row._chipFs:SetText("")
-        end
+        row._chipFs:SetText(_sourceCell(ed))
         HDG.Theme:Register(row, "RowChrome", {})
     end
     row._edKind = ed.kind
@@ -573,6 +596,8 @@ function C:_wireLibrary(root)
             HDG.Store:Dispatch({ type = A.BLUEPRINT_LIBRARY_SET_SORT, payload = { col = col } })
         end)
     end
+    HDG.UI.OnClick(root, "blueprintsLibraryPanel.compareBtn", function() C:_CompareTicked() end)
+    HDG.UI.OnClick(root, "blueprintsLibraryPanel.tickAll", function() C:_ToggleCompareAll() end)
     HDG.UI.OnClick(root, "blueprintsLibraryPanel.hideBackups", function()
         local hide = HDG.Selectors:Call("blueprints.libraryHideBackups", HDG.Store:GetState(), {})  -- exception(false-positive): top-level controller read, not a row factory
         HDG.Store:Dispatch({ type = A.BLUEPRINT_SET_HIDE_BACKUPS, payload = { hide = not hide } })
@@ -1078,8 +1103,105 @@ function C:_CopyRequirements()
                 return newText, EXPORT_SWITCH_LABEL[nextFaction]
             end,
         } or nil,   -- exception(nullable): a neutral character expresses no neighborhood, so no switch
+        -- The same contents as spreadsheet rows. Read on the click, from the
+        -- state of that moment, like the faction switch's text.
+        sheet = {
+            label     = HDG.Locale:Get("BP_COPY_SHEET"),
+            backLabel = HDG.Locale:Get("BP_COPY_SHEET_BACK"),
+            text = function()
+                return HDG.Selectors:Call("blueprints.manifestSheet", HDG.Store:GetState(), {})
+            end,
+        },
     })
     HDG.Log:Success("blueprints", ("Copied requirements for %q"):format(name))
+end
+
+-- ===== Compare CSV ===========================================================
+-- The ticked Library blueprints as one spreadsheet (blueprints.compareSheet).
+-- Contents not yet in hand are asked for ONE AT A TIME: some requests are
+-- silently dropped by the server, and nothing here has shown that it answers
+-- several at once. A slow poll moves the queue along; the observer's own
+-- timeout turns a dropped request into a failure, so the queue cannot stall.
+local COMPARE_POLL = 0.5  -- seconds between looks at the request in flight
+
+local function _setCompare(key, value)
+    HDG.Store:Dispatch({ type = A.UI_SET_TRANSIENT, payload = { view = "blueprints", key = key, value = value } })
+end
+
+-- Immutable copy-update: never mutate the table a selector handed out.
+function C:_ToggleCompareTick(shareCode)
+    local ticks = HDG.Store:GetState().session.ui.blueprints.compareTicks  -- exception(false-positive): top-level controller read
+    local nextTicks = {}
+    for code in pairs(ticks) do nextTicks[code] = true end
+    nextTicks[shareCode] = (not ticks[shareCode]) or nil
+    _setCompare("compareTicks", nextTicks)
+end
+
+-- The header tick. Everything shown gets ticked; if it all is already, those
+-- rows are cleared. Ticks on rows the filter is hiding are left as they are.
+function C:_ToggleCompareAll()
+    local state = HDG.Store:GetState()  -- exception(false-positive): top-level controller read
+    local clear = HDG.Selectors:Call("blueprints.compareAllTicked", state, {})
+    local nextTicks = {}
+    for code in pairs(state.session.ui.blueprints.compareTicks) do nextTicks[code] = true end
+    for _, e in ipairs(HDG.Selectors:Call("blueprints.libraryRows", state, {})) do
+        if not e.gone then nextTicks[e.shareCode] = (not clear) or nil end
+    end
+    _setCompare("compareTicks", nextTicks)
+end
+
+function C:_CompareTicked()
+    local state = HDG.Store:GetState()  -- exception(false-positive): top-level controller read
+    if state.session.ui.blueprints.compareWaiting then return end  -- one compare at a time; the button stays lit to show its progress
+    local queue = {}
+    for _, code in ipairs(HDG.Selectors:Call("blueprints.compareCodes", state, {})) do
+        local m = state.session.blueprints.manifests[code]  -- exception(nullable): never asked for
+        -- a failed one gets one more ask per compare; a stale one is fine, its
+        -- totals are the blueprint's own and only its have/need counts age
+        if not (m and m.status == "received") then queue[#queue + 1] = code end
+    end
+    self._compareQueue, self._compareCurrent = queue, nil
+    if #queue == 0 then return self:_CompareFinish() end
+    _setCompare("compareWaiting", true)
+    self._compareTicker = C_Timer.NewTicker(COMPARE_POLL, function() C:_CompareStep() end)
+    self:_CompareStep()
+end
+
+-- Wait on the request in flight; when it has settled, ask for the next, and
+-- when none are left, show the result.
+function C:_CompareStep()
+    local manifests = HDG.Store:GetState().session.blueprints.manifests  -- exception(false-positive): top-level controller read
+    -- exception(nullable): the blueprint in flight can be forgotten mid-compare, which drops its entry -- that counts as settled
+    local inFlight = self._compareCurrent and manifests[self._compareCurrent]
+    if inFlight and inFlight.status == "pending" then return end
+    local nextCode = table.remove(self._compareQueue, 1)
+    self._compareCurrent = nextCode
+    if not nextCode then return self:_CompareFinish() end
+    local m = manifests[nextCode]  -- exception(nullable): never asked for
+    -- already in flight (the player selected it a moment ago): wait on that one
+    if m and m.status == "pending" then return end
+    HDG.BlueprintObserver:RequestContents(nextCode, _targetHouse())
+end
+
+function C:_CompareFinish()
+    if self._compareTicker then  -- exception(nullable): nothing had to load, so no poll was started
+        self._compareTicker:Cancel()
+        self._compareTicker = nil
+    end
+    _setCompare("compareWaiting", false)
+    local sheet = HDG.Selectors:Call("blueprints.compareSheet", HDG.Store:GetState(), {})
+    -- Said in chat, not only the debug log: the player has to know a column is absent.
+    if #sheet.missing > 0 then
+        HDG.Log:Notify("warn", HDG.Locale:Get("BP_COMPARE_MISSING"):format(table.concat(sheet.missing, ", ")))
+    end
+    if sheet.count < 2 then return HDG.Log:Notify("warn", HDG.Locale:Get("BP_COMPARE_TOO_FEW")) end
+    -- A short count in the title is the only sign, on the window itself, that a
+    -- ticked blueprint is absent; chat names which.
+    local title = (#sheet.missing > 0)
+        and HDG.Locale:Get("BP_COMPARE_TITLE_PARTIAL"):format(sheet.count, sheet.count + #sheet.missing)
+        or HDG.Locale:Get("BP_COMPARE_TITLE"):format(sheet.count)
+    -- the language server types the dialog as a bare Frame; Open is the method the factory adds
+    HDG.UI:CopyDialog():Open(title, sheet.text)  ---@diagnostic disable-line: undefined-field
 end
 
 function C:_LinkInChat()

@@ -2527,7 +2527,7 @@ HDG.WidgetTypes:Register("scrollingTextBox", {
 -- HDG.UI:Checkbox is the one builder: the kind below calls it, and bespoke
 -- frames (the vendor quantity picker) call it directly and size it themselves.
 
-function HDG.UI:Checkbox(parent, labelText, font)
+function HDG.UI:Checkbox(parent, labelText, font, checkSize)
     -- Wrapping Frame fills the layout slot's full width. The inner CheckButton
     -- stays at its template's natural size (24x24) so the textures don't
     -- stretch into smeared squiggles. The label sits to the right of the
@@ -2537,7 +2537,8 @@ function HDG.UI:Checkbox(parent, labelText, font)
     -- the layout engine resized it past 24px.)
     local container = CreateFrame("Frame", nil, parent)
     local check = CreateFrame("CheckButton", nil, container, "UICheckButtonTemplate")
-    check:SetSize(24, 24)
+    local size = checkSize or 24   -- exception(optional): checkSize declared in checkbox specFields; absent = the template's 24
+    check:SetSize(size, size)
     check:SetPoint("LEFT", container, "LEFT", 0, 0)
 
     local label = container:CreateFontString(nil, "OVERLAY")
@@ -2594,12 +2595,12 @@ local function dispatchCheckbox(widget, values)
 end
 
 HDG.WidgetTypes:Register("checkbox", {
-    build    = function(parent, spec) return HDG.UI:Checkbox(parent, spec.text, spec.font) end,
+    build    = function(parent, spec) return HDG.UI:Checkbox(parent, spec.text, spec.font, spec.checkSize) end,
     dispatch = { fields = { "checked" }, push = dispatchCheckbox },
     -- input.events advertises the OnClick handler controllers attach.
     input    = { events = { OnClick = true } },
     destroy  = destroyWidget,
-    specFields = { "text", "label", "font" },
+    specFields = { "text", "label", "font", "checkSize" },
 })
 
 -- (Unified `button` WidgetTypes registration lives below buildToggleButton
@@ -4335,39 +4336,70 @@ function HDG.UI:CopyDialog()
     facLabel:Hide()
     f._facLabel = facLabel
 
+    -- OPT-IN format button, same terms as the faction switch: built once,
+    -- hidden, shown only for a caller that passes `opts.sheet`. Left of Close.
+    local sheetBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    sheetBtn:SetSize(80, 22); sheetBtn:SetPoint("RIGHT", close, "LEFT", -6, 0)
+    sheetBtn:Hide()
+    f._sheetBtn = sheetBtn
+
     local rawShow = f.Show
 
+    -- A re-render can come back empty: the window behind this one stays
+    -- clickable, so the blueprint it was opened for may no longer be the
+    -- selected one. The text on screen stays.
+    function f:_SetBody(text)
+        if not text then return end  -- exception(nullable): the caller's selector has nothing to render now
+        self._edit:SetText(text)
+        self._edit:HighlightText()
+        self._edit:SetFocus()
+    end
+
+    function f:_PaintExtras()
+        local showFaction = self._fspec ~= nil
+        self._facSwitch:SetShown(showFaction); self._facLabel:SetShown(showFaction)
+        local sspec = self._sspec
+        self._sheetBtn:SetShown(sspec ~= nil)
+        if sspec then self._sheetBtn:SetText(self._sheetOn and sspec.backLabel or sspec.label) end
+    end
+
+    fac:SetScript("OnClick", function()
+        local fspec = f._fspec
+        local nextFaction = (fac._faction == "alliance") and "horde" or "alliance"
+        local newBody, newLabel = fspec.onChange(nextFaction)
+        fac:SetFaction(nextFaction)
+        f._facLabel:SetText(newLabel)
+        f._listBody = newBody or f._listBody  -- exception(nullable): same miss as _SetBody
+        -- both formats name vendors, so the one on screen is re-rendered
+        f:_SetBody(f._sheetOn and f._sspec.text() or newBody)
+    end)
+
+    sheetBtn:SetScript("OnClick", function()
+        f._sheetOn = not f._sheetOn
+        f:_SetBody(f._sheetOn and f._sspec.text() or f._listBody)
+        f:_PaintExtras()
+    end)
+
     -- opts.faction (optional): { current = "alliance"|"horde", label = "Alliance",
-    -- onChange = function(nextFaction) -> newBodyText }. onChange re-renders the
-    -- text in place so the switch shows its effect on the thing being copied,
-    -- which is the only reason it belongs on this window rather than behind it.
+    -- onChange = function(nextFaction) -> newBodyText, newLabel }. onChange
+    -- re-renders the text in place so the switch shows its effect on the thing
+    -- being copied, which is the only reason it belongs on this window rather
+    -- than behind it.
+    -- opts.sheet (optional): { label = "CSV", backLabel = "List",
+    -- text = function() -> the same contents as spreadsheet rows }. The window
+    -- always opens on the list.
     function f:Open(titleText, bodyText, opts)
-        if self._title and self._title.SetText then self._title:SetText(titleText or "Copy") end
-        if self._edit then
-            self._edit:SetText(bodyText or "")
-            self._edit:HighlightText()
-            self._edit:SetFocus()
+        self._title:SetText(titleText or "Copy")  -- exception(optional): callers may open untitled
+        self._listBody = bodyText or ""           -- exception(optional): debug callers pass a possibly-nil dump
+        self._fspec = opts and opts.faction  -- exception(optional): only the requirements export passes one
+        self._sspec = opts and opts.sheet    -- exception(optional): only the requirements export passes one
+        self._sheetOn = false
+        if self._fspec then
+            self._facSwitch:SetFaction(self._fspec.current)
+            self._facLabel:SetText(self._fspec.label)
         end
-        local fspec = opts and opts.faction  -- exception(optional): only the requirements export passes one
-        if fspec then
-            self._facSwitch:SetFaction(fspec.current)
-            self._facLabel:SetText(fspec.label or "")
-            self._facSwitch:SetScript("OnClick", function()
-                local nextFaction = (self._facSwitch._faction == "alliance") and "horde" or "alliance"
-                local newBody, newLabel = fspec.onChange(nextFaction)
-                self._facSwitch:SetFaction(nextFaction)
-                self._facLabel:SetText(newLabel or "")
-                if self._edit and newBody then
-                    self._edit:SetText(newBody)
-                    self._edit:HighlightText()
-                    self._edit:SetFocus()
-                end
-            end)
-            self._facSwitch:Show(); self._facLabel:Show()
-        else
-            self._facSwitch:SetScript("OnClick", nil)
-            self._facSwitch:Hide(); self._facLabel:Hide()
-        end
+        self:_SetBody(self._listBody)
+        self:_PaintExtras()
         rawShow(self)
     end
 

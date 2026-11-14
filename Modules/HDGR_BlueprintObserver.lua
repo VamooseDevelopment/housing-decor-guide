@@ -186,9 +186,15 @@ function BP:OnContentsReceived(info)
         payload = { shareCode = info.shareCode, raw = info, faction = self:_DeriveFaction(info) } })
 end
 
+-- `gone` = BlueprintNotFound, the answer for a code its owner deleted (live,
+-- 2026-11-15). DbError is NOT counted: the one sample was a PTR database wipe,
+-- and a passing server fault must not write "deleted" into a player's note.
 function BP:OnContentsFailure(shareCode, reasonCode)
+    local R = Enum.HousingResult  -- exception(boundary): Blizzard enum (never hardcode values)
     HDG.Store:Dispatch({ type = A.BLUEPRINT_CONTENTS_FAILED,
-        payload = { shareCode = shareCode, reasonCode = reasonCode } })
+        payload = { shareCode = shareCode, reasonCode = reasonCode,
+                    gone = reasonCode == R.BlueprintNotFound,
+                    goneNote = HDG.Locale:Get("BP_LIBRARY_GONE") } })
 end
 
 -- Storage changed under the cached manifests. The counts in a manifest are

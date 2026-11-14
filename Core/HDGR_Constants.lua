@@ -48,6 +48,20 @@ HDG.Constants = {
         -- header still reads "Backups" -- that string is the server's, not ours.)
         { value = "backup", label = "Auto saves" },
     },
+    -- The inspector's item list: one table for the row factory's anchors and the
+    -- header labels above the list, so a heading can never drift off its column.
+    -- x is from the row's left edge; `align` is the cell's justification.
+    -- Need is centred with clear air before Source: right-aligned against it,
+    -- the owned tick read as part of the vendor's name (in game 2026-11-15).
+    BLUEPRINT_CONTENT_COLUMNS = {
+        { col = "name",   label = "Item",   x = 16,  width = 250, align = "LEFT" },
+        { col = "have",   label = "Have",   x = 270, width = 56,  align = "RIGHT" },
+        { col = "need",   label = "Need",   x = 334, width = 44,  align = "CENTER" },
+        { col = "source", label = "Source", x = 392, width = 124, align = "LEFT" },
+    },
+    -- Width of the select-all tick that sits in the Library's header row, ahead
+    -- of the Name heading (which gives up this much plus the row's gap).
+    BLUEPRINT_LIBRARY_TICK_ALL_WIDTH = 20,
     BLUEPRINT_LIBRARY_COLUMNS = {
         { col = "name",    label = "Name",    width = 320, firstDir = "asc"  },
         { col = "source",  label = "Source",  width = 64,  firstDir = "asc"  },

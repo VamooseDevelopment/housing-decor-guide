@@ -12,22 +12,23 @@
 
 ---
 
-## What's New in v3.44.0
+## What's New in v3.45.0
 
-**Descriptive search.** The Decor tab's search box now finds decor by what it looks like, not only by its name.
+**Blueprints in a spreadsheet.** Two new ways to take blueprint contents out of the game, asked for on Discord.
 
-- **Type what you are picturing.** A colour, a material, a style, a culture, a shape, where it sits or where it is from: "red velvet chair", "wrought iron lamp", "round rug", "stormwind table".
-- **Every word has to fit the piece,** so adding a word narrows the list.
-- **Names still match as you type.** Other words match whole words, so "bed" lists beds and not everything that suits a bedroom.
-- **Blizzard's own tags match in your game's language.** The colour, material and shape words are English.
-- **2,346 of the 2,512 decor are described this way.** The rest are found by their name and Blizzard's tags.
+- **CSV in the Copy list window.** On the Blueprints tab, click Copy list, then CSV. The list becomes comma-separated rows (item, count, type, source and where it comes from) that split into columns when pasted into a spreadsheet.
+- **Compare CSV in the Blueprint Library.** Tick two or more blueprints and click Compare CSV. You get one row per item and one count column per blueprint, with how many of the blueprints use the item and the total across them.
+- **Rows are grouped by type:** house, dyes, rooms, fixtures, decor, pet decor. Within a type, the items used by the most blueprints come first.
+- **A tick above the Library table selects everything shown.** Pick a chip or type in the filter first to tick just those rows.
+- **Blueprints you have not opened this session are loaded first,** one at a time. The button counts them as they arrive.
 
 **Also in this release:**
 
-- **Style tags now cover the newer decor.** 684 newer pieces that were matched on their name alone now carry the full set of tags, so Filtered Sets and the preset styles find them.
-- **Colours are more accurate.** A dark piece is tagged dark, and a coloured flame or glow counts as one of a piece's colours. A Filtered Set that uses colour, palette, condition or formality tags will list different decor than before.
-- **The Horde and Alliance styles follow Blizzard's own faction tags.** Each lists the decor Blizzard marks for that faction first, then other decor of its cultures.
-- **New tags in the Smart Set Builder:** boat, mask, doghouse and garland under Subject, and wax under Material.
+- **A pasted blueprint that its owner has deleted is marked.** The Library writes "Deleted by its owner" at the start of its note, so you can decide whether to forget the code.
+- **The blueprint item list has column headings:** Item, Have, Need and Source.
+- **The budget meters are labelled with words** in place of the icons.
+- **The button beside the share code box now reads Add,** since it adds the code to your pasted list as well as inspecting it.
+- **In the Blueprint Library, the x on a table row shows on pasted codes only.** Deleting one of your own blueprints is done with the button under the table.
 
 ## The Decor Catalog
 
@@ -87,7 +88,7 @@ Housing crafting runs on lumber, so there's a dedicated **Lumber Tracker** -- a 
 
 ## Blueprints -- inspect and plan builds (WoW 12.1)
 
-On a 12.1 client, a Blueprints tab appears under House. Paste any blueprint share code to inspect its full contents -- rooms, decor, dyes, fixtures -- and what you are missing, measured against whichever of your houses you pick, with room and decor budget meters and the game's own reason text when an import would be blocked. Pasted codes are kept in your own library with private names; your saved blueprint catalog shows alongside with rename and delete. Route missing items, dyes included, to a shopping list, import the contents as a Styles furnishing set, open House and Interior blueprints in the Architect, save a blueprint of your current house (full house, room, interior, or exterior), apply a code to your house through the game's import dialog, or link a blueprint in chat for others to import.
+On a 12.1 client, a Blueprints tab appears under House. Paste any blueprint share code to inspect its full contents -- rooms, decor, dyes, fixtures -- and what you are missing, measured against whichever of your houses you pick, with room and decor budget meters and the game's own reason text when an import would be blocked. Pasted codes are kept in your own library with private names; your saved blueprint catalog shows alongside with rename and delete. Route missing items, dyes included, to a shopping list, import the contents as a Styles furnishing set, open House and Interior blueprints in the Architect, save a blueprint of your current house (full house, room, interior, or exterior), apply a code to your house through the game's import dialog, or link a blueprint in chat for others to import. The Copy list window gives the contents as a plain list or as CSV rows for a spreadsheet, and the Blueprint Library's Compare CSV puts several blueprints side by side, one count column each.
 
 ## House -- your collection at a glance
 
@@ -125,7 +126,7 @@ A companion window injects into Blizzard's House Editor so you can **place decor
 ---
 
 **Author:** Vamoose
-**Version:** 3.44.0
+**Version:** 3.45.0
 **Game Version:** 12.1.5 (Midnight)
 **Source / Issues:** https://github.com/VamooseDevelopment/housing-decor-guide
 **Discord:** https://discord.gg/RWZaxJaHFP

@@ -1,3 +1,37 @@
+## [3.45.0] - 2026-11-15 (November 2026)
+
+### Added
+- **Blueprint contents as spreadsheet rows.** The Copy list window on the Blueprints tab has a
+  new CSV button. It turns the list into comma-separated rows (item, count, type, source and
+  where it comes from) that split into columns when pasted into a spreadsheet. Click List to go
+  back. Commas and double quotes are taken out of item names so every row stays in its columns.
+- **Compare CSV in the Blueprint Library.** Tick two or more blueprints in the table and click
+  Compare CSV. You get one row per item and one count column per blueprint, with how many of
+  the blueprints use the item and the total across them. Rows are grouped by type (house, dyes,
+  rooms, fixtures, decor, pet decor), and within a type the items used by the most blueprints
+  come first. Blueprints you have not opened this session are loaded first, one at a time, and
+  the button counts them as they arrive.
+- **A tick above the Library table selects everything shown,** or clears it. Pick a chip or
+  type in the filter first to tick just those rows.
+- **A pasted blueprint that its owner has deleted is marked.** When the game answers that a
+  share code no longer exists, the Library writes "Deleted by its owner" at the start of that
+  blueprint's note and shows it in the warning colour, so you can decide whether to forget the
+  code. Your own note is kept underneath.
+
+### Changed
+- **The blueprint item list has column headings:** Item, Have, Need and Source. The Source
+  column shows the vendor, zone or profession by name.
+- **The budget meters are labelled with words** (Rooms, Interior, Exterior, Pets in, Pets out)
+  in place of the icons. With no house picked to inspect against, a meter shows the blueprint's
+  cost alone.
+- **The button beside the share code box now reads Add,** since it adds the code to your pasted
+  list as well as inspecting it.
+- **Save a Blueprint and Apply to House are the highlighted buttons** on the Blueprints tab.
+- **Blueprint Library:** the x on a table row now shows on pasted codes only. Deleting one of
+  your own blueprints is done with the button under the table. The All chip's count leaves out
+  automatic saves while they are hidden, and the share code box has a label.
+- **The missing count reads "3 missing"** and adds the piece count only when it differs.
+
 ## [3.44.0] - 2026-11-13 (November 2026)
 
 ### Added

@@ -67,6 +67,13 @@ local function _byName(entries)
     return out
 end
 
+-- "3 missing" when every missing entry is a single piece; "3 missing (7
+-- pieces)" only when the two numbers differ and the second one says something.
+local function _missingText(entries, pieces)
+    if entries == pieces then return ("%d missing"):format(entries) end
+    return ("%d missing (%d pieces)"):format(entries, pieces)
+end
+
 -- have / need for one manifest entry. Decor takes the server's figures.
 --
 -- DYES DO NOT. The server's numMissing for a dye only covers decor the target
@@ -365,11 +372,11 @@ Selectors:Register("blueprints.budgetFit", {
         local room, intDecor, extDecor = inter[0] or {}, inter[1] or {}, exter[1] or {}  -- exception(boundary): reshaped/nilable budget map
         local intPet, extPet = inter[2] or {}, exter[2] or {}  -- PetDecor = budgetType 2; exception(boundary): reshaped/nilable
         local meters = {
-            { key = "room",        name = "Rooms",          cost = room.cost     or 0, max = room.max     or 0, cur = room.current     or 0 },
-            { key = "interior",    name = "Interior decor", cost = intDecor.cost or 0, max = intDecor.max or 0, cur = intDecor.current or 0 },
-            { key = "exterior",    name = "Exterior decor", cost = extDecor.cost or 0, max = extDecor.max or 0, cur = extDecor.current or 0 },
-            { key = "interiorPet", name = "Interior pets",  cost = intPet.cost   or 0, max = intPet.max   or 0, cur = intPet.current   or 0 },
-            { key = "exteriorPet", name = "Exterior pets",  cost = extPet.cost   or 0, max = extPet.max   or 0, cur = extPet.current   or 0 },
+            { key = "room",        name = "Rooms",          short = "Rooms",    cost = room.cost     or 0, max = room.max     or 0, cur = room.current     or 0 },
+            { key = "interior",    name = "Interior decor", short = "Interior", cost = intDecor.cost or 0, max = intDecor.max or 0, cur = intDecor.current or 0 },
+            { key = "exterior",    name = "Exterior decor", short = "Exterior", cost = extDecor.cost or 0, max = extDecor.max or 0, cur = extDecor.current or 0 },
+            { key = "interiorPet", name = "Interior pets",  short = "Pets in",  cost = intPet.cost   or 0, max = intPet.max   or 0, cur = intPet.current   or 0 },
+            { key = "exteriorPet", name = "Exterior pets",  short = "Pets out", cost = extPet.cost   or 0, max = extPet.max   or 0, cur = extPet.current   or 0 },
         }
         -- Room blueprints ADD to the target's spent budget (House/Interior/
         -- Exterior REPLACE -- verified 68629), so a Room's headroom is what's
@@ -383,7 +390,9 @@ Selectors:Register("blueprints.budgetFit", {
             -- 12.1 uses cost = -1 (was 0) for a budget the blueprint doesn't touch;
             -- _meterState already maps cost<=0 -> "na", so clamp the DISPLAY so the
             -- label reads "0 / N" (not "-1 / N"). Caption still says "not used".
-            mt.label   = math.max(mt.cost, 0) .. " / " .. avail
+            -- No house picked to inspect against = no cap to show: the cost
+            -- alone, since "81 / 0" reads as a broken budget.
+            mt.label   = mt.max > 0 and (math.max(mt.cost, 0) .. " / " .. avail) or tostring(math.max(mt.cost, 0))
             mt.caption = METER_CAPTION[mt.state]
         end
         local blocking = raw.blockingRequirementFlags
@@ -441,7 +450,7 @@ local BP_TYPE_LABEL = { [1] = "House", [2] = "Room", [3] = "Interior", [4] = "Ex
 -- The word the Source column prints. Separate from `src` (the state tag the row
 -- factory themes by) so the displayed text stays selector-owned and can change
 -- without touching a paint path -- cookbook 04, selectors compose display text.
-local SRC_LABEL = { pasted = "pasted", mine = "mine", backup = "auto" }
+local SRC_LABEL = { pasted = "Pasted", mine = "Mine", backup = "Auto" }
 
 Selectors:Register("blueprints.entries", {
     -- perf: one Library click wakes ~15 bound widgets and every one of them
@@ -455,9 +464,11 @@ Selectors:Register("blueprints.entries", {
               "session.blueprints.manifests", "account.blueprints.pasted",
               "account.blueprints.pastedTypes", "account.blueprints.labels",
               "account.blueprints.factions", "account.blueprints.pastedAt",
-              "account.blueprints.notes" },
+              "account.blueprints.notes", "account.blueprints.gone",
+              "session.ui.blueprints.compareTicks" },
     fn = function(state)
         local sb, ab, out = state.session.blueprints, state.account.blueprints, {}
+        local ticks = state.session.ui.blueprints.compareTicks
         for _, code in ipairs(ab.pasted) do
             out[#out + 1] = {
                 key = "bpPasted:" .. code, shareCode = code,
@@ -470,6 +481,10 @@ Selectors:Register("blueprints.entries", {
                 date = ab.pastedAt[code],     -- exception(nullable): codes pasted before the stamp existed sort last
                 note = ab.notes[code] or "",  -- exception(nullable): no note yet
                 isSelected = (code == sb.selectedCode),
+                isTicked = ticks[code] == true,
+                -- the server said this code no longer exists; only a pasted
+                -- code can be, your own catalog is the server's list
+                gone = ab.gone[code] == true,
             }
         end
         for _, g in ipairs(sb.groups) do
@@ -488,6 +503,7 @@ Selectors:Register("blueprints.entries", {
                     date = e.creationTime,
                     note = ab.notes[e.shareCode] or "",  -- exception(nullable): no note yet
                     isSelected = (e.shareCode == sb.selectedCode),
+                    isTicked = ticks[e.shareCode] == true,
                 }
             end
         end
@@ -533,7 +549,9 @@ Selectors:Register("blueprints.collectionRows", {
         -- nothing saved yet, where "0 / 0" reads as a broken cap.
         rows[#rows + 1] = { kind = "fold", section = "catalog", label = "Your catalog",
                             count = slots.used, countMax = slots.max > 0 and slots.max or nil,
-                            capText = slots.max > 0 and (free .. " slots free") or "",
+                            -- "10 / 50" is already on the fold; the free count is
+                            -- only worth a second number once it is nearly gone
+                            capText = (slots.max > 0 and free <= BP_CAP_WARN_FREE) and (free .. " slots free") or "",
                             capWarn = slots.max > 0 and free <= BP_CAP_WARN_FREE,
                             collapsed = folded.catalog == true }
         if not folded.catalog then
@@ -614,6 +632,7 @@ Selectors:Register("blueprints.libraryRows", {
 })
 
 Selectors:Register("blueprints.libraryChipCounts", {
+    reads = { "account.ui.blueprints.hideBackups" },
     calls = { "blueprints.entries" },
     fn = function(state, ctx)
         local c = { all = 0, pasted = 0, mine = 0, backup = 0 }
@@ -621,6 +640,8 @@ Selectors:Register("blueprints.libraryChipCounts", {
             c.all = c.all + 1
             c[e.src] = c[e.src] + 1
         end
+        -- what the All chip lists: automatic saves drop out while they are hidden
+        c.allShown = state.account.ui.blueprints.hideBackups and (c.all - c.backup) or c.all
         return c
     end,
 })
@@ -634,7 +655,8 @@ for _, chip in ipairs(HDG.Constants.BLUEPRINT_LIBRARY_CHIPS) do
     Selectors:Register("blueprints.libraryChipText_" .. value, {
         calls = { "blueprints.libraryChipCounts" },
         fn = function(state, ctx)
-            return ("%s (%d)"):format(label, Selectors:Call("blueprints.libraryChipCounts", state, ctx)[value])
+            local c = Selectors:Call("blueprints.libraryChipCounts", state, ctx)
+            return ("%s (%d)"):format(label, value == "all" and c.allShown or c[value])
         end,
     })
     Selectors:Register("blueprints.libraryChipActive_" .. value, {
@@ -885,7 +907,8 @@ Selectors:Register("blueprints.contentRows", {
                 if it.need > 0 then gm = gm + 1; gp = gp + it.need end
             end
             rows[#rows + 1] = { kind = "header", ct = g.ct, label = g.ctLabel,
-                                count = #g.items, missing = gm, missingPieces = gp, collapsed = g.collapsed }
+                                count = #g.items, missing = gm, missingPieces = gp,
+                                missingText = gm > 0 and _missingText(gm, gp) or "", collapsed = g.collapsed }
             if not g.collapsed then
                 for _, it in ipairs(g.items) do
                     rows[#rows + 1] = { kind = "item", ct = g.ct, name = it.name, have = it.have,
@@ -913,22 +936,14 @@ local function _meterFrac(m)
     return (p > 1) and 1 or p
 end
 
--- Blizzard's own budget icons (Blizzard_HousingBlueprintContentSummary.xml,
--- ptr): rooms / interior decor / exterior decor. Icon + numbers, like the
--- Import dialog; the bar tooltips carry the full budget names.
-local METER_ICON = {
-    room        = "house-room-limit-icon",
-    interior    = "house-decor-budget-icon",
-    exterior    = "house-decor-exteriorbudget-icon",
-    interiorPet = "house-decor-pets-icon",
-    exteriorPet = "house-decor-pets-icon",
-}
-
+-- A word and the numbers ("Interior 82 / 1000"). The icons this row used to
+-- wear were five near-identical glyphs nobody could tell apart; the bar
+-- tooltips still carry the full budget names.
 local function _meterText(m)
     -- No caption: the bar color carries the state (teal fits / amber at-limit /
     -- red over), and any blocking reason is spelled out in the fit-verdict line.
     if not m then return "" end
-    return "|A:" .. METER_ICON[m.key] .. ":14:14|a  " .. m.label
+    return m.short .. "  " .. m.label
 end
 
 Selectors:Register("blueprints.meterFracRoom", {
@@ -1079,8 +1094,7 @@ Selectors:Register("blueprints.itemCountText", {
     fn = function(state, ctx)
         local insp = Selectors:Call("blueprints.inspector", state, ctx)
         if not insp or insp.status ~= "received" then return "" end
-        return ("%d items -- %d missing (%d piece%s)"):format(
-            insp.entryCount, insp.missingCount, insp.missingTotal, insp.missingTotal == 1 and "" or "s")
+        return ("%d items -- %s"):format(insp.entryCount, _missingText(insp.missingCount, insp.missingTotal))
     end,
 })
 
@@ -1218,5 +1232,240 @@ Selectors:Register("blueprints.manifestText", {
         end
         blocks[#blocks + 1] = EXPORT_FOOTER
         return table.concat(blocks, "\n\n")
+    end,
+})
+
+-- ===== Spreadsheet rows ======================================================
+-- The same manifest as comma-separated rows -- name, count, type, source --
+-- for a player who sorts and compares blueprints in a spreadsheet (asked for
+-- on Discord, 2026-11-15). One fact per cell, so the source is two columns:
+-- its kind ("Vendor") and its name. Counts are `total` for the same reason as
+-- the list: it describes the blueprint, not the exporter's collection.
+local SHEET_SEP    = ","
+local SHEET_HEADER = table.concat({ "Item", "Count", "Type", "Source", "From" }, SHEET_SEP)
+local SHEET_TYPE   = { [1] = "House", [2] = "Room", [3] = "Decor", [4] = "Dye", [5] = "Fixture" }
+local SHEET_PET    = "Pet decor"
+
+-- A name as one cell, with no quoting. Pasted text split into columns by a
+-- spreadsheet is cut at EVERY comma, quotes or not (seen in Google Sheets
+-- 2026-11-15: "Grand Mask of Bwonsamdi, Loa of Graves" pushed its whole row one
+-- column right). So the name gives up its commas. Its double quotes go too:
+-- turned into single ones, a painting's leading quote was eaten by the sheet
+-- as its "this is text" mark, leaving a stray one behind ("Eversong Lantern'
+-- Painting").
+local function _sheetCell(text)
+    return (text:gsub('[,"]', ""))
+end
+
+-- The two source cells. Blank under the same rules as the list: only decor
+-- carries a source, and an unknown one is left empty rather than stamped.
+local function _sheetSource(entry, withSource, preferredMapID)
+    if not withSource then return "", "" end
+    local _, srcKind, srcName = _resolveAcq(entry, preferredMapID)
+    if not (srcKind and srcName) or srcKind == "UNKN" then return "", "" end
+    return HDG.Constants.SOURCE_KIND_BY_KEY[srcKind].label, _sheetCell(srcName)
+end
+
+local function _sheetRows(lines, entries, typeLabel, withSource, preferredMapID)
+    for _, e in ipairs(entries) do
+        local kind, from = _sheetSource(e, withSource, preferredMapID)
+        lines[#lines + 1] = table.concat({ _sheetCell(e.name), e.total, typeLabel, kind, from }, SHEET_SEP)
+    end
+end
+
+Selectors:Register("blueprints.manifestSheet", {
+    calls = { "blueprints.exportNeighborhood" },
+    reads = { "session.blueprints.selectedCode", "session.blueprints.manifests",
+              "session.resolvers.catalog.tick" },
+    fn = function(state, ctx)
+        local exportFaction = Selectors:Call("blueprints.exportNeighborhood", state, ctx)
+        local preferredMap  = exportFaction
+            and HDG.Constants.NEIGHBORHOOD_MAP_BY_FACTION[exportFaction] or nil
+        local sb = state.session.blueprints
+        local code = sb.selectedCode
+        if not code then return nil end  -- exception(nullable): nothing selected
+        local m = sb.manifests[code]
+        if not m or m.status ~= "received" then return nil end  -- exception(nullable): no contents to copy yet
+        local lines = { SHEET_HEADER }
+        for _, g in ipairs(m.raw.contentGroups) do
+            if g.contentType == 3 then
+                local plain, pets = _splitPetDecor(_byName(g.entries))
+                _sheetRows(lines, plain, SHEET_TYPE[3], true, preferredMap)
+                _sheetRows(lines, pets, SHEET_PET, true, preferredMap)
+            else
+                _sheetRows(lines, _byName(g.entries), SHEET_TYPE[g.contentType], false, preferredMap)
+            end
+        end
+        return table.concat(lines, "\n")
+    end,
+})
+
+-- ===== Compare CSV ===========================================================
+-- The ticked Library blueprints side by side: one row per item, one count
+-- column per blueprint, grouped by type and most-shared first within each. It answers "which pieces do these
+-- builds have in common" (asked for on Discord, 2026-11-15) -- a player
+-- reworking blueprints to reuse the same decor. Ticks are by share code, so an
+-- own blueprint pasted back in is one column, not two.
+
+-- The ticked share codes that still have a Library entry, in code order. A
+-- tick outlives its blueprint when that is forgotten or deleted, and a tick
+-- nobody can see must not be counted, asked for or given a column.
+Selectors:Register("blueprints.compareCodes", {
+    reads = { "session.ui.blueprints.compareTicks" },
+    calls = { "blueprints.entries" },
+    fn = function(state, ctx)
+        local seen, out = {}, {}
+        for _, e in ipairs(Selectors:Call("blueprints.entries", state, ctx)) do
+            if e.isTicked and not seen[e.shareCode] then
+                seen[e.shareCode] = true
+                out[#out + 1] = e.shareCode
+            end
+        end
+        table.sort(out)
+        return out
+    end,
+})
+
+-- The ticked codes whose contents are in hand, as columns in name order, plus
+-- the names of the ticked ones that are not (never asked for, or failed).
+local function _compareColumns(state, codes)
+    local manifests = state.session.blueprints.manifests
+    local cols, missing = {}, {}
+    for _, code in ipairs(codes) do
+        local m = manifests[code]  -- exception(nullable): never asked for
+        local name = _displayName(state, code)
+        if m and m.status == "received" then
+            cols[#cols + 1] = { code = code, name = name, groups = m.raw.contentGroups }
+        else
+            missing[#missing + 1] = name
+        end
+    end
+    table.sort(cols, function(a, b)
+        if a.name ~= b.name then return a.name < b.name end
+        return a.code < b.code
+    end)
+    table.sort(missing)
+    return cols, missing
+end
+
+-- The compare sheet keeps each type together: sorted on sharing alone, rooms
+-- and dyes landed in between the decor rows. House, dye, room, decor is the
+-- owner's order (2026-11-15); fixtures sit with the rooms they belong to and
+-- pet decor follows decor.
+local COMPARE_TYPE_ORDER = { House = 1, Dye = 2, Room = 3, Fixture = 4, Decor = 5, [SHEET_PET] = 6 }
+
+local function _compareType(entry, contentType)
+    if contentType == 3 and HDG.Constants.PET_DECOR_BY_DECOR_ID[entry.recordID] then return SHEET_PET end
+    return SHEET_TYPE[contentType]
+end
+
+-- One manifest entry into the item table. The same record can sit in a
+-- blueprint more than once, so a column's count adds up.
+local function _compareAdd(items, entry, contentType, col)
+    local key = contentType .. ":" .. entry.recordID
+    local item = items[key]
+    if not item then
+        item = { key = key, name = entry.name, type = _compareType(entry, contentType),
+                 counts = {}, usedIn = 0, total = 0 }
+        items[key] = item
+    end
+    if not item.counts[col] then item.usedIn = item.usedIn + 1 end
+    item.counts[col] = (item.counts[col] or 0) + entry.total  -- exception(nullable): first sighting in this column
+    item.total = item.total + entry.total
+end
+
+local function _compareItems(cols)
+    local items = {}
+    for col, c in ipairs(cols) do
+        for _, g in ipairs(c.groups) do
+            for _, e in ipairs(g.entries) do _compareAdd(items, e, g.contentType, col) end
+        end
+    end
+    local list = {}
+    for _, item in pairs(items) do list[#list + 1] = item end
+    table.sort(list, function(a, b)
+        local ta, tb = COMPARE_TYPE_ORDER[a.type], COMPARE_TYPE_ORDER[b.type]
+        if ta ~= tb then return ta < tb end
+        if a.usedIn ~= b.usedIn then return a.usedIn > b.usedIn end
+        if a.name ~= b.name then return a.name < b.name end
+        return a.key < b.key
+    end)
+    return list
+end
+
+local function _compareLine(item, numCols)
+    local cells = { _sheetCell(item.name), item.type, item.usedIn, item.total }
+    for col = 1, numCols do cells[#cells + 1] = item.counts[col] or "" end  -- exception(nullable): not in this blueprint = empty cell
+    return table.concat(cells, SHEET_SEP)
+end
+
+-- { text, count, missing }: the CSV, how many blueprints it holds, and the
+-- names of ticked blueprints left out because their contents never arrived.
+Selectors:Register("blueprints.compareSheet", {
+    reads = { "session.blueprints.manifests", "session.blueprints.groups", "account.blueprints.labels" },
+    calls = { "blueprints.compareCodes" },
+    fn = function(state, ctx)
+        local cols, missing = _compareColumns(state, Selectors:Call("blueprints.compareCodes", state, ctx))
+        local head = { "Item", "Type", "Used in", "Total" }
+        for _, c in ipairs(cols) do head[#head + 1] = _sheetCell(c.name) end
+        local lines = { table.concat(head, SHEET_SEP) }
+        for _, item in ipairs(_compareItems(cols)) do lines[#lines + 1] = _compareLine(item, #cols) end
+        return { text = table.concat(lines, "\n"), count = #cols, missing = missing }
+    end,
+})
+
+-- How many blueprints are ticked, and how many of those have contents in hand.
+local function _compareCounts(state, ctx)
+    local manifests = state.session.blueprints.manifests
+    local codes = Selectors:Call("blueprints.compareCodes", state, ctx)
+    local loaded = 0
+    for _, code in ipairs(codes) do
+        local m = manifests[code]  -- exception(nullable): never asked for
+        if m and m.status == "received" then loaded = loaded + 1 end
+    end
+    return #codes, loaded
+end
+
+-- The header tick: on when the table shows rows and every one is ticked.
+Selectors:Register("blueprints.compareAllTicked", {
+    calls = { "blueprints.libraryRows" },
+    fn = function(state, ctx)
+        -- rows whose blueprint is gone from the server are not part of "all":
+        -- there is nothing to compare, so the header tick leaves them alone
+        local live = 0
+        for _, e in ipairs(Selectors:Call("blueprints.libraryRows", state, ctx)) do
+            if not e.gone then
+                if not e.isTicked then return false end
+                live = live + 1
+            end
+        end
+        return live > 0
+    end,
+})
+
+-- English in the selector, like every other composed label in this file.
+local COMPARE_TEXT, COMPARE_TEXT_N, COMPARE_LOADING = "Compare CSV", "Compare CSV (%d)", "Loading %d of %d..."
+
+Selectors:Register("blueprints.compareText", {
+    reads = { "session.ui.blueprints.compareWaiting", "session.blueprints.manifests" },
+    calls = { "blueprints.compareCodes" },
+    fn = function(state, ctx)
+        local ticked, loaded = _compareCounts(state, ctx)
+        if state.session.ui.blueprints.compareWaiting then
+            return COMPARE_LOADING:format(loaded, ticked)
+        end
+        if ticked == 0 then return COMPARE_TEXT end
+        return COMPARE_TEXT_N:format(ticked)
+    end,
+})
+
+-- Two or more to compare. It stays lit while a compare loads: a disabled
+-- button dims its text, and "Loading 8 of 10..." is the one moment that text
+-- has to be read (in game 2026-11-15). The controller ignores a click meanwhile.
+Selectors:Register("blueprints.compareEnabled", {
+    reads = { "session.blueprints.manifests" },
+    calls = { "blueprints.compareCodes" },
+    fn = function(state, ctx)
+        return _compareCounts(state, ctx) >= 2
     end,
 })
