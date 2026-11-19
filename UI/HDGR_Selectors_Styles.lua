@@ -945,6 +945,7 @@ Selectors:Register("styles.detail.items", {
                     isSelected  = selected == itemID,
                     iconTexture = iconTex,
                     iconAtlas   = iconAtl,
+                    iconModel   = row and row.iconModel,
                     isOwned     = row and row.isOwned == true,
                     band        = bandByID and bandByID[itemID] or nil,
                 }
@@ -1153,6 +1154,7 @@ local function _curatorSourceTile(itemID, row, name, iconTex, iconAtl, isSelecte
         name              = name,
         iconTexture       = iconTex,
         iconAtlas         = iconAtl,
+        iconModel         = row and row.iconModel,
         isSelected        = isSelected,
         categoryID        = catID,
         subcategoryID     = subID,
@@ -1888,6 +1890,7 @@ local function _itemRow(itemID, state, scoreInfo)
         name        = name,
         iconTexture = iconTex,
         iconAtlas   = iconAtl,
+        iconModel   = row and row.iconModel,
         score       = scoreInfo.score,
         band        = scoreInfo.band,
     }

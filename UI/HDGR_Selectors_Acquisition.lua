@@ -2188,6 +2188,7 @@ local function _buildSelectedVendorItem(state, itemID, catRow, isColl)
         achieveID         = 0,    -- DEFERRED: CostAugment
         iconTexture       = iconTex,
         iconAtlas         = iconAtl,
+        iconModel         = catRow.iconModel,
         isAllowedIndoors  = catRow.isAllowedIndoors,
         isAllowedOutdoors = catRow.isAllowedOutdoors,
     }

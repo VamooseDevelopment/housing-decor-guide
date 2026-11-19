@@ -803,11 +803,8 @@ HDG.CardGrid:RegisterCellKind("projectsPickerCard", {
     initFunc = function(cell, ed, cfg)
         HDG.CardGrid:EnsureDefaultAnatomy(cell, cfg)
         cell:Show()
-        HDG.CardGrid:PaintIcon(cell, ed.iconTexture, ed.iconAtlas)
-        if cell.icon then   -- unowned reads dimmed; PaintIcon resets both on reuse
-            cell.icon:SetDesaturated(not ed.owned)
-            cell.icon:SetAlpha(ed.owned and 1 or 0.45)
-        end
+        HDG.CardGrid:PaintIcon(cell, ed.iconTexture, ed.iconAtlas, ed.iconModel)
+        HDG.CardGrid:DimIcon(cell, not ed.owned)   -- unowned reads dimmed
         HDG.CardGrid:PaintSelected(cell, false)
         -- Planned-count badge (absent at 0).
         HDG.CardGrid:PaintMemberBadge(cell, ed.plannedCount > 0 and ed.plannedCount or nil)

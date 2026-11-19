@@ -401,7 +401,7 @@ HDG.CardGrid:RegisterCellKind("companionGridCell", {
     initFunc = function(cell, ed, cfg)
         HDG.CardGrid:EnsureDefaultAnatomy(cell, cfg)
         cell:Show()
-        HDG.CardGrid:PaintIcon(cell, ed.iconTexture, ed.iconAtlas)
+        HDG.CardGrid:PaintIcon(cell, ed.iconTexture, ed.iconAtlas, ed.iconModel)
         -- No collected check/X badge -- this is a PLACEMENT grid; the owned-to-
         -- place count badge below carries ownership (matches HDG's cell).
         cell.label:Hide()
@@ -421,10 +421,7 @@ HDG.CardGrid:RegisterCellKind("companionGridCell", {
             HDG.CardGrid:PaintBadge(cell, nil)
         else
             HDG.CardGrid:PaintBadge(cell, qty > 0 and tostring(qty) or nil)
-            if greyed then
-                cell.icon:SetDesaturated(true)
-                cell.icon:SetAlpha(0.45)
-            end
+            if greyed then HDG.CardGrid:DimIcon(cell, true) end
         end
         _paintDyeMark(cell, ed, sizeKey, greyed)
 

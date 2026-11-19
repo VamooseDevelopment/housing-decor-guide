@@ -154,8 +154,50 @@ function M:PaintBand(cell, band)
     end
 end
 
-function M:PaintIcon(cell, iconTexture, iconAtlas)
+-- The model a tile draws for decor with no icon (Constants.DECOR_TILE_MODEL_SCENE_ID),
+-- built on the first cell that needs one: most cells never do. Blizzard's tile
+-- camera, and a scene that takes no mouse, so the cell keeps its hover and clicks.
+local function _ensureModel(cell)
+    if cell.model then return cell.model end
+    local scene = CreateFrame("ModelScene", nil, cell, "NonInteractableModelSceneMixinTemplate")
+    scene:SetAllPoints(cell.icon)
+    scene:TransitionToModelSceneID(HDG.Constants.DECOR_TILE_MODEL_SCENE_ID,
+        _G.CAMERA_TRANSITION_TYPE_IMMEDIATE, _G.CAMERA_MODIFICATION_TYPE_MAINTAIN, true)
+    cell.model      = scene
+    cell.modelActor = scene:GetActorByTag(HDG.Constants.DECOR_TILE_ACTOR_TAG)
+    if not cell.modelActor then  -- exception(boundary): the scene's actors are Blizzard's data
+        HDG.Log:Warn("model_preview", "tile model scene has no '" .. HDG.Constants.DECOR_TILE_ACTOR_TAG
+            .. "' actor; decor with no icon shows the placeholder")
+    end
+    return scene
+end
+
+-- Draws the model in place of the icon. False when the scene has no actor to draw it.
+local function _paintModel(cell, iconModel)
+    _ensureModel(cell)
+    local actor = cell.modelActor
+    if not actor then return false end  -- exception(nullable): logged once per cell in _ensureModel
+    actor:SetModelByFileID(iconModel)
+    actor:SetDesaturation(0)
+    actor:SetAlpha(1)
+    cell.icon:Hide()
+    cell.model:Show()
+    return true
+end
+
+-- A pooled cell that drew a model before paints an icon now.
+local function _hideModel(cell)
+    if not cell.model then return end
+    cell.model:Hide()
+    if cell.modelActor then cell.modelActor:ClearModel() end
+end
+
+-- iconModel: the model file of decor with no icon (catalog row iconModel); it
+-- wins over the texture, which is then only the "?" placeholder.
+function M:PaintIcon(cell, iconTexture, iconAtlas, iconModel)
     if not cell or not cell.icon then return end
+    if iconModel and _paintModel(cell, iconModel) then return end
+    _hideModel(cell)
     if iconTexture and cell.icon.SetTexture then
         cell.icon:SetTexture(iconTexture)
         cell.icon:SetDesaturated(false)
@@ -169,6 +211,18 @@ function M:PaintIcon(cell, iconTexture, iconAtlas)
     else
         if cell.icon.SetTexture then cell.icon:SetTexture(HDG.Constants.PLACEHOLDER_ICON) end  -- exception(false-positive): Texture always has SetTexture; mock-fidelity guard
         cell.icon:Show()
+    end
+end
+
+-- Greys the tile's picture, the icon or the model drawn in its place. Call after
+-- PaintIcon, which paints both back to full colour.
+function M:DimIcon(cell, dimmed)
+    local alpha = dimmed and HDG.Constants.TILE_DIM_ALPHA or 1
+    cell.icon:SetDesaturated(dimmed)
+    cell.icon:SetAlpha(alpha)
+    if cell.model and cell.model:IsShown() then
+        cell.modelActor:SetDesaturation(dimmed and 1 or 0)
+        cell.modelActor:SetAlpha(alpha)
     end
 end
 

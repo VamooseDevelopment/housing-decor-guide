@@ -159,7 +159,7 @@ HDGR_VendorAugment = {
     [169524] = { name = "Acquirer Ta'gosh", zone = "Oribos", mapID = 1670, x = 61.6, y = 71.6, faction = "N", exp = "Shadowlands" },
     [173003] = { name = "Nalcorn Talsen", zone = "Maldraxxus", mapID = 1536, x = 50.6, y = 53.4, faction = "N", exp = "Shadowlands" },
     [174710] = { name = "Chachi the Artiste", zone = "Sinfall", mapID = 1699, x = 54.0, y = 24.7, faction = "N", exp = "Shadowlands" },
-    [175419] = { name = "Lunelle", zone = "Ardenweald", mapID = 1701, x = 46.6, y = 56.6, faction = "N", exp = "Shadowlands" },
+    [175419] = { name = "Lunelle", zone = "Ardenweald", mapID = 1565, x = 48.9, y = 53.1, faction = "N", exp = "Shadowlands" },
     [180790] = { name = "Aithlyn", zone = "Ardenweald", mapID = 1565, x = 48.4, y = 50.4, faction = "N", exp = "Shadowlands" },
     [188265] = { name = "Rae'ana (Waking Shores)", zone = "The Waking Shores", mapID = 2022, x = 47.8, y = 82.0, faction = "N", exp = "Dragonflight" },
     [188623] = { name = "Samia Inkling", zone = "The Waking Shores", mapID = 2022, x = 24.6, y = 56.8, faction = "N", exp = "Dragonflight" },

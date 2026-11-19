@@ -1548,6 +1548,15 @@ HDG.Constants.PVP_COST_KEYS = {
 -- 134400 = INV_Misc_QuestionMark.blp -- canonical "?" placeholder for missing icons.
 HDG.Constants.PLACEHOLDER_ICON = 134400
 
+-- Decor Blizzard ships no thumbnail for (HouseDecor ThumbnailFileDataID 0: 30 items
+-- at 12.1.5) has no icon in its catalog entry, only its model. Blizzard's catalog
+-- tile draws that model instead, and so do ours (CardGrid:PaintIcon), with the same
+-- tile camera: HousingCatalogEntryMixin's model scene and actor tag.
+HDG.Constants.DECOR_TILE_MODEL_SCENE_ID = 691
+HDG.Constants.DECOR_TILE_ACTOR_TAG      = "decor"
+-- A tile's picture greyed out: decor you don't own, or have no copy of free to place.
+HDG.Constants.TILE_DIM_ALPHA = 0.45
+
 -- Vendor buy queue pacing (spec HDGR_VENDOR_BUYING_SPEC.md s2.1/s2.2/s6).
 -- Two constraints: the server rejects >~13-15 rapid buys in a burst, AND items
 -- bought faster than storage absorbs them pile up in real bags instead of going

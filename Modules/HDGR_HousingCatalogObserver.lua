@@ -1138,6 +1138,10 @@ function R:BuildRow(info)
     row.name              = info.name
     row.iconTexture       = info.iconTexture
     row.iconAtlas         = info.iconAtlas
+    -- No icon at all (no thumbnail shipped, Constants.DECOR_TILE_MODEL_SCENE_ID):
+    -- the tiles draw the model, so only these rows keep its file. Every other
+    -- row drops `asset` (ROW_DROPPED).
+    if not (info.iconTexture or info.iconAtlas) then row.iconModel = info.asset end
     row.quality           = info.quality
     row.size              = info.size
     row.placementCost     = info.placementCost

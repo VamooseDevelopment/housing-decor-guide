@@ -1,3 +1,14 @@
+## [3.45.1] - 2026-11-20 (November 2026)
+
+### Fixed
+- **Decor the game has no icon for now shows the piece itself on its tile,** the way the
+  in-game Housing Catalog does. Thirty pieces, among them the Boralus Swill Bottle, the Sinfall
+  Dining Table and the Nomad's set, showed a question mark on the tiles in Shop by Vendor, the
+  Projects picker, Styles and the house editor companion.
+- **Lunelle's map pin and waypoint now point to where anyone can buy from her,** just outside
+  the Heart of the Forest in Ardenweald. They led inside the tree, where only the Night Fae may
+  go. (Thanks CombatWombatt23.)
+
 ## [3.45.0] - 2026-11-15 (November 2026)
 
 ### Added

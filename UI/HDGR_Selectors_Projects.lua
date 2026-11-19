@@ -1189,6 +1189,7 @@ Selectors:Register("projects.pickerResults", {
                 rows[#rows + 1] = {
                     itemID = it.itemID, decorID = it.decorID, name = it.name,
                     iconTexture = it.iconTexture, iconAtlas = it.iconAtlas,
+                    iconModel = row and row.iconModel,
                     plannedCount = planned[it.itemID] or 0,
                     owned = it.isOwned,
                 }

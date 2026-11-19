@@ -662,7 +662,7 @@ HDG.CardGrid:RegisterCellKind("stylesDetailTile", {
     initFunc = function(cell, ed, cfg)
         HDG.CardGrid:EnsureDefaultAnatomy(cell, cfg)
         cell:Show()
-        HDG.CardGrid:PaintIcon(cell, ed.iconTexture, ed.iconAtlas)
+        HDG.CardGrid:PaintIcon(cell, ed.iconTexture, ed.iconAtlas, ed.iconModel)
         local isSelected = ed.isSelected == true
         HDG.CardGrid:PaintSelected(cell, isSelected)
         -- Detail-jump landing animation: when this tile transitions from
@@ -1007,7 +1007,7 @@ HDG.CardGrid:RegisterCellKind("stylesCuratorTile", {
     initFunc = function(cell, ed, cfg)
         HDG.CardGrid:EnsureDefaultAnatomy(cell, cfg)
         cell:Show()
-        HDG.CardGrid:PaintIcon(cell, ed.iconTexture, ed.iconAtlas)
+        HDG.CardGrid:PaintIcon(cell, ed.iconTexture, ed.iconAtlas, ed.iconModel)
         HDG.CardGrid:PaintSelected(cell, ed.isSelected == true)
         HDG.CardGrid:PaintMemberBadge(cell, ed.memberCount)  -- set-membership count badge (TOPLEFT)
         -- Label hidden; TooltipEngine carries the name (tile is 80px square).
@@ -1252,7 +1252,7 @@ HDG.CardGrid:RegisterCellKind("stylesPreviewTile", {
     initFunc = function(cell, ed, cfg)
         HDG.CardGrid:EnsureDefaultAnatomy(cell, cfg)
         cell:Show()
-        HDG.CardGrid:PaintIcon(cell, ed.iconTexture, ed.iconAtlas)
+        HDG.CardGrid:PaintIcon(cell, ed.iconTexture, ed.iconAtlas, ed.iconModel)
         HDG.CardGrid:PaintBand(cell, ed.band)
         if cell.label then cell.label:Hide() end
         cell:RegisterForClicks("LeftButtonUp")

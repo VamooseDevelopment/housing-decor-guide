@@ -852,6 +852,7 @@ local function _emitDecorCells(out, itemID, row, needle)
         name           = #dyed > 0 and (name .. " (Undyed)") or name,
         iconTexture    = iconTex,
         iconAtlas      = iconAtl,
+        iconModel      = row.iconModel,
         isOwned        = row.isOwned == true,
         entryID        = row.entryID,
         ownedQty       = baseQty,
@@ -868,6 +869,7 @@ local function _emitDecorCells(out, itemID, row, needle)
             name           = name .. " (" .. (dv.label or "Dyed") .. ")",
             iconTexture    = iconTex,
             iconAtlas      = iconAtl,
+            iconModel      = row.iconModel,
             isOwned        = true,
             entryID        = dv.entryID,
             ownedQty       = dv.numStored or 0,
@@ -933,6 +935,7 @@ local function _gridRecentItems(state, needle)
                 name           = name,
                 iconTexture    = iconTex,
                 iconAtlas      = iconAtl,
+                iconModel      = row and row.iconModel,
                 isOwned        = row and row.isOwned == true,
                 placedCount    = ev.placed,
                 removedCount   = ev.removed,
@@ -1150,6 +1153,7 @@ Selectors:Register("companion.recentStrip", {
                 name           = name,
                 iconTexture    = iconTex,
                 iconAtlas      = iconAtl,
+                iconModel      = row and row.iconModel,
                 isActionStrip  = true,   -- per-action feed: hide qty badge, +/- direction only
                 -- exception(boundary): row nil for unswept items -> entryID nil -> click no-ops
                 isOwned        = row and row.isOwned == true,

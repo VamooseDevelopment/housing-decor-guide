@@ -433,7 +433,7 @@ HDG.CardGrid:RegisterCellKind("acqVendorItemTile", {
     initFunc = function(cell, ed, cfg)
         HDG.CardGrid:EnsureDefaultAnatomy(cell, cfg)
         cell:Show()
-        HDG.CardGrid:PaintIcon(cell, ed.iconTexture, ed.iconAtlas)
+        HDG.CardGrid:PaintIcon(cell, ed.iconTexture, ed.iconAtlas, ed.iconModel)
         HDG.CardGrid:PaintCollected(cell, ed.isCollected == true)
 
         -- Storage badge: only when stored > 1 (1 is the implicit "I have it"

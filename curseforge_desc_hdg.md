@@ -12,23 +12,10 @@
 
 ---
 
-## What's New in v3.45.0
+## What's New in v3.45.1
 
-**Blueprints in a spreadsheet.** Two new ways to take blueprint contents out of the game, asked for on Discord.
-
-- **CSV in the Copy list window.** On the Blueprints tab, click Copy list, then CSV. The list becomes comma-separated rows (item, count, type, source and where it comes from) that split into columns when pasted into a spreadsheet.
-- **Compare CSV in the Blueprint Library.** Tick two or more blueprints and click Compare CSV. You get one row per item and one count column per blueprint, with how many of the blueprints use the item and the total across them.
-- **Rows are grouped by type:** house, dyes, rooms, fixtures, decor, pet decor. Within a type, the items used by the most blueprints come first.
-- **A tick above the Library table selects everything shown.** Pick a chip or type in the filter first to tick just those rows.
-- **Blueprints you have not opened this session are loaded first,** one at a time. The button counts them as they arrive.
-
-**Also in this release:**
-
-- **A pasted blueprint that its owner has deleted is marked.** The Library writes "Deleted by its owner" at the start of its note, so you can decide whether to forget the code.
-- **The blueprint item list has column headings:** Item, Have, Need and Source.
-- **The budget meters are labelled with words** in place of the icons.
-- **The button beside the share code box now reads Add,** since it adds the code to your pasted list as well as inspecting it.
-- **In the Blueprint Library, the x on a table row shows on pasted codes only.** Deleting one of your own blueprints is done with the button under the table.
+- **Decor the game has no icon for now shows the piece itself on its tile,** the way the in-game Housing Catalog does. Thirty pieces, among them the Boralus Swill Bottle, the Sinfall Dining Table and the Nomad's set, showed a question mark on the tiles in Shop by Vendor, the Projects picker, Styles and the house editor companion.
+- **Lunelle's map pin and waypoint now point to where anyone can buy from her,** just outside the Heart of the Forest in Ardenweald. They led inside the tree, where only the Night Fae may go.
 
 ## The Decor Catalog
 
@@ -126,7 +113,7 @@ A companion window injects into Blizzard's House Editor so you can **place decor
 ---
 
 **Author:** Vamoose
-**Version:** 3.45.0
+**Version:** 3.45.1
 **Game Version:** 12.1.5 (Midnight)
 **Source / Issues:** https://github.com/VamooseDevelopment/housing-decor-guide
 **Discord:** https://discord.gg/RWZaxJaHFP
