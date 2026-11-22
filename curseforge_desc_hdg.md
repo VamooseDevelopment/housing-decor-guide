@@ -12,24 +12,39 @@
 
 ---
 
-## What's New in v3.45.1
+## What's New in v3.46.0
 
-- **Decor the game has no icon for now shows the piece itself on its tile,** the way the in-game Housing Catalog does. Thirty pieces, among them the Boralus Swill Bottle, the Sinfall Dining Table and the Nomad's set, showed a question mark on the tiles in Shop by Vendor, the Projects picker, Styles and the house editor companion.
-- **Lunelle's map pin and waypoint now point to where anyone can buy from her,** just outside the Heart of the Forest in Ardenweald. They led inside the tree, where only the Night Fae may go.
+- **The Decor tab's filters are now menus, and you can combine them.** Two rows of menu buttons replace the filter and tag buttons: "What" (Collection, Type, Room, Sits on, Size, Source, Expansion, Holiday) and "Looks" (Colour, Material, Shape, Motif, Palette, Finish, Glow, Mood, Style, Culture, Place, More). Tick any number of values in any number of menus. Each value shows how many decor it would list, each menu has a Clear row, and Clear all sits beside the search box.
+- **The words the descriptive search matches on are now on the page.** The Looks menus list the colours, materials, shapes, motifs and moods decor is described by, so you can pick them instead of guessing the word.
+- **Type menu.** Each kind of decor opens its objects beside it. Tick Seating for all seating, or tick Chair under it for chairs only.
+- **Holiday has its own menu,** listing every holiday of the year.
+- **Best first, the default.** Next to the search box, Match switches between "Best first" and "Every filter". Best first lists the closest fits first, under a heading per score, with each decor's score on its row and what the selected decor misses under the preview. Every colour, material, shape, motif, mood, style, culture, place and room you tick counts on its own: tick Brown, Gold and Gray and the decor with all three comes first. Every filter lists only the decor that fits them all.
+- **Find similar,** beside the note, ticks the selected decor's own object, colours, materials, moods and cultures, and lists the closest fits first.
+- **Sort,** under the list: by name, newest expansion, budget cost or most owned.
+- **Your active filters show as chips above the list.** Click one to remove it, or Clear all at the end of the row.
+- **Pets is a Decor | Pets switch** at the left of the search box, and pet families are a Family menu beside it.
+- **Every Style tag can be picked.** The old Tags row had room for 12 buttons, so 13 of the game's 25 Style tags could not be reached.
+- **Deleting a shopping list from its card in Styles now hands over to another list.** Deleting the active list there left "+ Cart" saying "added" while adding to the list that was gone.
+- **With Hide in combat turned off, closing the window during a fight closes it at once.**
+- **The Mogul plan takes new prices as soon as HDG's own Auction House scan finishes.**
+- **Buying several copies of a new decor at once records one learn,** not one per copy, and moving decor you already own before the catalog has loaded no longer records it as newly learned.
+- **Switching colour scheme or language updates everything already on screen,** without a /reload.
 
 ## The Decor Catalog
 
 - **Every piece from the in-game Housing Catalog** in one searchable list -- favorites, a collected check, a craftable-recipe star, and dye-variant color dots at a glance.
 - **Descriptive search** -- type what a piece looks like ("red velvet chair", "wrought iron lamp", "round rug") and the list narrows to the decor that fits every word: colour, material, style, culture, shape, where it sits and where it is from.
-- **Compose filters** across Crafted (by profession), Size (footprint tags plus placement-cost chips), Styles, Expansions, Sources (vendor / quest / achievement / reputation / crafted / ...), and more -- with a live "collected / shown" status readout and one-click Reset.
-- **"New in <patch>"** -- when a patch or hotfix adds decor to the catalog, a New chip appears in the filter row so you can browse exactly what was added (and what you're still missing, via the Uncollected toggle).
+- **Filter menus** -- two rows of menus above the list: Collection, Type, Room, Sits on, Size (footprint and placement cost), Source (vendor / quest / achievement / reputation / crafted / ..., and crafted by profession), Expansion and Holiday, then Colour, Material, Shape, Motif, Palette, Finish, Glow, Mood, Style, Culture and Place, with condition, faction and indoor or outdoor under More. Tick any number of values in any number of menus; each value shows how many decor it would list, your active filters show as chips above the list, and Clear all resets them -- with a live "collected / shown" status readout.
+- **Best first or Every filter** -- Best first ranks the decor by how many of your ticked filters it fits, closest first, with each piece's score on its row and what the selected piece misses under the preview; Every filter lists only the decor that fits them all. **Find similar** ticks the selected decor's own object, colours, materials, moods and cultures.
+- **Sort** the list by name, newest expansion, budget cost or most owned.
+- **"New in <patch>"** -- when a patch or hotfix adds decor to the catalog, a "New in" row appears in the Collection menu so you can browse exactly what was added (and what you're still missing, with Uncollected ticked beside it).
 - **Hide PvP decor** -- a setting that takes the decor bought with Honor or Marks of Honor out of the lists.
 - **Uncollected** toggle to focus on what you're missing; **Destroy Decor** toggle to manage stored duplicates, with a confirmed destroy dialog that counts each copy as the game takes it, or Ctrl-Shift-click a row to destroy one copy.
 - **3D model preview** of any piece -- rotate, zoom, swap the backdrop, and preview specific dye variants.
 - **Rich detail card**: category breadcrumb, size, source, owned/stored/placed counts, first-acquisition House XP bonus, and style/faction tags.
 - **Private notes** per item and a one-click **+ Cart** that adds to your active shopping list.
 
-- **Placeable pets** -- a Pets filter listing the pets in your collection that can be placed on decor, ordered by size, with each pet's height shown against your own character, family filters, a full-size preview, and Summon or Dismiss.
+- **Placeable pets** -- a Decor | Pets switch lists the pets in your collection that can be placed on decor, ordered by size, with each pet's height shown against your own character, a Family menu, a full-size preview, and Summon or Dismiss.
 
 ## Acquire -- where every piece comes from
 
@@ -113,7 +128,7 @@ A companion window injects into Blizzard's House Editor so you can **place decor
 ---
 
 **Author:** Vamoose
-**Version:** 3.45.1
+**Version:** 3.46.0
 **Game Version:** 12.1.5 (Midnight)
 **Source / Issues:** https://github.com/VamooseDevelopment/housing-decor-guide
 **Discord:** https://discord.gg/RWZaxJaHFP

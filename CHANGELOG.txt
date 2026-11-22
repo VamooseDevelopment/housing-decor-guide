@@ -1,3 +1,66 @@
+## [3.46.0] - 2026-11-23 (November 2026)
+
+### Added
+- **The Decor tab's filters are now menus, and you can combine them.** Two rows of menu buttons
+  replace the filter and tag buttons: "What" (Collection, Type, Room, Sits on, Size, Source,
+  Expansion, Holiday) and "Looks" (Colour, Material, Shape, Motif, Palette, Finish, Glow, Mood,
+  Style, Culture, Place, More). Tick any number of values in any number of menus. Each value shows
+  how many decor it would list, each menu has a Clear row, and Clear all sits beside the search box.
+- **The words the descriptive search matches on are now on the page.** The Looks menus list the
+  colours, materials, shapes, motifs and moods decor is described by, so you can pick them
+  instead of guessing the word. (The search box also reads names and finer details that have no
+  menu.)
+- **Type menu:** each kind of decor opens its objects beside it. Tick Seating for all seating, or
+  tick Chair under it for chairs only.
+- **Holiday has its own menu,** listing every holiday of the year, also the ones no decor has yet.
+- **Best first,** the default. Next to the search box, Match switches between "Best first" and
+  "Every filter". Best first lists the closest fits under a heading per score (fits all 3, fits
+  2 of 3, and so on), with each decor's score on its row and what the selected decor misses under
+  the preview. Every colour, material, shape, motif, mood, style, culture, place and room you
+  tick counts on its own: tick Brown, Gold and Gray and the decor with all three comes first.
+  Every filter lists only the decor that fits them all.
+- **Find similar,** beside the note: ticks the selected decor's own object, colours, materials,
+  moods and cultures, and lists the closest fits first.
+- **Sort,** under the list: by name, newest expansion, budget cost or most owned.
+- **Your active filters show as chips above the list.** Click one to remove it, or Clear all at
+  the end of the row.
+
+### Changed
+- **Pets is a Decor | Pets switch** at the left of the search box, and pet families are a Family
+  menu beside it.
+- **The preview background picker moved** to the top right of the preview pane's heading.
+
+### Fixed
+- **Every Style tag can be picked.** The old Tags row had room for 12 buttons, so 13 of the game's
+  25 Style tags (Magical to Winter) and 6 of the tags under Other could not be reached.
+- **Deleting a shopping list from its card in Styles now hands over to another list.** Delete the
+  active list there and "+ Cart" said "added" while adding to the list that was gone, even after a
+  /reload. Another list, or a fresh one, now becomes active, and a save already caught this way is
+  repaired when you log in.
+- **With Hide in combat turned off, closing the window during a fight closes it at once.** The X
+  and Escape left it on screen until combat ended, and a second click opened it again.
+- **The Mogul plan takes new prices as soon as HDG's own Auction House scan finishes,** or the
+  price cache is cleared. It kept the old prices until something else changed.
+- **Decor bought while the catalog is still loading for the first time in a session is checked
+  again once the load finishes.** It was skipped, so a purchase the load missed stayed unowned
+  until the next refresh.
+- **Moving or placing decor you already own before the catalog has loaded no longer records it as
+  newly learned** in Your Data and Recently Learned.
+- **Buying several copies of a new decor at once records one learn,** not one per copy.
+- **A purchase is taken off your shopping list even when only a catalog refresh sees it land.**
+- **Both of your houses keep their level and favor** when the game reports them together; one of
+  them could be dropped.
+- **Tag names no longer read "Other" for a whole session** when the game sends the tag list late at
+  login.
+- **Switching colour scheme now repaints the link labels on the Settings page, the close buttons
+  and the Recipes group heading.** They kept the old scheme's colours until a /reload.
+- **Changing HDG's language updates the lists already on screen,** such as the Decor Quests rows,
+  instead of keeping the old language until something else changed.
+- **A new item note is no longer dropped after a computer restart** once you have 500 notes (100
+  for vendors).
+- **A description you typed for a Smart Set is kept** when you come back to the unsaved set from
+  the side menu; it was replaced by the generated one at the next tag you picked.
+
 ## [3.45.1] - 2026-11-20 (November 2026)
 
 ### Fixed

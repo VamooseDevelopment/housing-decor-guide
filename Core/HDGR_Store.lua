@@ -214,7 +214,7 @@ end
 -- selectors can read state.session.ui.<view>.<key> directly. Shape is
 -- guaranteed; selectors fail loudly on typos (strict reads, ADR-005).
 
--- Forward-declared; real definition further down (SSoT shared with DECOR_FILTER_RESET).
+-- Forward-declared; real definition further down (SSoT shared with UI_FILTER_RESET).
 local NewDecorFilters
 
 -- Forward-declared; defined alongside the shopping factories further down.
@@ -224,10 +224,22 @@ local function NewDecorSessionUI()
     return {
         searchQuery     = "",
         selectedItemID  = nil,
-        -- Pets browser selection. Lives in the DECOR bucket because Pets is a
-        -- top-filter mode of the decor view, not a view of its own (invariant 16).
+        -- "decor" or "pets": Pets is a MODE of the decor view (it swaps the list
+        -- and the detail pane), not a view of its own, so its selection and its
+        -- family filter live in the DECOR bucket too (invariant 16).
+        mode            = "decor",
         selectedSpeciesID = nil,
+        petFamily       = nil,     -- the Family menu's pick; nil = every family
         filters         = NewDecorFilters(),
+        -- How the list answers the ticks: "best" = the closest fits first, the
+        -- default (owner 2026-11-22); "all" = a decor has to fit every filter
+        -- (decor.matchingRows). And its sort order (Constants.DECOR_SORTS). View
+        -- settings, not filters: Clear all keeps both.
+        match           = "best",
+        sort            = "name",
+        -- The chip strip's real wrapped height, published by the strip itself after
+        -- layout (UI_SET_TRANSIENT); decor.gridRows sizes the chips' row to it.
+        chipsHeight     = 0,
         -- { [variantKey] = stored count } the Destroy decor list sorts by once the
         -- player destroys from it (DECOR_PIN_STORED_SORT); nil = sort by live counts.
         pinnedSortCounts = nil,
@@ -1056,13 +1068,13 @@ end
 
 -- Defaults for session.ui.decor.filters. Single source of truth referenced
 -- by NewDecorSessionUI (above; forward-declared so NewDecorSessionUI's
--- body can call it), by DECOR_FILTER_RESET (atomic write), and by
+-- body can call it), by UI_FILTER_RESET (atomic write), and by
 -- ensureDecorFilters (lazy init inside reducer cases).
 NewDecorFilters = function()
     return {
-        topFilter        = "all",
-        activeTag        = nil,
-        onlyUncollected  = false,
+        -- { ["group:value"] = true }: the ticks of the filter menus
+        -- (Core/HDGR_DecorFilters.lua). Empty = nothing filtered.
+        ticks            = {},
         onlyStored       = false,
     }
 end
@@ -1372,6 +1384,26 @@ local function SeedDefaultShoppingList(account)
     account.activeShoppingListId = id
 end
 
+-- An active id must name a list that exists: with its list gone it hands over to
+-- any remaining list, or to "" when none is left (the seed then mints one).
+local function RepointActiveShoppingList(account)
+    local active = account.activeShoppingListId
+    if active == "" or account.vendorShoppingLists[active] then return end
+    local nextId = ""
+    for other in pairs(account.vendorShoppingLists) do nextId = other; break end
+    account.activeShoppingListId = nextId
+end
+
+-- The one delete for a shopping list, shared by the Shopping tab and the Styles
+-- card: the card once removed the list alone and left the active id on it, so
+-- "+ Cart" reported success while adding to nothing, even after a /reload.
+local function DeleteShoppingList(account, id)
+    account.vendorShoppingLists[id] = nil
+    RepointActiveShoppingList(account)
+    -- The last list gone: a fresh default takes its place, as at load.
+    SeedDefaultShoppingList(account)
+end
+
 local function EnsureShopping(account)
     if type(account.vendorShoppingLists) ~= "table" then
         account.vendorShoppingLists = NewVendorShoppingLists()
@@ -1387,6 +1419,9 @@ local function EnsureShopping(account)
         end
         account.shoppingListSeq = maxN
     end
+    -- Saves from before 2026-11-20 can hold an active id on a list the Styles
+    -- card deleted; repair it here, where the seed below can then mint a list.
+    RepointActiveShoppingList(account)
     -- Runs after the seq reseed above so the new ID can't collide with a
     -- previously-used slot.
     SeedDefaultShoppingList(account)
@@ -2537,44 +2572,42 @@ HDG.Actions:Register{ name = "LOG_TRACE_TOGGLE",
     -- ensureDecorFilters keeps defaults in NewDecorFilters (SSoT); helpers run only inside _RawDispatch.
     end }
 
-HDG.Actions:Register{ name = "DECOR_SET_TOP_FILTER",
-    persists = false, combatUnsafe = false, 
+-- One tick of a filter menu on or off. The Type menu's rule (a ticked kind is all
+-- of it, so a kind and the objects under it are never ticked together) lives in
+-- DecorFilters.Toggle.
+HDG.Actions:Register{ name = "DECOR_TOGGLE_FILTER",
+    persists = false, combatUnsafe = false,
+    invalidates = { "session.ui.decor.filters.ticks" },
+    reduce = function(state, payload)
+        HDG.DecorFilters.Toggle(ensureDecorFilters(state).ticks, payload.tick)
+    end }
+
+-- A menu's Clear row: every tick of that menu's groups.
+HDG.Actions:Register{ name = "DECOR_CLEAR_FILTERS",
+    persists = false, combatUnsafe = false,
+    invalidates = { "session.ui.decor.filters.ticks" },
+    reduce = function(state, payload)
+        HDG.DecorFilters.ClearMenu(ensureDecorFilters(state).ticks, payload.menu)
+    end }
+
+-- Find similar: the selected piece's own words become the filters, the closest
+-- fits first. Search and the Destroy list would hide them, so both go.
+HDG.Actions:Register{ name = "DECOR_FIND_SIMILAR",
+    persists = false, combatUnsafe = false,
     invalidates = {
-                "session.ui.decor.filters.topFilter",
-                "session.ui.decor.filters.activeTag",
+                "session.ui.decor.filters",
+                "session.ui.decor.searchQuery",
+                "session.ui.decor.match",
+                "session.ui.decor.pinnedSortCounts",
             },
     reduce = function(state, payload)
-        local f = ensureDecorFilters(state)
-        local v = payload.value
-        -- Validate against HDG.Constants.TOP_FILTERS so the reducer rejects
-        -- typo'd values from any caller. Single SSoT for the bucket set.
-        local valid = false
-        for _, entry in ipairs(HDG.Constants.TOP_FILTERS or {}) do
-            if entry.value == v then valid = true; break end
-        end
-        if valid then
-            f.topFilter = v
-            -- Switching top filter always clears the active tag (ADR-018).
-            f.activeTag = nil
-        end
-    end }
-
-HDG.Actions:Register{ name = "DECOR_SET_TAG",
-    persists = false, combatUnsafe = false, 
-    invalidates = { "session.ui.decor.filters.activeTag" },
-    reduce = function(state, payload)
-        local f = ensureDecorFilters(state)
-        if payload.tag == nil or type(payload.tag) == "string" then
-            f.activeTag = payload.tag
-        end
-    end }
-
-HDG.Actions:Register{ name = "DECOR_TOGGLE_ONLY_UNCOLLECTED",
-    persists = false, combatUnsafe = false, 
-    invalidates = { "session.ui.decor.filters.onlyUncollected" },
-    reduce = function(state, payload)
-        local f = ensureDecorFilters(state)
-        f.onlyUncollected = not f.onlyUncollected
+        local decor = state.session.ui.decor
+        decor.filters = NewDecorFilters()
+        -- Copied: state does not share a table with whoever dispatched.
+        for tick in pairs(payload.ticks) do decor.filters.ticks[tick] = true end
+        decor.searchQuery = ""
+        decor.match = "best"
+        decor.pinnedSortCounts = nil
     end }
 
 HDG.Actions:Register{ name = "DECOR_TOGGLE_ONLY_STORED",
@@ -2618,9 +2651,13 @@ HDG.Actions:Register{ name = "NOTE_SET",
             invalidates = { "account.userNotes" },
     reduce = function(state, payload)
         if payload.itemID and payload.text ~= nil then
+            -- Wall-clock time(), not GetTime(): GetTime is machine uptime and
+            -- restarts at a reboot, so a note written after one sorted as the
+            -- oldest and evicted itself at the cap. Notes stamped with uptime
+            -- before 2026-11-20 sort older than every new note, which they are.
             state.account.userNotes[payload.itemID] = {
                 text = payload.text,
-                ts   = payload.ts or (_G.GetTime and _G.GetTime() or 0),  -- exception(boundary): GetTime/time absent in headless harness
+                ts   = payload.ts or _G.time(),  -- exception(optional): tests pin ts to order the LRU
             }
             -- LRU cap at 500. Iterate to find oldest; cheap at this size.
             local MAX_NOTES = 500
@@ -2660,9 +2697,10 @@ HDG.Actions:Register{ name = "VENDOR_NOTE_SET",
             invalidates = { "account.vendorNotes" },
     reduce = function(state, payload)
         if payload.npcID and payload.text ~= nil then
+            -- time(), not GetTime(): see NOTE_SET above.
             state.account.vendorNotes[payload.npcID] = {
                 text = payload.text,
-                ts   = payload.ts or (_G.GetTime and _G.GetTime() or 0),  -- exception(boundary): GetTime/time absent in headless harness
+                ts   = payload.ts or _G.time(),  -- exception(optional): tests pin ts to order the LRU
             }
             -- LRU cap at 100 (vendor count is much smaller than item count).
             local MAX_VENDOR_NOTES = 100
@@ -4034,9 +4072,10 @@ HDG.Actions:Register{ name = "STYLES_SET_VIEW",
         if payload.view == "smartset" then
             local s = state.session.ui.styles.smartset
             local blankName = (s.draft.displayName == nil or s.draft.displayName == "")
+            -- Name only: every draft reset already sets descAuto, and setting it
+            -- here flipped a description the player typed back to generated.
             if not s.draftKey and blankName and not next(s.rules) then
                 s.draft.displayName = _seededSmartsetName(state.account)
-                s.draft.descAuto    = true
             end
         end
     end }
@@ -4267,6 +4306,7 @@ HDG.Actions:Register{ name = "STYLES_DELETE_STYLE",
     persists = false, combatUnsafe = false, 
     invalidates = { "account.collections",
                                                "account.vendorShoppingLists",   -- shopping lists live here; deleted via the "vsl:" id prefix
+                                               "account.activeShoppingListId", "account.shoppingListSeq",  -- DeleteShoppingList repoints + seeds
                                                "session.ui.styles.curator.selectedTargetID" },
     reduce = function(state, payload)
         -- Delete any user-authored collection -- style / smartset / snapshot
@@ -4283,7 +4323,7 @@ HDG.Actions:Register{ name = "STYLES_DELETE_STYLE",
         if vslID then
             local lists = state.account.vendorShoppingLists
             if not (lists and lists[vslID]) then return end   -- exception(boundary): missing list
-            lists[vslID] = nil
+            DeleteShoppingList(state.account, vslID)
         else
             local cols = state.account.collections
             if not (id and cols and cols[id]) then return end   -- exception(boundary): missing id / pre-first-save
@@ -5222,18 +5262,7 @@ HDG.Actions:Register{ name = "SHOPPING_LIST_DELETE",
             invalidates = { "account.vendorShoppingLists", "account.activeShoppingListId",
                             "account.shoppingListSeq" },
     reduce = function(state, payload)
-        local id = payload.id
-        state.account.vendorShoppingLists[id] = nil
-        if state.account.activeShoppingListId == id then
-            -- Pick any remaining list as new active, or "" if none.
-            local nextId = ""
-            for other in pairs(state.account.vendorShoppingLists) do
-                nextId = other; break
-            end
-            state.account.activeShoppingListId = nextId
-        end
-        -- The last list gone: a fresh default takes its place, as at load.
-        SeedDefaultShoppingList(state.account)
+        DeleteShoppingList(state.account, payload.id)
     end }
 
 HDG.Actions:Register{ name = "SHOPPING_LIST_RENAME",
@@ -6060,8 +6089,13 @@ HDG.Actions:Register{ name = "UI_FILTER_RESET",
         -- the dispatch table below; no new action enum needed for additional tabs.
         local tab = payload.tab
         if tab == "decor" then
+            -- Back to every decor: a jump from another window lands on the decor
+            -- list too, so the mode and the pet family go with the filters. Match
+            -- and sort are how the list is read, not what it holds: both stay.
             state.session.ui.decor.searchQuery = ""
             state.session.ui.decor.filters     = NewDecorFilters()
+            state.session.ui.decor.mode        = "decor"
+            state.session.ui.decor.petFamily   = nil
             state.session.ui.decor.pinnedSortCounts = nil
         elseif tab == "acquisition" then
             local acq = state.session.ui.acquisition
@@ -6498,29 +6532,29 @@ HDG.Resolver:RegisterStatic{ name = "recipeSource",
 HDG.Resolver:RegisterStatic{ name = "staticData", facade = "StaticData" }
 
 -- Prices (the species A+B hybrid, split per TICK_REVALIDATION). A-side: the
--- external TSM/Auctionator facades + which source/mode is preferred -- these
--- four actions change what the facade RETURNS without touching price data,
+-- external TSM/Auctionator facades + which source is preferred -- these
+-- actions change what the facade RETURNS without touching price data,
 -- so they bump the resolver tick. B-side: the direct-scan caches + owned
 -- auctions are account.prices.* STATE -- those actions invalidate their data
 -- paths only, and price-consuming selectors declare account.prices (prefix)
--- alongside this tick. Goblin computes through PriceSource, so both modules
--- carry the same contract.
+-- alongside this tick. Goblin and Mogul compute through PriceSource, so all
+-- three modules carry the same contract (mogul.plan once declared the tick
+-- alone and kept old prices after HDG's own AH scan).
 HDG.Resolver:Register{ name = "prices",
-    facade   = { "PriceSource", "Goblin" },
+    facade   = { "PriceSource", "Goblin", "Mogul" },
     requires = { "account.prices" },
     actions  = {
         { name = "PRICES_CONFIG_CHANGED" },  -- pure signal; config write rides CONFIG_SET
         { name = "PRICES_SET_PREFERRED_SOURCE", persists = true,
           invalidates = { "account.config.preferredPriceAddon" },
           -- Config write + resolver bump in one pass (two dispatches would
-          -- cost two reducer runs).
+          -- cost two reducer runs). Same dual write as CONFIG_SET: the profile
+          -- slot is what a /reload rebuilds the mirror from, so writing the
+          -- mirror alone kept the choice only while its default stayed nil.
           reduce = function(state, payload)
+              local scope = HDG.ConfigSchema.ScopeBy["preferredPriceAddon"]
+              HDG.Config:_GetSourceForScope(scope)["preferredPriceAddon"] = payload.source
               state.account.config.preferredPriceAddon = payload.source
-          end },
-        { name = "PRICES_SET_TSM_MODE", persists = true,
-          invalidates = { "account.config.tsmPriceMode" },
-          reduce = function(state, payload)
-              state.account.config.tsmPriceMode = payload.mode
           end },
         { name = "PRICES_ADDONS_AVAILABILITY_CHANGED",
           invalidates = { "session.prices.tsmLoaded", "session.prices.auctionatorLoaded" },

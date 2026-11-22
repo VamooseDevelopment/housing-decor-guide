@@ -412,6 +412,11 @@ R.DecorQuestSteps = { title = "locale:DQ_QUEST_STEPS_BTN", body = "locale:TIP_DQ
 -- ===== Decor browser controls ===============================================
 R.DecorDestroy      = { title = "locale:TIP_DECOR_DESTROY_TITLE",       body = "locale:TIP_DECOR_DESTROY_BODY",       anchor = "ANCHOR_TOP" }
 R.DecorStoredFilter = { title = "locale:TIP_DECOR_STORED_FILTER_TITLE", body = "locale:TIP_DECOR_STORED_FILTER_BODY", anchor = "ANCHOR_BOTTOM" }
+-- The filter strip (2026-11): what the search box reads, the two match modes, Find similar.
+R.DecorSearchHelp   = { title = "locale:TIP_DECOR_SEARCH_TITLE",        body = "locale:TIP_DECOR_SEARCH_BODY",        anchor = "ANCHOR_BOTTOM" }
+R.DecorMatch_all    = { title = "locale:DECOR_MATCH_ALL",               body = "locale:TIP_DECOR_MATCH_ALL_BODY",     anchor = "ANCHOR_BOTTOM" }
+R.DecorMatch_best   = { title = "locale:DECOR_MATCH_BEST",              body = "locale:TIP_DECOR_MATCH_BEST_BODY",    anchor = "ANCHOR_BOTTOM" }
+R.DecorFindSimilar  = { title = "locale:DECOR_FIND_SIMILAR",            body = "locale:TIP_DECOR_FIND_SIMILAR_BODY",  anchor = "ANCHOR_TOP" }
 
 -- ===== Goblin price-source + actions ========================================
 R.GoblinSrcAuto   = { title = "locale:TIP_GOBLIN_SRC_AUTO_TITLE",   body = "locale:TIP_GOBLIN_SRC_AUTO_BODY",   anchor = "ANCHOR_BOTTOMRIGHT" }
@@ -450,7 +455,6 @@ R.MogulOptBuy         = { title = "locale:TIP_MOGUL_OPT_BUY_TITLE",         body
 R.MogulFrugal         = { title = "locale:TIP_MOGUL_FRUGAL_TITLE",          body = "locale:TIP_MOGUL_FRUGAL_BODY",          anchor = "ANCHOR_BOTTOMRIGHT" }
 R.MogulSupplyImpact   = { title = "locale:TIP_MOGUL_SUPPLY_IMPACT_TITLE",   body = "locale:TIP_MOGUL_SUPPLY_IMPACT_BODY",   anchor = "ANCHOR_BOTTOMRIGHT" }
 
-R.RedeemableTag       = { title = "locale:TIP_REDEEMABLE_TAG_TITLE",         body = "locale:TIP_REDEEMABLE_TAG_BODY",         anchor = "ANCHOR_BOTTOM" }
 
 -- ===== House-editor companion: mode tabs ===================================
 R.CompanionCatalog     = { title = "locale:TIP_COMPANION_CATALOG_TITLE",     body = "locale:TIP_COMPANION_CATALOG_BODY",     anchor = "ANCHOR_BOTTOM" }

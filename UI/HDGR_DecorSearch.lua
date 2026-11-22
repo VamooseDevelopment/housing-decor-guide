@@ -29,6 +29,7 @@ local byte = string.byte
 
 -- Facet values that say "nothing here": never an answer to a search.
 local EMPTY_VALUES = { ["none"] = true, ["plain-none"] = true, ["generic"] = true, ["misc"] = true }
+DS.EMPTY_VALUES = EMPTY_VALUES   -- the filter menus leave the same values out (Core/HDGR_DecorFilters.lua)
 
 -- " word word " -- lowercase, every run of spaces and punctuation one space, a
 -- space at each end, so a whole word is one plain find of " word ".

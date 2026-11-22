@@ -19,6 +19,12 @@ local ATLAS_CRAFT_STAR   = "auctionhouse-icon-favorite-off"    -- outline varian
 
 -- ===== decorRowFactory primitives ============================================
 
+-- The fit score's column: its right edge, its width, and where the name stops
+-- while it shows (a dyed stack's droplets take the same stretch, so a stack's
+-- row leaves the score to the base row above it).
+local FIT_RIGHT, FIT_WIDTH = 46, 26
+local NAME_RIGHT, NAME_RIGHT_FIT = 44, FIT_RIGHT + FIT_WIDTH + 2
+
 local function _layoutDecorRow(row)
     HDG.TooltipEngine:Attach(row, HDG.TooltipRecipes.DecorRow)
 
@@ -55,6 +61,16 @@ local function _layoutDecorRow(row)
     check:SetPoint("RIGHT", row, "RIGHT", -28, 0)
     check:SetAtlas(ATLAS_CHECK)
     row._checkIcon = check
+
+    -- Best first's score ("3/4"): how many of the scored filters the decor fits.
+    -- Left of the collected check; the name gives way while it shows.
+    local fit = row:CreateFontString(nil, "OVERLAY")
+    HDG.UI.applyFontRole(fit, "small")
+    HDG.Theme:Register(fit, "TextInfo")
+    fit:SetPoint("RIGHT", row, "RIGHT", -FIT_RIGHT, 0)
+    fit:SetWidth(FIT_WIDTH)
+    fit:SetJustifyH("RIGHT")
+    row._fitFs = fit
 
     -- Craftable star: small, tucked into the count column's top-right corner so it no
     -- longer eats its own slot -- the count number reads below-left of it.
@@ -133,7 +149,32 @@ local function _paintDroplets(row, ed)
     end
     -- Reserve name space when droplets present (-34 default; -34 each paint is
     -- a harmless no-op for the common non-variant row).
-    row._nameFs:SetPoint("RIGHT", row, "RIGHT", n > 0 and (-44 - n * 9 - 2) or -44, 0)
+    row._nameFs:SetPoint("RIGHT", row, "RIGHT", n > 0 and (-NAME_RIGHT - n * 9 - 2) or -NAME_RIGHT, 0)
+end
+
+-- Best first's score on a base row: "3/4". Runs after the droplets, which set the
+-- name's right bound for every row.
+local function _paintFit(row, ed)
+    if not ed.fit or ed.isVariantRow then   -- exception(nullable): fit is nil outside Best first
+        row._fitFs:Hide()
+        return
+    end
+    row._fitFs:SetText(ed.fit .. "/" .. ed.fitOf)
+    row._fitFs:Show()
+    row._nameFs:SetPoint("RIGHT", row, "RIGHT", -NAME_RIGHT_FIT, 0)
+end
+
+-- A Best first heading ("Fits 3 of 4 (11)"): the label alone, in the accent colour.
+local function _paintBandRow(row, ed)
+    row._itemID, row._name = nil, nil
+    row._nameFs:SetText(HDG.Theme:ColorCode("semantic.accent") .. ed.name .. "|r")
+    row._nameFs:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+    row._favStar:Hide()
+    row._storedCountFs:Hide()
+    row._checkIcon:Hide()
+    row._craftStar:Hide()
+    row._fitFs:Hide()
+    for i = 1, 3 do row._droplets[i]:Hide() end
 end
 
 -- Left = select, right = favorite toggle. The handlers are file-level and read the
@@ -195,9 +236,14 @@ local function _wireDecorClicks(row, ed)
 end
 
 local function _paintDecorRow(row, ed)
+    if ed.isBand then
+        _paintBandRow(row, ed)
+        return
+    end
     row._itemID, row._name = ed.itemID, ed.name   -- R2 tooltip stamps
     _paintName(row, ed)
     _paintDroplets(row, ed)
+    _paintFit(row, ed)
     _paintFavAndCount(row, ed)
     _paintCheckmark(row, ed)
     if row._craftStar then
@@ -205,6 +251,44 @@ local function _paintDecorRow(row, ed)
             HDG.Constants.RECIPE_STATE.NotARecipe)
     end
 end
+
+-- Clear all: every tick, the search box and the Destroy list, in one atomic
+-- UI_FILTER_RESET. The filter strip's button and the chip strip's last chip.
+local function _clearAllFilters()
+    HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.UI_FILTER_RESET, payload = { tab = "decor" } })
+end
+
+-- One chip per tick above the list ("Colour: Red  x"): a click unticks it. The
+-- strip's last chip is Clear all, lit so it reads apart from the filters: the same
+-- UI_FILTER_RESET as the filter strip's button.
+HDG.ChipStrip:RegisterCellKind("decorFilterChip", {
+    constructor = function(parent, cfg)
+        return HDG.ChipStrip:DefaultChipConstructor(parent, cfg)
+    end,
+    binder = function(chip, item, cfg)
+        if not item then
+            chip:Hide()
+            chip:SetScript("OnClick", nil)
+            return
+        end
+        HDG.UI:EnsureChipChrome(chip)
+        chip:Show()
+        chip:SetText(item.label)
+        HDG.Theme:Register(chip, "Button", { variant = "chip", active = item.clearAll == true })
+        chip:RegisterForClicks("LeftButtonUp")
+        if item.clearAll then
+            chip:SetScript("OnClick", _clearAllFilters)
+            return
+        end
+        local tick = item.tick
+        chip:SetScript("OnClick", function()
+            HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.DECOR_TOGGLE_FILTER, payload = { tick = tick } })
+        end)
+    end,
+    sizer = function(item, cfg)
+        return HDG.ChipStrip:DefaultChipSizer({ label = item.label }, cfg)
+    end,
+})
 
 HDG.Rows:Register("decorRow", {
     font    = "body",
@@ -222,6 +306,7 @@ HDG.Rows:Register("decorRow", {
             if row._favStar   then row._favStar:Hide()   end
             if row._checkIcon then row._checkIcon:Hide() end
             if row._craftStar then row._craftStar:Hide() end
+            if row._fitFs     then row._fitFs:Hide()     end
             -- pre-layout: _droplets nil until _layoutDecorRow runs on a fresh slot.
             if row._droplets then for i = 1, 3 do row._droplets[i]:Hide() end end
         end,
@@ -593,52 +678,19 @@ local function ShowDestroyStepperDialog(sel)
     f:Show(); f:Raise()
 end
 
-local function SetTopFilter(value)
-    -- per ADR-018: 'all' -> UI_FILTER_RESET (atomic clear); others -> DECOR_SET_TOP_FILTER (preserves toggles + search).
-    if value == "all" then
-        HDG.Store:Dispatch({
-            type    = HDG.Constants.ACTIONS.UI_FILTER_RESET,
-            payload = { tab = "decor" },
-        })
-    else
-        HDG.Store:Dispatch({
-            type    = HDG.Constants.ACTIONS.DECOR_SET_TOP_FILTER,
-            payload = { value = value },
-        })
-    end
-end
-
 -- Keyboard nav: host:SelectByArrow handles selection + ScrollToElementData.
 
 function DecorController:Wire(rootFrame)
     local searchBox = HDG.UI.WireSearchBox(rootFrame, "decorPanel.search", "decor", "searchQuery")
 
     self:_wireListBox(rootFrame)
+    self:_wireFilterStrip(rootFrame)
+    self:_wireFilterChips(rootFrame)
 
-    -- Top filter chips (SSoT: HDG.Constants.TOP_FILTERS used by both LayoutConfig and here).
-    for _, entry in ipairs(HDG.Constants.TOP_FILTERS or {}) do
-        local captured = entry.value
-        HDG.UI.OnClick(rootFrame, "decorPanel.topFilter_" .. captured, function()
-            SetTopFilter(captured)
-        end)
-    end
-
-    self:_wireTagSlots(rootFrame)
-
-    -- Right-side toggles
-    HDG.UI.OnClick(rootFrame, "decorPanel.onlyUncollectedToggle", function()
-        HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.DECOR_TOGGLE_ONLY_UNCOLLECTED })
-    end)
-    HDG.UI.OnClick(rootFrame, "decorPanel.onlyStoredToggle", function()
-        HDG.Store:Dispatch({ type = HDG.Constants.ACTIONS.DECOR_TOGGLE_ONLY_STORED })
-    end)
-
-    -- Reset: atomic clear via UI_FILTER_RESET (mirrors the 'all' chip).
+    -- Clear all: every tick, the search box and the Destroy list, in one atomic
+    -- UI_FILTER_RESET. The menus' own Clear rows dispatch from the menu.
     HDG.UI.OnClick(rootFrame, "decorPanel.resetFilters", function()
-        HDG.Store:Dispatch({
-            type    = HDG.Constants.ACTIONS.UI_FILTER_RESET,
-            payload = { tab = "decor" },
-        })
+        _clearAllFilters()
         if searchBox and searchBox.SetText then searchBox:SetText("") end
     end)
 
@@ -706,6 +758,9 @@ function DecorController:_wireListBox(rootFrame)
                 end
                 self:SetPropagateKeyboardInput(false)
                 local ed = self.SelectByArrow and self:SelectByArrow(key)
+                -- Best first's headings are not decor: step over one. A heading is
+                -- always followed by a decor, so one more step lands on a row.
+                if ed and ed.isBand then ed = self:SelectByArrow(key) end   -- exception(nullable): an empty list has no row to step to
                 if ed and ed.itemID then
                     CH.Mechanics.SetUITransientView("decor", "selectedItemID", ed.itemID)
                     CH.Mechanics.SetUITransientView("decor", "selectedVariantKey", ed.variantKey)
@@ -720,43 +775,60 @@ function DecorController:_wireListBox(rootFrame)
     end
 end
 
--- Tag chip slots: click reads decor.tagsForFilter at click-time (live slot text).
--- Dynamic tag-chip tooltips. Tag slots are pooled (the live sub-tag list maps
--- onto fixed slots), so the def is a FUNCTION resolved live at hover -- it keys
--- off the slot's CURRENT tag. Only tags in TAG_TOOLTIP_RECIPE get a tip.
-local TAG_TOOLTIP_RECIPE = { Redeemable = "RedeemableTag" }
-local function _makeTagTooltipDef(slot)
-    return function()
-        -- exception(false-positive): top-level controller def fn (not a row factory)
-        -- Strict: decor.tagsForFilter returns a table on every branch.
-        local tags = HDG.Selectors:Call("decor.tagsForFilter", HDG.Store:GetState(), {})
-        local name = tags[slot] and TAG_TOOLTIP_RECIPE[tags[slot]]
-        return name and { recipe = name } or nil
+-- The filter strip's switches and the buttons that tick for the player. The
+-- filter menus wire themselves (dropdown `dispatch`).
+function DecorController:_wireFilterStrip(rootFrame)
+    local A = HDG.Constants.ACTIONS
+    -- Decor | Pets, and Every filter | Best first: view settings, written through
+    -- the generic transient.
+    for _, mode in ipairs({ "decor", "pets" }) do
+        HDG.UI.OnClick(rootFrame, "decorPanel.mode_" .. mode, function()
+            CH.Mechanics.SetUITransientView("decor", "mode", mode)
+        end)
     end
+    for _, match in ipairs({ "all", "best" }) do
+        HDG.UI.OnClick(rootFrame, "decorPanel.match_" .. match, function()
+            CH.Mechanics.SetUITransientView("decor", "match", match)
+        end)
+    end
+    -- The Decor Browser heading's Uncollected button is the Collection menu's tick.
+    HDG.UI.OnClick(rootFrame, "decorPanel.onlyUncollectedToggle", function()
+        HDG.Store:Dispatch({ type = A.DECOR_TOGGLE_FILTER,
+                             payload = { tick = HDG.DecorFilters.Tick("status", "uncollected") } })
+    end)
+    HDG.UI.OnClick(rootFrame, "decorPanel.onlyStoredToggle", function()
+        HDG.Store:Dispatch({ type = A.DECOR_TOGGLE_ONLY_STORED })
+    end)
+    -- Find similar: the selected piece's own words become the filters.
+    HDG.UI.OnClick(rootFrame, "decorDetailPanel.findSimilarBtn", function()
+        local id = HDG.Selectors:Call("decor.selectedItemID", HDG.Store:GetState(), {})  -- exception(false-positive): top-level controller method (not a row factory)
+        local row = id and HDG.HousingCatalogObserver:GetRow(id)
+        if not row then return end   -- exception(nullable): nothing selected, or the catalog is cold
+        local ticks = HDG.DecorFilters.SimilarTicks(row)
+        if next(ticks) == nil then
+            HDG.Log:Info("decor_action", row.name .. " has no keywords to match on yet")
+            return
+        end
+        HDG.Store:Dispatch({ type = A.DECOR_FIND_SIMILAR, payload = { ticks = ticks } })
+    end)
 end
 
-function DecorController:_wireTagSlots(rootFrame)
-    for slot = 1, HDG.Constants.TAG_SLOT_COUNT do
-        local captured = slot
-        -- Dynamic tooltip: shows the Redeemable explainer when this slot holds it.
-        HDG.TooltipEngine:Attach(
-            HDG.UI.W(rootFrame, "decorPanel.tagSlot_" .. captured),
-            _makeTagTooltipDef(captured))
-        HDG.UI.OnClick(rootFrame, "decorPanel.tagSlot_" .. captured, function()
-            local tags = HDG.Selectors:Call("decor.tagsForFilter",
-                HDG.Store:GetState(), {}) or {}  -- exception(false-positive): top-level controller method (not a row factory)
-            local tag = tags[captured]
-            if tag then
-                -- Real branch, NOT `(current==tag) and nil or tag` -- Lua 5.1 trap returns tag when equal.
-                local current = HDG.Selectors:Call("decor.activeTag",
-                    HDG.Store:GetState(), {})  -- exception(false-positive): top-level controller method (not a row factory)
-                local nextTag = tag
-                if current == tag then nextTag = nil end
-                HDG.Store:Dispatch({
-                    type    = HDG.Constants.ACTIONS.DECOR_SET_TAG,
-                    payload = { tag = nextTag },
-                })
-            end
+-- The chip strip publishes its real wrapped height to session.ui.decor.chipsHeight;
+-- decor.gridRows reads it to size the chips' row exactly. Deferred + deduped so the
+-- publish -> relayout -> re-measure cycle converges (the Recipes run strip's pattern).
+function DecorController:_wireFilterChips(rootFrame)
+    local chips = HDG.UI.W(rootFrame, "decorChipsPanel.chips")
+    if not (chips and chips._chipStripCfg) then return end   -- exception(boundary): headless mock builds no ChipStrip
+    chips._chipStripCfg.onMeasure = function(h)
+        h = math.ceil(h or 0)   -- exception(boundary): FlowContainer reports nil before its first layout
+        if h == HDG.Store:GetState().session.ui.decor.chipsHeight then return end  -- exception(false-positive): top-level controller read
+        if not _G.RunNextFrame then return end   -- exception(boundary): pre-12.0 / headless
+        -- RunNextFrame defers past the in-flight FlowContainer layout (no re-entrant
+        -- dispatch), then publishes the measured height and reflows.
+        _G.RunNextFrame(function()
+            if h == HDG.Store:GetState().session.ui.decor.chipsHeight then return end  -- exception(false-positive): top-level controller read
+            CH.Mechanics.SetUITransientView("decor", "chipsHeight", h)
+            HDG:RefreshMainWindow()
         end)
     end
 end

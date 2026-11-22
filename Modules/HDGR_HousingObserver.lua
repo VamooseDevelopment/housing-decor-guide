@@ -1269,10 +1269,13 @@ HDG.Modules:Declare({
         HOUSING_DECOR_PLACE_FAILURE          = { handler = "OnDecorPlaceFailure" },
         PLAYER_ENTERING_WORLD                = { handler = "OnEnteringWorld" },
 
-        -- House meta channel. Both events spam on login (3-5 fires);
-        -- debounce per wow-api MCP gotcha.
+        -- House meta channel. Both events spam on login (3-5 fires). The list
+        -- is debounced per the wow-api MCP gotcha. Level/favor is NOT: each fire
+        -- carries ONE house and a debounce keeps only the last arguments, so two
+        -- houses answering inside 0.3 s lost one house's level. OnHouseLevelFavor
+        -- already drops a repeat per house.
         PLAYER_HOUSE_LIST_UPDATED            = { handler = "OnPlayerHouseList",          debounce = 0.3 },
-        HOUSE_LEVEL_FAVOR_UPDATED            = { handler = "OnHouseLevelFavor",          debounce = 0.3 },
+        HOUSE_LEVEL_FAVOR_UPDATED            = { handler = "OnHouseLevelFavor" },
 
         -- Active-neighborhood channel. Event fires whenever the
         -- neighborhood initiative cache settles. Handler reads

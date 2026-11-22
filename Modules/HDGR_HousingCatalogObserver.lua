@@ -745,7 +745,10 @@ end
 -- read every already-owned decor the player nudged during a failed first load
 -- as a fresh learn, and wrote a false "learned" craft-history entry for each.
 local function _priorOwnership(decorID)
-    if next(R.byDecorID) then
+    -- The index answers only once a build has committed. Before that it holds
+    -- just the rows single storage events built, and a decor missing from those
+    -- read as never owned: every owned piece moved next logged a false learn.
+    if HDG.Store:GetState().session.catalog.status == "ready" then
         local row = R.byDecorID[decorID]  -- exception(nullable): entry not yet in the catalog
         return row ~= nil and row.isOwned == true
     end
@@ -764,12 +767,17 @@ end
 function R:_DrainParkedEntries()
     local parked = R._pendingEntries
     R._pendingEntries = {}
+    local applied = {}
     for _, p in ipairs(parked) do
-        if p.wasOwned == nil then p.wasOwned = _priorOwnership(p.decorID) end
+        -- A later event for a decor this drain already applied takes its prior
+        -- from the row the first one updated: each kept the prior it parked
+        -- with, so a Buy All of three new copies logged three learns.
+        if p.wasOwned == nil or applied[p.decorID] then p.wasOwned = _priorOwnership(p.decorID) end
         if p.wasOwned == nil then
             R._pendingEntries[#R._pendingEntries + 1] = p
         else
             R:_ApplyEntry(p.entryID, p.decorID, p.wasOwned)
+            applied[p.decorID] = true
         end
     end
 end
@@ -942,12 +950,15 @@ function R:NoteDecorArrival(decorID)
 end
 
 function R:_JudgeArrivals(ids)
-    -- Not loaded yet: the first load reads the arrival itself.
-    if HDG.Store:GetState().session.catalog.status ~= "ready" then return end
+    local status = HDG.Store:GetState().session.catalog.status
+    -- Never loaded (or the load failed): the next load reads the arrival itself.
+    if status ~= "ready" and status ~= "loading" then return end
     -- A sweep about to commit swaps in a fresh snapshot and replays the parked
     -- entry events: judge against that, not the tables it replaces (judging now
-    -- warned falsely and ran a second full sweep behind the first).
-    if R:IsSweepPending() then
+    -- warned falsely and ran a second full sweep behind the first). The first
+    -- load counts as one: its search may have read before the purchase landed,
+    -- and returning here dropped the arrival with nothing left to re-check it.
+    if status == "loading" or R:IsSweepPending() then
         local waiting = R._arrivalsAfterCommit or {}
         for _, decorID in ipairs(ids) do waiting[#waiting + 1] = decorID end
         R._arrivalsAfterCommit = waiting

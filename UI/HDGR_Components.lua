@@ -607,10 +607,9 @@ function HDG.UI:LinkRow(parent, spec)
         labelFS:SetPoint("BOTTOMLEFT", icon, "TOPRIGHT", 8, -22)
         applyFontRole(labelFS, "small")
         labelFS:SetText(spec.label)
-        local dim = HDG.Theme:GetColor("text.dim")
-        if dim and labelFS.SetTextColor then
-            labelFS:SetTextColor(dim.r, dim.g, dim.b, dim.a)
-        end
+        -- Registered, not coloured once: a one-off colour kept the old scheme's
+        -- grey after a scheme switch.
+        HDG.Theme:Register(labelFS, "TextDim")
         frame.label = labelFS
     end
 
@@ -823,14 +822,16 @@ local function _applyTertiaryButtonChrome(button)
     return fs
 end
 
-function HDG.UI:Button(parent, text, font)
+-- `frameType`: "Button" unless named. The filter-menu dropdown builds the same
+-- button on Blizzard's DropdownButton, which is a Button that opens a menu.
+function HDG.UI:Button(parent, text, font, frameType)
     -- BlizzardUI (scheme.nativeButtons): build the NATIVE Blizzard button
     -- (UIPanelButtonTemplate), left unskinned -- the real Blizzard look the dark
     -- atlas only approximated. The Button Skinner no-ops on _hdgrNative, so Blizzard
     -- owns the art + font + state textures.
     local scheme = HDG.Theme.currentScheme
     if scheme and scheme.nativeButtons then   -- exception(nullable): currentScheme unset until Theme:Initialize (headless tests build first)
-        local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+        local button = CreateFrame(frameType or "Button", nil, parent, "UIPanelButtonTemplate")   -- exception(optional): frameType optional, a plain Button by default
         button:SetSize(60, 22)  -- placeholder; layout supplies real width/height
         button._hdgrNative = true
         button:SetText(text or "")
@@ -846,7 +847,7 @@ function HDG.UI:Button(parent, text, font)
     end
     -- common-button-tertiary: dark fill + white border (tints cleanly).
     -- Hand-built (no template) so the FontString + state textures stay under direct control.
-    local button = CreateFrame("Button", nil, parent)
+    local button = CreateFrame(frameType or "Button", nil, parent)   -- exception(optional): frameType optional, a plain Button by default
     button:SetSize(60, 22)  -- placeholder; layout supplies real width/height
     _applyTertiaryButtonChrome(button)
     button:SetText(text or "")
@@ -1009,6 +1010,37 @@ local function checkOnSelectSpec(spec)
     return ON_SELECT_CHECKS[named](shortcut)
 end
 
+-- A selector a dropdown spec names outside its binding (a menu button's `rows`,
+-- `ticks` and `counts`): the layout validator checks bindings, so these are
+-- checked here. Returns the problem or nil.
+local function _checkSelectorField(spec, field, required)
+    local name = spec[field]
+    if name == nil and not required then return nil end
+    if type(name) ~= "string" then return ("%s must name a selector"):format(field) end
+    if not HDG.Selectors:Has(name) then return ("%s names an unknown selector %q"):format(field, name) end
+end
+
+-- What a dropdown has to say about where its menu comes from.
+--   variant "menu", multi   rows + ticks on the spec, binding = { count = <selector> }
+--   everything else         binding = { menu = <selector>, current = <selector> }
+local function _checkDropdownSource(spec)
+    local binding = spec.binding
+    if spec.variant == "menu" and spec.multi then
+        if type(binding) ~= "table" or type(binding.count) ~= "string" then
+            return "a multi menu button requires binding = { count = <selector> }"
+        end
+        return _checkSelectorField(spec, "rows", true) or _checkSelectorField(spec, "ticks", true)
+            or _checkSelectorField(spec, "counts", false)
+    end
+    if type(binding) ~= "table" or type(binding.menu) ~= "string" or type(binding.current) ~= "string" then
+        return "dropdown widget requires binding = { menu = <selector>, current = <selector> }"
+    end
+end
+
+local function checkDropdownSpec(spec)
+    return checkOnSelectSpec(spec) or _checkDropdownSource(spec)
+end
+
 local function buildDropdownOnSelect(spec)
     local problem = checkOnSelectSpec(spec)
     if problem then error("dropdown spec: " .. problem, 2) end
@@ -1051,21 +1083,46 @@ local DROPDOWN_CHECK_GAP   = 7    -- Blizzard's checkbox-to-label gap (MenuVaria
 local DROPDOWN_COUNT_FONT  = "GameFontDisable"
 local DROPDOWN_HEADER_FONT = "GameFontNormalSmall"
 
+-- `text`: the column's string, or a function read each time the row draws -- a
+-- tick redraws every row of an open menu (MenuResponse.Refresh), so a live count
+-- follows the ticks. A row that opens a submenu carries Blizzard's arrow at its
+-- right edge; the column steps clear of it.
+local DROPDOWN_SUBMENU_ARROW = 16
 local function _attachRightColumn(desc, text, font, leadWidth)
-    desc:AddInitializer(function(button)
+    desc:AddInitializer(function(button, description)
+        local arrow = description:CanOpenSubmenu() and DROPDOWN_SUBMENU_ARROW or 0
         local fs = button:AttachFontString()
         fs:SetFontObject(font)
         fs:SetHeight(DROPDOWN_ROW_EXTENT)
-        fs:SetPoint("RIGHT")
+        fs:SetPoint("RIGHT", -arrow, 0)
         fs:SetJustifyH("RIGHT")
-        fs:SetText(text)
+        fs:SetText(type(text) == "function" and text() or text)
         return leadWidth(button) + button.fontString:GetUnboundedStringWidth()
-               + DROPDOWN_RIGHT_GAP + fs:GetUnboundedStringWidth(), DROPDOWN_ROW_EXTENT
+               + DROPDOWN_RIGHT_GAP + fs:GetUnboundedStringWidth() + arrow, DROPDOWN_ROW_EXTENT
     end)
 end
 
 local function _checkboxLead(button) return button.leftTexture1:GetWidth() + DROPDOWN_CHECK_GAP end
 local function _titleLead() return 0 end
+
+-- A colour square between a tick row's box and its label (the Decor tab's Colour
+-- menu). Its width joins the row's lead, so the right column still clears the label.
+local DROPDOWN_SWATCH     = 10
+local DROPDOWN_SWATCH_GAP = 5
+local function _swatchLead(button)
+    return _checkboxLead(button) + DROPDOWN_SWATCH + DROPDOWN_SWATCH_GAP
+end
+local function _attachSwatch(desc, rgb)
+    desc:AddInitializer(function(button)
+        local sw = button:AttachTexture()
+        sw:SetSize(DROPDOWN_SWATCH, DROPDOWN_SWATCH)
+        sw:SetPoint("LEFT", button.leftTexture1, "RIGHT", DROPDOWN_CHECK_GAP, 0)
+        sw:SetColorTexture(rgb[1], rgb[2], rgb[3], 1)   -- scheme-invariant: the colour the row names
+        button.fontString:ClearAllPoints()
+        button.fontString:SetPoint("LEFT", sw, "RIGHT", DROPDOWN_SWATCH_GAP, 1)
+        return _swatchLead(button) + button.fontString:GetUnboundedStringWidth(), DROPDOWN_ROW_EXTENT
+    end)
+end
 
 -- A title with a right column is a column header: both halves take the header font.
 local function _addDropdownTitle(root, opt)
@@ -1075,54 +1132,154 @@ local function _addDropdownTitle(root, opt)
     _attachRightColumn(desc, opt.right, DROPDOWN_HEADER_FONT, _titleLead)
 end
 
--- isSelected re-reads live state per poll (the menu stays open across toggles).
-local function _addDropdownCheckbox(root, opt, currentSelector, onSelect)
+local _addDropdownItem   -- forward: a row's children are items too
+
+-- The context every live read of an open menu passes. One table, not one per
+-- read: Blizzard asks every row of a menu whether it is ticked after each click
+-- (DropdownButton's SignalUpdate walks them all), and redraws every visible row.
+local MENU_CTX = {}
+
+-- A tick row's live count when the dropdown names a counts selector
+-- ({ [value] = n }), read as the row draws.
+local function _liveCount(menu, value)
+    return tostring(HDG.Selectors:Call(menu.countsSelector, HDG.Store:GetState(), MENU_CTX)[value] or 0)   -- exception(nullable): no decor carries the value under the current filters
+end
+
+-- A tick row's right column: its own `right` text, else its live count.
+local function _rightText(opt, menu)
+    if opt.right then return opt.right end   -- exception(nullable): only counted menus carry a right column
+    if not menu.countsSelector then return nil end   -- exception(optional): spec.counts optional, most menus count nothing
     local value = opt.value
-    local isAll = opt.isAll == true
-    local desc = root:CreateCheckbox(opt.text or "",
-        function()
-            local set = HDG.Selectors:Call(currentSelector, HDG.Store:GetState(), {})
-            if isAll then return next(set) == nil end
-            return set[value] == true
-        end,
-        function() onSelect(value) end,
-        value)
-    if opt.right then   -- exception(nullable): only counted menus carry a right column
-        _attachRightColumn(desc, opt.right, DROPDOWN_COUNT_FONT, _checkboxLead)
+    return function() return _liveCount(menu, value) end
+end
+
+-- The callbacks every plain tick row of one generated menu shares. Blizzard hands
+-- a row's own value to both (isSelected(data), responder(data, ...)), so a menu
+-- needs one pair, not a pair of closures per row -- the Type menu has some 200.
+-- isSelected re-reads live state per poll (the menu stays open across toggles).
+local function _sharedTickCallbacks(menu)
+    local currentSelector = menu.currentSelector
+    menu.isTicked = function(value)
+        return HDG.Selectors:Call(currentSelector, HDG.Store:GetState(), MENU_CTX)[value] == true
+    end
+    -- The count column of every counted row that carries no square, as one
+    -- initializer: it reads the row's value off its description.
+    if menu.countsSelector then   -- exception(optional): spec.counts optional, most menus count nothing
+        menu.drawCount = function(button, description)
+            local arrow = description:CanOpenSubmenu() and DROPDOWN_SUBMENU_ARROW or 0
+            local fs = button:AttachFontString()
+            fs:SetFontObject(DROPDOWN_COUNT_FONT)
+            fs:SetHeight(DROPDOWN_ROW_EXTENT)
+            fs:SetPoint("RIGHT", -arrow, 0)
+            fs:SetJustifyH("RIGHT")
+            fs:SetText(_liveCount(menu, description:GetData()))
+            return _checkboxLead(button) + button.fontString:GetUnboundedStringWidth()
+                   + DROPDOWN_RIGHT_GAP + fs:GetUnboundedStringWidth() + arrow, DROPDOWN_ROW_EXTENT
+        end
     end
 end
 
+-- The "All X" master row: ticked while the set is empty. Its own closure -- it
+-- asks a different question from every other row.
+local function _allIsTicked(menu)
+    local currentSelector = menu.currentSelector
+    return function()
+        return next(HDG.Selectors:Call(currentSelector, HDG.Store:GetState(), MENU_CTX)) == nil
+    end
+end
+
+-- `tip`: { title, body } shown on hover, for a row whose name needs explaining.
+-- `children`: the rows of the submenu this row opens beside it -- a tick row that
+-- is also a submenu is Blizzard's own case (Blizzard_Menu/Menu.lua AttributeRespond).
+local function _addDropdownCheckbox(root, opt, menu)
+    local isTicked = opt.isAll == true and _allIsTicked(menu) or menu.isTicked
+    local desc = root:CreateCheckbox(opt.text or "", isTicked, menu.onSelect, opt.value)
+    -- A plain counted row: the menu's shared count column, nothing made per row.
+    if menu.drawCount and not (opt.right or opt.swatch or opt.tip) then
+        desc:AddInitializer(menu.drawCount)
+        return desc
+    end
+    if opt.swatch then _attachSwatch(desc, opt.swatch) end   -- exception(nullable): only colour rows carry a square
+    if opt.tip then   -- exception(nullable): few rows need explaining
+        local tip = opt.tip
+        desc:SetTooltip(function(tooltip)
+            GameTooltip_SetTitle(tooltip, tip.title)
+            GameTooltip_AddNormalLine(tooltip, tip.body)
+        end)
+    end
+    local right = _rightText(opt, menu)
+    if right then
+        _attachRightColumn(desc, right, DROPDOWN_COUNT_FONT, opt.swatch and _swatchLead or _checkboxLead)
+    end
+    return desc
+end
+
+-- A row that runs an action of its own and leaves the menu open (a menu's Clear row).
+local function _addDropdownAction(root, opt)
+    local action = HDG.Constants.ACTIONS[opt.action]
+    if not action then error(("dropdown item: action %q is not in HDG.Constants.ACTIONS"):format(tostring(opt.action)), 2) end
+    root:CreateButton(opt.text, function()
+        HDG.Store:Dispatch({ type = action, payload = opt.payload })
+        return MenuResponse.Refresh
+    end)
+end
+
+local function _addChildren(desc, opt, menu)
+    for _, child in ipairs(opt.children) do _addDropdownItem(desc, child, menu) end
+end
+
 -- Add one menu item. radio: compares against `current` snapshot (picking closes the menu).
-local function _addDropdownItem(root, opt, current, currentSelector, onSelect)
+_addDropdownItem = function(root, opt, menu)
     local kind = opt.kind or "radio"
     if kind == "divider" then
         root:CreateDivider()
     elseif kind == "title" then
         _addDropdownTitle(root, opt)
+    elseif kind == "action" then
+        _addDropdownAction(root, opt)
+    elseif kind == "submenu" then
+        _addChildren(root:CreateButton(opt.text), opt, menu)
     elseif kind == "checkbox" then
-        _addDropdownCheckbox(root, opt, currentSelector, onSelect)
+        local desc = _addDropdownCheckbox(root, opt, menu)
+        if opt.children then _addChildren(desc, opt, menu) end   -- exception(nullable): most tick rows open nothing
     else  -- radio
-        local value = opt.value
+        local value, current = opt.value, menu.current
         root:CreateRadio(opt.text or "",
             function() return current == value end,
-            function() onSelect(value) end,
+            function() menu.onSelect(value) end,
             value)
     end
 end
 
 -- SetupMenu generator closure. Reads fresh state inside the closure.
-local function buildDropdownGenerator(menuSelector, currentSelector, onSelect)
-    return function(_owner, root)
-        local state   = HDG.Store:GetState()
-        local items   = HDG.Selectors:Call(menuSelector,    state, {})
-        local current = HDG.Selectors:Call(currentSelector, state, {})
+-- `scroll`: false leaves the menu unscrolled whatever its length (the Decor Type
+-- menu: tick rows that open submenus, which we have not seen inside a scrolling menu).
+-- A menu button names its rows and its tick set on the spec (`rows`, `ticks`)
+-- rather than binding them: bound, every menu's rows would be built when the tab
+-- opens and again on every change they read, for menus nobody opened.
+local function buildDropdownGenerator(spec, onSelect)
+    local menuSelector    = spec.rows  or spec.binding.menu      -- exception(optional): spec.rows is the menu button's; templates bind their menu
+    local currentSelector = spec.ticks or spec.binding.current   -- exception(optional): spec.ticks is the menu button's; templates bind their current
+    local scroll = spec.scroll ~= false   -- exception(optional): spec.scroll optional, menus scroll by default
+    return function(owner, root)
+        -- A menu button asks for its rows only when it opens (_setEmptyMenu).
+        if owner._hdgrMenuEmpty then return end
+        local state = HDG.Store:GetState()
+        local items = HDG.Selectors:Call(menuSelector, state, {})
+        local menu = {
+            currentSelector = currentSelector,
+            countsSelector  = spec.counts,
+            onSelect        = onSelect,
+            current         = HDG.Selectors:Call(currentSelector, state, {}),
+        }
+        _sharedTickCallbacks(menu)
         -- Cap menu height before adding items. Per Reference/UI_HOW_TO.md s34,
         -- SetScrollMode + SetGridMode interact unpredictably; no grid here, so
         -- scroll alone is safe + cheap. Pixel-based cap; short lists render
         -- below it with no scrollbar.
-        root:SetScrollMode(DROPDOWN_VISIBLE_ROWS * DROPDOWN_ROW_EXTENT)
+        if scroll then root:SetScrollMode(DROPDOWN_VISIBLE_ROWS * DROPDOWN_ROW_EXTENT) end
         for _, opt in ipairs(items) do
-            _addDropdownItem(root, opt, current, currentSelector, onSelect)
+            _addDropdownItem(root, opt, menu)
         end
     end
 end
@@ -1187,10 +1344,94 @@ local function _attachDropdownSuffixStrip(dd)
     end)
 end
 
+-- ===== Menu button: HDG's own button that opens a dropdown menu ==============
+-- variant = "menu". The Decor tab's filter strip holds twenty in two rows, and
+-- Blizzard's dropdown templates carry their own art, 60px of text padding and no
+-- sign of whether the menu holds a tick. This is HDG.UI:Button built on
+-- Blizzard's bare DropdownButton:
+--   multi   the menu's name and a caret; once the menu holds ticks, the active
+--           fill and the tick count where the caret was. Its width comes from
+--           the name alone, so a row of them does not shift as ticks come and go.
+--   single  selectionPrefix + the picked row's text, at the width the layout gives.
+-- Pressed while its menu is open.
+local MENU_CARET_ATLAS = "housing-floor-arrow-down-default"
+local MENU_CARET_SIZE  = 8
+local MENU_CARET_INSET = 5
+local MENU_CARET_ROOM  = 10   -- the caret's (or the count's) share of the button's width
+local MENU_LABEL_PAD   = 14   -- the label's own padding, both sides together
+
+local function _layoutMenuButton(dd, font)
+    local caret = dd:CreateTexture(nil, "OVERLAY")
+    caret:SetSize(MENU_CARET_SIZE, MENU_CARET_SIZE)
+    caret:SetPoint("RIGHT", dd, "RIGHT", -MENU_CARET_INSET, 0)
+    HDG.UI.WarnIfBadAtlas(MENU_CARET_ATLAS)
+    caret:SetAtlas(MENU_CARET_ATLAS)
+    dd._caret = caret
+    local count = dd:CreateFontString(nil, "OVERLAY")
+    applyFontRole(count, font)
+    HDG.Theme:Register(count, "Text")
+    count:SetPoint("RIGHT", dd, "RIGHT", -MENU_CARET_INSET, 1)
+    count:Hide()
+    dd._count = count
+    -- The label centres in what the caret leaves. A native (BlizzardUI scheme)
+    -- button's label belongs to its template: left where it is.
+    if not dd._hdgrNative then
+        local fs = dd:GetFontString()
+        fs:ClearAllPoints()
+        fs:SetPoint("CENTER", dd, "CENTER", -MENU_CARET_ROOM / 2, 1)
+    end
+end
+
+-- A menu button's menu holds no rows until it is opened, and none again once it
+-- closes. Blizzard keeps a generated menu's every row on the button (2.5 MB over
+-- 22 dropdowns, memory census 2026-10-19), SetupMenu generates at once for a
+-- shown button, and the Decor strip alone has twenty of these with some 600 rows
+-- between them. The button's label is HDG's own, so nothing needs the rows
+-- before the open: both calls below generate an EMPTY menu. OpenMenu always
+-- generates again, with the rows.
+local function _setEmptyMenu(dd, generate)
+    dd._hdgrMenuEmpty = true
+    generate(dd, dd._hdgrMenuGenerator)
+    dd._hdgrMenuEmpty = nil
+end
+local function _setupMenu(dd, generator) dd:SetupMenu(generator) end
+local function _regenerateMenu(dd) dd:GenerateMenu() end
+
+local function buildMenuButton(parent, spec)
+    local problem = _checkDropdownSource(spec)
+    if problem then error("dropdown spec: " .. problem, 3) end
+    local dd = HDG.UI:Button(parent, spec.placeholder, spec.font, "DropdownButton")
+    dd._hdgrVariant         = "tertiary"   -- the Button skinner's variant, not a dropdown template
+    dd._hdgrMenuButton      = true
+    dd._hdgrMulti           = spec.multi == true
+    dd._hdgrSelectionPrefix = spec.selectionPrefix
+    dd._hdgrPlaceholder     = spec.placeholder
+    _layoutMenuButton(dd, spec.font)
+    HDG.Theme:Register(dd, "Button", { active = false })
+    if dd._hdgrMulti then
+        dd.RefreshIntrinsicWidth = function(btn)
+            local w = _naturalTextWidth(btn:GetFontString(), btn._hdgrPlaceholder)
+            if w > 0 then btn._intrinsicWidth = math.ceil(w) + MENU_LABEL_PAD + MENU_CARET_ROOM end
+        end
+        dd:RefreshIntrinsicWidth()
+    end
+    if _G.DropdownButtonMixin then   -- exception(boundary): Blizzard's callback registry; the headless mock has no DropdownButtonMixin
+        dd:RegisterCallback(_G.DropdownButtonMixin.Event.OnMenuOpen,  function(owner) owner:SetButtonState("PUSHED", true) end, dd)
+        dd:RegisterCallback(_G.DropdownButtonMixin.Event.OnMenuClose, function(owner)
+            owner:SetButtonState("NORMAL")
+            _setEmptyMenu(owner, _regenerateMenu)   -- the closed menu's rows go
+        end, dd)
+    end
+    dd._hdgrMenuGenerator = buildDropdownGenerator(spec, buildDropdownOnSelect(spec))
+    dd._hdgrMenuReleased = true   -- born released, as buildDropdown: the first push sets the menu up
+    return dd
+end
+
 local function buildDropdown(parent, spec)
     local variant  = spec.variant or "style2"
-    local template = _resolveDropdownTemplate(variant)
+    if variant == "menu" then return buildMenuButton(parent, spec) end
     _validateDropdownBinding(spec.binding)
+    local template = _resolveDropdownTemplate(variant)
 
     -- Multi-select (checkbox menu) requires the filter variant: its label is
     -- manually stamped (count-based), whereas style1/2 auto-render a single
@@ -1258,7 +1499,7 @@ local function buildDropdown(parent, spec)
     end
 
     local onSelect = buildDropdownOnSelect(spec)
-    dd._hdgrMenuGenerator = buildDropdownGenerator(spec.binding.menu, spec.binding.current, onSelect)
+    dd._hdgrMenuGenerator = buildDropdownGenerator(spec, onSelect)
     -- Born released: the first push sets the menu up (dispatchDropdown). SetupMenu
     -- generates at once for a shown frame and a new one is born shown, so setting
     -- it up here built the menu at build and again at the first push.
@@ -1317,8 +1558,35 @@ local function _sameMenu(widget, menu, current)
     return true
 end
 
+-- A menu button's push: the menu waits for the open (_setEmptyMenu), so a push
+-- only paints the closed button.
+--   multi   the tick count (binding.count) where the caret was, and the active fill
+--   single  selectionPrefix + the picked row's text (binding.menu / binding.current)
+local function _dispatchMenuButton(widget, values)
+    if widget._hdgrMenuReleased then
+        widget._hdgrMenuReleased = nil
+        _setEmptyMenu(widget, _setupMenu)
+    end
+    if widget._hdgrMulti then
+        local n = values.count
+        if not n then return end   -- exception(nullable): a partial push carries no count
+        -- Every tick pushes all of a strip's buttons (their counts read the same
+        -- ticks); only the one whose count moved repaints.
+        if n == widget._hdgrCount then return end
+        widget._hdgrCount = n
+        widget:SetActive(n > 0)
+        widget._caret:SetShown(n == 0)
+        widget._count:SetShown(n > 0)
+        widget._count:SetText(n)
+        return
+    end
+    local label = resolveFilterLabel(values.menu, values.current) or widget._hdgrPlaceholder   -- exception(nullable): nothing picked shows the placeholder
+    widget:SetText((widget._hdgrSelectionPrefix or "") .. label)   -- exception(optional): spec.selectionPrefix optional
+end
+
 local function dispatchDropdown(widget, values)
     if not widget then return end
+    if widget._hdgrMenuButton then return _dispatchMenuButton(widget, values) end
     -- RADIO (single-select) menus snapshot `current` at generate time, so they need a
     -- rebuild to repaint the selected dot when state changes externally. CHECKBOX (multi)
     -- menus poll their isSelected fn live (MenuTemplates), so they self-update on click
@@ -2228,13 +2496,16 @@ HDG.WidgetTypes:Register("dropdown", {
     end,
     build = buildDropdown,
     -- Both fields trigger GenerateMenu so the open popup repaints on external state change.
-    dispatch = { fields = { "menu", "current" }, push = dispatchDropdown },
+    dispatch = { fields = { "menu", "current", "count" }, push = dispatchDropdown },
     destroy = destroyWidget,
     requiresFont = function() return false end,
-    checkSpec = checkOnSelectSpec,
+    checkSpec = checkDropdownSpec,
     specFields = {
         "placeholder", "selectionPrefix", "selectionStripSuffix", "variant", "multi",
         "minWidth", "width", "height",
+        -- variant "menu": its label font, the selectors its menu reads when it opens
+        -- (rows, ticks, live counts), scroll = false
+        "font", "rows", "ticks", "counts", "scroll",
         "setTransient", "setConfig", "dispatch",
     },
 })
@@ -2784,7 +3055,9 @@ local function buildCloseButton(parent, spec)
     -- defensive fallback. A close button that wasn't `XMarksTheSpot`
     -- would be a different kind (atlas button), not a config of this one.
     icon:SetAtlas("XMarksTheSpot")
-    HDG.UI._TintTexture(icon, HDG.Theme:GetColor("text.dim"))
+    -- Toned through the Theme, so a scheme switch re-tints the X (a one-off
+    -- tint held the old scheme until the mouse passed over it).
+    HDG.UI.ToneTexture(icon, "text.dim")
     button.icon = icon
 
     _attachIconHoverTint(button, function(btn) return btn.icon end,
@@ -3069,10 +3342,10 @@ HDG.WidgetTypes:Register("button", {
         -- Controller-side identifiers. LayoutConfig stamps these on
         -- dynamically-generated button clusters so the matching Controller
         -- can iterate them by tag at Wire() time (chrome tab buttons,
-        -- decor tag rows, top-filter size strip, alts population pills,
-        -- active-filter chip strip, decor toggle pair, Mogul profession
-        -- pill strip). Pure data; the build path doesn't read them.
-        "view", "tagSlot", "topFilter", "population", "axis",
+        -- alts population pills, active-filter chip strip, decor toggle
+        -- pair, Mogul profession pill strip). Pure data; the build path
+        -- doesn't read them.
+        "view", "population", "axis",
         "toggle", "profession",
     },
 })

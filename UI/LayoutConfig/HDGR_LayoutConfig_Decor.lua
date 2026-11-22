@@ -4,17 +4,18 @@
 -- after the main UI/HDGR_LayoutConfig.lua has assembled the base table.
 --
 -- Decor tab: full-width filter strip above a 2-column browser/detail body.
---   decorFilterPanel  (filter row, span 2) -- search + chips + toggles
+--   decorFilterPanel  (filter row, span 2) -- search row + two rows of filter menus
+--   decorChipsPanel   (chips row, col 1)   -- the ticks in force; no ticks, no row
 --   decorPanel        (body, col 1)        -- browser list
 --   decorDetailPanel  (detail, col 2)      -- 3D preview + meta + note cards
 --
 -- Dynamic widget blocks (generated at load time):
---   decorPanel.topFilter_<value>   (from HDG.Constants.TOP_FILTERS)
---   decorPanel.tagSlot_<slot>      (from HDG.Constants.TAG_SLOT_COUNT)
+--   decorPanel.filterMenu_<id>   (one per HDG.Constants.DECOR_FILTER_MENUS entry)
 
 HDG = HDG or {}
 local LC = HDG.LayoutConfig
-local FILTER_BAR_HEIGHT  = 89    -- decor filter strip: 3 rows (top chips+BG dropdown 25h, tags row 22h, toggles row 22h)
+local FILTER_BAR_HEIGHT = HDG.Constants.DECOR_FILTER_BAR_HEIGHT   -- 3 rows: search row 25h + two rows of menu buttons 22h
+local BODY_HEIGHT       = HDG.Constants.DECOR_BODY_HEIGHT
 
 -- ===== View ==================================================================
 
@@ -24,21 +25,34 @@ LC.window.views.decor = {
     height   = "auto",       -- chrome + status now come from the window's slots
     columns  = { 360, 540 },
     -- chrome/status rows removed per HDG-ADR-025 (window slots provide them).
-    rows     = { FILTER_BAR_HEIGHT, 600 },
+    -- Static fallback; decor.gridRows gives the chips' row its real height, taken
+    -- out of the browser's, so the detail column (spanning both) never moves.
+    rows        = { FILTER_BAR_HEIGHT, 0, BODY_HEIGHT },
+    dynamicRows = "decor.gridRows",
     cells    = {
         filter = { col = 1, row = 1, colSpan = 2, rowSpan = 1 },
-        body   = { col = 1, row = 2, colSpan = 1, rowSpan = 1 },
-        detail = { col = 2, row = 2, colSpan = 1, rowSpan = 1 },
+        chips  = { col = 1, row = 2, colSpan = 1, rowSpan = 1 },
+        body   = { col = 1, row = 3, colSpan = 1, rowSpan = 1 },
+        detail = { col = 2, row = 2, colSpan = 1, rowSpan = 2 },
     },
 }
 
 -- ===== Panels ================================================================
 
--- Decor filter strip. Full-width so the chip strip has ~900px (360w panel was too narrow).
+-- Decor filter strip. Full-width: the two rows of menu buttons need the ~900px.
 LC.panels.decorFilterPanel = {
     kind = "panel",
     cell = { decor = "filter" },
     visibleInViews = { "decor" },
+}
+
+-- The ticks in force, one chip each, above the browser. Its row is zero-height
+-- until a menu holds a tick (decor.gridRows).
+LC.panels.decorChipsPanel = {
+    kind = "panel",
+    cell = { decor = "chips" },
+    visibleInViews = { "decor" },
+    visible = "decor.hasFilterChips",
 }
 
 -- Decor browser panel: list + header slot. Gated on catalog.isReady; loading/error/blank siblings own other states.
@@ -110,8 +124,9 @@ LC.sections["decor.body"] = {
     order = 10,
 }
 
--- Filter strip: 3 stacked rows (top chips, tags, search+toggles).
--- One-row layout didn't fit (9 chips ~440px + toggles ~210px vs ~360px available).
+-- Filter strip: 3 stacked rows. Top: Decor | Pets, the search box (it fills the
+-- row), Clear all, the match switch, Destroy decor. Then the filter menus: "What" (what the piece is and
+-- where it goes) and "Looks" (how it looks).
 LC.sections["decor.filterRow"] = {
     ["in"] = "decorFilterPanel",
     layout = "vertical",
@@ -122,76 +137,29 @@ LC.sections["decor.filterRow"] = {
 LC.sections["decor.filterRowTop"] = {
     ["in"] = "decor.filterRow",
     layout = "horizontal",
-    height = 25,    -- 25 (was 22) to fit the preview-bg dropdown's native WowStyle2 height
-    gap    = "md",
+    height = 25,
+    gap    = "sm",
     order  = 10,
 }
--- Preview-background picker (top-right of the filter strip). Self-wired dropdown,
--- config-theme pattern; the fill topFilterChips (order 20) pushes it to the right edge.
-LC.widgets["decorFilterPanel.previewBgDropdown"] = {
-    tooltip = false,
-    kind = "dropdown", ["in"] = "decor.filterRowTop",
-    width = 170, height = 25, order = 30,
-    placeholder     = "locale:DECOR_BG_PLACEHOLDER",
-    selectionPrefix = "locale:DECOR_BG_PREFIX",
-    binding   = { menu = "decor.previewBgMenuItems", current = "decor.previewBg" },
-    setConfig = { key = "decorPreviewBg" },
-}
--- "Filter:" label: same fixed width as "Tags:" below for visual alignment.
-LC.sections["decor.filterLabel"] = {
-    ["in"]   = "decor.filterRowTop",
-    layout   = "horizontal",
-    height   = 22,
-    width    = 38,
-    order    = 5,
-}
-LC.sections["decor.topFilterChips"] = {
-    ["in"] = "decor.filterRowTop",
-    layout = "horizontal",
-    height = 22,
-    width  = "fill",
-    gap    = "xs",
-    order  = 20,
-}
--- Tags row: always rendered so the search box below doesn't bounce when no sub-tags exist.
--- Label + chips inside hide via decor.hasTagsRow; row collapses to empty whitespace.
-LC.sections["decor.filterRowMiddle"] = {
+LC.sections["decor.filterRowWhat"] = {
     ["in"]   = "decor.filterRow",
     layout   = "horizontal",
     height   = 22,
-    gap      = "sm",
-    order    = 15,
-}
-LC.sections["decor.tagsLabel"] = {
-    ["in"]   = "decor.filterRowMiddle",
-    layout   = "horizontal",
-    height   = 22,
-    width    = 38,    -- enough for "Tags:" caption
-    order    = 5,
-    visible  = "decor.hasTagsRow",
-}
-LC.sections["decor.tagsChips"] = {
-    ["in"]   = "decor.filterRowMiddle",
-    layout   = "horizontal",
-    height   = 22,
-    width    = "fill",
-    gap      = 0,    -- tightened 2px from "xs"(2) per feedback; numeric escape hatch
-    order    = 10,
-}
--- Bottom row: search (left) + fill spacer + right-aligned toggles.
-LC.sections["decor.filterRowBottom"] = {
-    ["in"] = "decor.filterRow",
-    layout = "horizontal",
-    height = 22,
-    gap    = "sm",
-    order  = 20,
-}
-LC.sections["decor.filterBottomSpacer"] = {
-    ["in"]   = "decor.filterRowBottom",
-    layout   = "horizontal",
-    height   = 22,
-    width    = "fill",
+    gap      = "xs",
     order    = 20,
+}
+LC.sections["decor.filterRowLooks"] = {
+    ["in"]   = "decor.filterRow",
+    layout   = "horizontal",
+    height   = 22,
+    gap      = "xs",
+    order    = 30,
+}
+LC.sections["decor.chips"] = {
+    ["in"] = "decorChipsPanel",
+    layout = "vertical",
+    padding = { top = "xs", right = "sm", bottom = 0, left = "sm" },
+    order = 10,
 }
 LC.sections["decor.list"] = {
     ["in"] = "decor.body",
@@ -226,6 +194,7 @@ LC.sections["decor.previewSlot"] = {
     ["in"] = "decor.detailBody",
     layout = "vertical",
     height = 382,
+    gap = "xs",
     order = 10,
 }
 -- Detail row 2: two sibling cards (detailCard=meta left, noteCard=note right).
@@ -383,11 +352,34 @@ LC.widgets["decorPanel.count"] = {
     width = "fill", height = 14, order = 10,
     binding = "decor.headerLabel",
 }
+-- Sort, right of the count line: a single-pick menu button.
+LC.widgets["decorPanel.sortDropdown"] = {
+    tooltip = false,
+    kind = "dropdown", ["in"] = "decor.statusRail", variant = "menu", font = "small",
+    width = 110, height = 16, order = 20,
+    placeholder     = "locale:DECOR_SORT_NAME",
+    selectionPrefix = "locale:DECOR_SORT_PREFIX",
+    binding      = { menu = "decor.sortMenuItems", current = "decor.sort" },
+    setTransient = { view = "decor", key = "sort" },
+}
+
+-- ===== Filter strip, top row ==================================================
+-- Decor | Pets: which list the tab shows. Wired in Controller_Decor.
+for i, mode in ipairs({ "decor", "pets" }) do
+    LC.widgets["decorPanel.mode_" .. mode] = {
+        tooltip = false,
+        kind = "button", ["in"] = "decor.filterRowTop", font = "button",
+        text = "locale:DECOR_MODE_" .. mode:upper(), width = "auto", height = 22, order = i, variant = "tertiary",
+        binding = { active = "decor.isMode_" .. mode },
+        view = mode,
+    }
+end
 LC.widgets["decorPanel.search"] = {
     search = true,   -- magnifier + clear "x", as Recipe Sources (Vamoose, 2026-10-26)
     tooltip = false,
-    kind = "editbox", ["in"] = "decor.filterRowBottom", font = "body",
-    height = 22, width = 240, order = 10,
+    -- Fills what the row's buttons leave, so the row cannot outgrow the strip.
+    kind = "editbox", ["in"] = "decor.filterRowTop", font = "body",
+    height = 22, width = "fill", order = 10,
     multiline = false,
     placeholder = "locale:DECOR_SEARCH_PLACEHOLDER",
     -- Its placeholder names decor, so pets mode swaps in petPanel.search instead.
@@ -397,12 +389,93 @@ LC.widgets["decorPanel.search"] = {
     binding = { text = "decor.filterQuery" },
     visible = "decor.showDecorDetail",
 }
--- Persistent filter reset: always visible. Wired in Controller_Decor -> UI_FILTER_RESET{tab="decor"}.
+-- "?": what the search box reads, with examples. A tooltip, nothing to click.
+LC.widgets["decorPanel.searchHelp"] = {
+    tooltip = { recipe = "DecorSearchHelp" },
+    kind = "button", ["in"] = "decor.filterRowTop", font = "button",
+    text = "?", width = 22, height = 22, order = 15, variant = "tertiary",
+    visible = "decor.showDecorDetail",
+}
+-- Clear all: every tick, the search box and the Destroy list. Always visible, the
+-- row's one primary button at the row's full height, and lit while there is
+-- something to clear (owner 2026-11-22: "more prominent and larger").
+-- Wired in Controller_Decor -> UI_FILTER_RESET{tab="decor"}.
 LC.widgets["decorPanel.resetFilters"] = {
     tooltip = false,
-    kind = "button", ["in"] = "decor.filterRowBottom", font = "small",
-    text = "locale:COMMON_RESET", width = "auto", height = 22, order = 15, variant = "tertiary",
+    kind = "button", ["in"] = "decor.filterRowTop", font = "subheading",
+    text = "locale:DECOR_CLEAR_ALL", width = 96, height = 25, order = 20, variant = "primary",
+    binding = { active = "decor.filterActive" },
 }
+-- Match: Every filter | Best first (session.ui.decor.match). Wired in Controller_Decor.
+LC.widgets["decorPanel.matchLabel"] = {
+    tooltip = false,
+    kind = "label", ["in"] = "decor.filterRowTop", font = "caption",
+    text = "locale:DECOR_MATCH_LABEL", width = "auto", height = 22, order = 30,
+    visible = "decor.showDecorDetail",
+}
+for i, match in ipairs({ "all", "best" }) do
+    LC.widgets["decorPanel.match_" .. match] = {
+        tooltip = { recipe = "DecorMatch_" .. match },
+        kind = "button", ["in"] = "decor.filterRowTop", font = "button",
+        text = "locale:DECOR_MATCH_" .. match:upper(), width = "auto", height = 22, order = 30 + i, variant = "tertiary",
+        binding = { active = "decor.isMatch_" .. match },
+        axis = match,
+        visible = "decor.showDecorDetail",
+    }
+end
+
+-- ===== Filter strip, the two rows of menus ====================================
+-- One menu button per Constants.DECOR_FILTER_MENUS entry: any number of ticks in
+-- any number of menus. A tick dispatches DECOR_TOGGLE_FILTER; the menu's first
+-- row clears it. `scroll = false` on the Type menu: see DECOR_FILTER_MENUS.
+local ROW_SECTION = { "decor.filterRowWhat", "decor.filterRowLooks" }
+local ROW_LABEL   = { "locale:DECOR_ROW_WHAT", "locale:DECOR_ROW_LOOKS" }
+for row, section in ipairs(ROW_SECTION) do
+    LC.widgets["decorPanel.filterRowLabel_" .. row] = {
+        tooltip = false,
+        kind = "label", ["in"] = section, font = "caption",
+        text = ROW_LABEL[row], width = 38, height = 22, order = 1,
+        visible = "decor.showDecorDetail",
+    }
+end
+for i, menu in ipairs(HDG.Constants.DECOR_FILTER_MENUS) do
+    local section = ROW_SECTION[menu.row]
+    if menu.gap then
+        LC.widgets["decorPanel.filterMenuGap_" .. menu.id] = {
+            tooltip = false, kind = "spacer", ["in"] = section,
+            width = 6, height = 22, order = i * 10 - 5,
+            visible = "decor.showDecorDetail",
+        }
+    end
+    LC.widgets["decorPanel.filterMenu_" .. menu.id] = {
+        tooltip = false,
+        kind = "dropdown", ["in"] = section, variant = "menu", multi = true, font = "button",
+        width = "auto", height = 22, order = i * 10,
+        placeholder = "locale:" .. menu.label,
+        -- What the menu reads when it opens: named, not bound, so twenty menus'
+        -- rows are not built for a tab on which none is open.
+        rows     = "decor.filterMenu_" .. menu.id,
+        ticks    = "decor.filterTicks",
+        counts   = "decor.filterCounts_" .. menu.id,
+        scroll   = not menu.tree,
+        -- What the closed button shows: how many of its menu's values are ticked.
+        binding  = { count = "decor.filterMenuCount_" .. menu.id },
+        dispatch = { type = "DECOR_TOGGLE_FILTER", payloadKey = "tick" },
+        visible = "decor.showDecorDetail",
+    }
+end
+
+-- ===== Chips ==================================================================
+-- One chip per tick; a click removes it. The strip publishes its wrapped height
+-- (Controller_Decor), which sizes its row.
+LC.widgets["decorChipsPanel.chips"] = {
+    tooltip = false,
+    kind = "chipStrip", ["in"] = "decor.chips",
+    cellKind = "decorFilterChip",
+    width = "fill", height = "fill", order = 10,
+    binding = "decor.filterChips",
+}
+
 LC.widgets["decorPanel.list"] = {
     tooltip = false,
     kind = "scrollbox", ["in"] = "decor.list",
@@ -418,18 +491,26 @@ LC.widgets["decorPanel.list"] = {
 -- ===== Decor detail pane widgets =============================================
 
 -- Title: selected item name (falls back to "Click an item").
+-- Fills the header, so the background picker and the expansion badge sit at the
+-- right and a long name is cut rather than pushed under them.
 LC.widgets["decorDetailPanel.title"] = {
     tooltip = false,
     kind = "label", ["in"] = "decorDetailPanel", slot = "header",
     text = "locale:DECOR_CLICK_AN_ITEM", font = "heading",
-    height = 18, width = "auto", order = 10,
+    height = 18, width = "fill", order = 10,
     binding = "decor.selectedItem.name",
 }
--- Header spacer pushes expansion badge to the right.
-LC.widgets["decorDetailPanel.headerSpacer"] = {
+-- Preview-background picker, right above the preview it sets (it sat in the
+-- filter strip until the filter menus took the strip). Self-wired dropdown,
+-- config-theme pattern.
+LC.widgets["decorDetailPanel.previewBgDropdown"] = {
     tooltip = false,
-    kind = "spacer", ["in"] = "decorDetailPanel", slot = "header",
-    width = "fill", height = 14, order = 15,
+    kind = "dropdown", ["in"] = "decorDetailPanel", slot = "header",
+    width = 150, height = 25, order = 15,   -- 25: the WowStyle2 template's native height
+    placeholder     = "locale:DECOR_BG_PLACEHOLDER",
+    selectionPrefix = "locale:DECOR_BG_PREFIX",
+    binding   = { menu = "decor.previewBgMenuItems", current = "decor.previewBg" },
+    setConfig = { key = "decorPreviewBg" },
 }
 -- Expansion badge (right). Lore colors baked into the selector's returned string.
 LC.widgets["decorDetailPanel.headerExpansion"] = {
@@ -454,6 +535,16 @@ LC.widgets["decorDetailPanel.itemPreview"] = {
     -- sceneInsets: declarative budget; build fn has no fallback by design.
     sceneInsets    = { top = 2, right = 2, bottom = 2, left = 2 },
     defaultSceneID = 859,   -- HOUSING_CATALOG_DECOR_MODELSCENEID_DEFAULT (12.0.5)
+}
+-- Best first: how the selected decor fits the ticked filters ("Fits 3 of 4:
+-- misses Colour"). Inside the preview's slot, so it takes its line from the
+-- preview while Best first is scoring and nothing from the cards below.
+LC.widgets["decorDetailPanel.fitNote"] = {
+    tooltip = false,
+    kind = "label", role = "TextInfo", ["in"] = "decor.previewSlot", font = "small",
+    text = "", height = 14, order = 20,
+    binding = "decor.selectedItem.fitNote",
+    visible = "decor.selectedItem.hasFitNote",
 }
 -- Detail meta column (left).
 LC.widgets["decorDetailPanel.itemCategory"] = {
@@ -562,6 +653,15 @@ LC.widgets["decorDetailPanel.questStepsBtn"] = {
     order = 6, variant = "tertiary",
     visible = "decorQuests.decorTabHasSteps",
 }
+-- Find similar: the selected piece's own words become the filters, the closest
+-- fits first (DECOR_FIND_SIMILAR). Wired in HDGR_Controller_Decor.
+LC.widgets["decorDetailPanel.findSimilarBtn"] = {
+    tooltip = { recipe = "DecorFindSimilar" },
+    kind = "button", ["in"] = "decor.noteCard", font = "small",
+    text = "locale:DECOR_FIND_SIMILAR", width = "fill", height = 22,
+    order = 7, variant = "tertiary",
+    visible = "decor.hasSelectedItem",
+}
 -- Note editbox column (right, 220px; height fills parent).
 LC.widgets["decorDetailPanel.note"] = {
     tooltip = false,
@@ -590,59 +690,12 @@ LC.widgets["decorDetailPanel.fortuneCells"] = {
     visible = "decor.fortune.visible",
 }
 
--- ===== Widgets -- dynamic (generated at load time) ===========================
-
--- Top filter chips: single-select. SSoT in HDG.Constants.TOP_FILTERS.
--- Clicks -> DECOR_SET_TOP_FILTER (or DECOR_FILTER_RESET for 'all').
-for i, entry in ipairs(HDG.Constants.TOP_FILTERS or {}) do
-    LC.widgets["decorPanel.topFilter_" .. entry.value] = {
-    tooltip = false,
-        kind = "button", ["in"] = "decor.topFilterChips", font = "button",
-        text = entry.label, width = "auto", height = 22, order = i, variant = "tertiary",
-        binding = { active = "decor.topFilter.active_" .. entry.value },
-        topFilter = entry.value,
-    }
-end
-
--- (Dye variant swatches removed with the variant strip.)
-
--- "Filter:" label (aligns with "Tags:" below).
-LC.widgets["decorPanel.filterLabel"] = {
-    tooltip = false,
-    kind = "label", ["in"] = "decor.filterLabel", font = "caption",
-    role = "TextDim",
-    text = "locale:DECOR_FILTER_LABEL", width = 38, height = 22, order = 10,
-}
-
--- "Tags:" label: dim; hides with its section via decor.hasTagsRow.
-LC.widgets["decorPanel.tagsLabel"] = {
-    tooltip = false,
-    kind = "label", ["in"] = "decor.tagsLabel", font = "caption",
-    role = "TextDim",
-    text = "locale:DECOR_TAGS_LABEL", width = 38, height = 22, order = 10,
-}
-
--- Tag-row chip slots: N pre-allocated, bound to decor.tagSlot.*. Empty slots hidden via visible.
-for slot = 1, HDG.Constants.TAG_SLOT_COUNT do
-    LC.widgets["decorPanel.tagSlot_" .. slot] = {
-    tooltip = false,
-        kind = "button", ["in"] = "decor.tagsChips", font = "button",
-        width = "auto", height = 22, order = slot, variant = "tertiary",
-        visible = "decor.tagSlot.visible_" .. slot,
-        binding = {
-            text   = "decor.tagSlot.text_"   .. slot,
-            active = "decor.tagSlot.active_" .. slot,
-        },
-        tagSlot = slot,
-    }
-end
-
 -- "Destroy decor" chip: textTone="error" telegraphs the destructive intent.
 -- (The Uncollected toggle moved to the Decor Browser header -- decorPanel.onlyUncollectedToggle.)
 LC.widgets["decorPanel.onlyStoredToggle"] = {
     tooltip = { recipe = "DecorStoredFilter" },
-    kind = "button", ["in"] = "decor.filterRowBottom", font = "button",
-    text = "locale:DECOR_DESTROY_TOGGLE", width = "auto", height = 22, order = 50, variant = "tertiary",
+    kind = "button", ["in"] = "decor.filterRowTop", font = "button",
+    text = "locale:DECOR_DESTROY_TOGGLE", width = "auto", height = 22, order = 70, variant = "tertiary",
     textTone = "error",
     binding = { active = "decor.onlyStored" },
     toggle = "onlyStored",

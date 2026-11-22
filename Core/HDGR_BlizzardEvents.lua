@@ -16,7 +16,10 @@
 --   thunk   = function(store, env, ...)      -> Conditional dispatch with full Store/env
 --
 -- Options on each subscription:
---   debounce  = 0.2     -- seconds; coalesces repeated fires within window
+--   debounce  = 0.2     -- seconds; coalesces repeated fires within window. The
+--                          handler runs ONCE with the LAST fire's arguments, so
+--                          never debounce an event whose fires carry different
+--                          payloads (one per house, one per entry): all but the last are lost.
 --   filter    = fn(...) -- arg predicate; drops fire if returns false
 --   once      = true    -- auto-unsubscribe after first fire
 --

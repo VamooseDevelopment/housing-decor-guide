@@ -143,9 +143,6 @@ function UI.Confirm(opts)
     if not (popupDialogs and popupShow) then return end
     local id = opts.id or "HDGR_CONFIRM"
     popupDialogs[id] = popupDialogs[id] or {
-        text       = opts.text   or "Confirm?",
-        button1    = opts.accept or "OK",
-        button2    = opts.cancel or "Cancel",
         hasEditBox = opts.input == true,
         maxLetters = opts.maxLetters or 64,  -- exception(boundary): opts API default
         OnAccept   = function(self, data)
@@ -176,6 +173,13 @@ function UI.Confirm(opts)
         end or nil,
         timeout = 0, whileDead = true, hideOnEscape = true,
     }
+    -- Labels are stamped on every show, not at build: the dialog is built once
+    -- per id, so build-time labels kept the language of its first show after a
+    -- Language change.
+    local dialog = popupDialogs[id]
+    dialog.text    = opts.text   or "Confirm?"
+    dialog.button1 = opts.accept or "OK"
+    dialog.button2 = opts.cancel or "Cancel"
     popupShow(id, opts.textArg1, opts.textArg2, opts.data)
 end
 

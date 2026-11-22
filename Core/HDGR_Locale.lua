@@ -49,8 +49,14 @@ function L:_InstallLocaleSubscriber()
         if type(loc) ~= "string" or loc == "" then return end
         if self._locale == loc then return end   -- idempotent
         self._locale = loc
-        -- locale:KEY bindings pull from in-memory table, not state -- force a full refresh to repaint.
+        -- L:Get reads self._locale, which no selector can declare, so the
+        -- CONFIG_SET above dropped only the few memos that read the locale path:
+        -- drop them all, or memoized rows keep the old language. A window
+        -- subscriber that ran before this one also cached old-language text.
+        -- Satellites don't read the locale either, so repaint them too.
+        HDG.Selectors:InvalidateMemos("*")
         if HDG.RefreshMainWindow then HDG:RefreshMainWindow("*") end  -- exception(boundary): load-order partial in tests
+        if HDG.Window then HDG.Window:RepaintAll() end  -- exception(boundary): Window nil in tests / partial load-order
         HDG.Log:Info("theme", "Locale set to " .. loc)
     end)
 end

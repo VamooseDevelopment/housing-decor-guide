@@ -25,9 +25,14 @@ sidebar groups everything into hubs:
 - Every piece from the in-game Housing Catalog in one searchable list --
   favorites, a collected check, a craftable-recipe star, and dye-variant color
   dots at a glance.
-- Compose filters across Crafted (by profession), Sizes, Styles, Expansions, and
-  Sources (vendor / quest / achievement / reputation / crafted / ...), with a
-  live "collected / shown" readout and one-click Reset.
+- Filter menus above the list: Collection, Type, Room, Sits on, Size, Source
+  (vendor / quest / achievement / reputation / crafted / ..., and crafted by
+  profession), Expansion and Holiday, then Colour, Material, Shape, Motif, Mood,
+  Style, Culture and Place. Tick any number of values in any number of menus,
+  with a live "collected / shown" readout and one-click Clear all.
+- Best first ranks the decor by how many of your ticked filters it fits; Every
+  filter lists only the decor that fits them all. Find similar starts from the
+  selected piece.
 - **Uncollected** toggle to focus on what you're missing; **Destroy Decor**
   toggle to clear stored duplicates (with a confirmed destroy dialog).
 - 3D model preview of any piece -- rotate, zoom, swap the backdrop, and preview

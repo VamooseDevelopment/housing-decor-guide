@@ -656,14 +656,17 @@ function RecipesController:Wire(rootFrame)
     local breadcrumbFs = HDG.UI.W(rootFrame, "recipesListPanel.breadcrumb")
     local scrollBox    = recipeList and recipeList._scrollBox
     if breadcrumbFs and scrollBox and scrollBox.RegisterCallback and scrollBox.FindElementData then
-        local lastGroup
+        local lastGroup, lastGeneration
         local function setBreadcrumb(beginIndex)
             -- exception(nullable): closing the window releases the list's data and the
             -- ScrollBox still reports the range change -- a list with no data has no group.
             local ed    = beginIndex and scrollBox:HasDataProvider() and scrollBox:FindElementData(beginIndex)
             local group = ed and ed.groupLabel
-            if group == lastGroup then return end   -- skip redundant SetText churn
-            lastGroup = group
+            -- Skip redundant SetText churn, but not across a scheme switch: the text
+            -- bakes the accent colour, and the same group kept the old one.
+            local generation = HDG.Theme.paintGeneration
+            if group == lastGroup and generation == lastGeneration then return end
+            lastGroup, lastGeneration = group, generation
             breadcrumbFs:SetText(group and (HDG.Theme:ColorCode("semantic.accent") .. group .. "|r") or "")
         end
         scrollBox:RegisterCallback(ScrollBoxListMixin.Event.OnDataRangeChanged,

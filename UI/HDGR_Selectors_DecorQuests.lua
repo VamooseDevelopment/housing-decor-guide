@@ -56,8 +56,9 @@ end
 -- State mirrors
 -- ============================================================================
 
+-- ("selected" is not a plain mirror: decorQuests.selected below resolves the key to its decor.)
 for _, key in ipairs({ "viewMode", "preset", "searchQuery", "expFilter", "kindFilter", "hideCollected",
-                       "collapsed", "openFolds", "openChapters", "picks", "selected" }) do
+                       "collapsed", "openFolds", "openChapters", "picks" }) do
     Selectors:DefinePath("decorQuests." .. key, UI_PATH .. "." .. key)
 end
 

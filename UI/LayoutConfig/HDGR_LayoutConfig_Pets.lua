@@ -129,17 +129,29 @@ LC.widgets["petBlankPanel.label"] = {
 }
 
 -- Pets search sibling. The decor search box lives in the shared
--- decor.filterRowBottom section and its placeholder names decor, so pets gets its
+-- decor.filterRowTop section and its placeholder names decor, so pets gets its
 -- own gated twin: one widget with two identities reads worse than two widgets with
 -- one each. Both write the same transient, so the query survives a mode switch.
 LC.widgets["petPanel.search"] = {
     search = true,   -- magnifier + clear "x", as Recipe Sources (Vamoose, 2026-10-26)
     tooltip = false,
-    kind = "editbox", ["in"] = "decor.filterRowBottom", font = "body",
-    height = 22, width = 240, order = 10,
+    kind = "editbox", ["in"] = "decor.filterRowTop", font = "body",
+    height = 22, width = "fill", order = 10,
     multiline = false,
     placeholder = "locale:PETS_SEARCH_PLACEHOLDER",
     binding = { text = "decor.filterQuery" },   -- same state as decorPanel.search
+    visible = "pets.isMode",
+}
+-- Family: one battle-pet family, or all of them (session.ui.decor.petFamily).
+-- The pets twin of the decor filter menus, in the same strip.
+LC.widgets["petPanel.familyDropdown"] = {
+    tooltip = false,
+    kind = "dropdown", ["in"] = "decor.filterRowTop", variant = "menu", font = "button",
+    width = 150, height = 22, order = 25,
+    placeholder     = "locale:PETS_ALL_FAMILIES",
+    selectionPrefix = "locale:PETS_FAMILY_PREFIX",
+    binding      = { menu = "pets.familyMenuItems", current = "pets.family" },
+    setTransient = { view = "decor", key = "petFamily" },
     visible = "pets.isMode",
 }
 

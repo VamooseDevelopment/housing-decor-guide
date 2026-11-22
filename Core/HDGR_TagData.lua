@@ -10,7 +10,7 @@
 -- are localized and unsuitable as keys.
 --
 -- Public API:
---   HDG.TagData.GetCategory(tagID) -> "Sizes"|"Factions"|"Styles"|"Expansions"|"Other"
+--   HDG.TagData.GetCategory(tagID) -> "Sizes"|"Factions"|"Styles"|"Expansions"|"Cultures"|"Themes"|"Other"
 --   HDG.TagData.GetLabel(tagID)    -> string|nil  (user-visible tag name; long form)
 --   HDG.TagData.GetShortLabel(tagID) -> string|nil  (expansion-shortened where applicable)
 --   HDG.TagData.Invalidate()        -- clear the cache (test/diagnostic hook)
@@ -18,14 +18,17 @@
 HDG = HDG or {}
 HDG.TagData = HDG.TagData or {}
 
--- Map Blizzard's groupName ("Size", "Faction", "Expansion", "Style") to the
--- internal category keys ("Sizes", "Factions", "Expansions", "Styles"). Anything
--- else (subject groups, condition groups, etc.) buckets to "Other".
+-- Map Blizzard's groupName ("Size", "Faction", "Expansion", "Style", "Culture",
+-- "Theme") to the internal category keys. Anything else buckets to "Other".
 local GROUP_NAME_TO_CATEGORY = {
     Size      = "Sizes",
     Faction   = "Factions",
     Expansion = "Expansions",
     Style     = "Styles",
+    -- The Decor tab's Style menu holds Style + Theme, its Culture menu Culture
+    -- (Constants.DECOR_FILTER_GROUPS). Before the menus both fell under "Other".
+    Culture   = "Cultures",
+    Theme     = "Themes",
 }
 
 -- Expansion long-name -> short-name map. The catalog API returns localized
@@ -73,7 +76,10 @@ local function buildMaps()
         return nil, nil
     end
     local groups = _G.C_HousingCatalog.GetAllFilterTagGroups()
-    if not groups then return nil, nil end
+    -- Empty is "not streamed in yet", not "no tags": the groups read 0 then N a
+    -- moment later (HDGR_HousingCatalogObserver.lua:112). Caching that first
+    -- empty answer filed every tag under "Other" for the session.
+    if not groups or next(groups) == nil then return nil, nil end  -- exception(boundary): tag metadata streams in after login
     local cat, lbl = {}, {}
     for _, group in ipairs(groups) do
         -- groupName is LOCALIZED -> matching it misses off enUS. Use the stable groupID -> canonical

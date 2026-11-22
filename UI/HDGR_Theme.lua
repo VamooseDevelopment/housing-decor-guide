@@ -174,6 +174,11 @@ function HDG.Theme:ApplyConfiguredTheme()
     -- Satellites too: their interest sets don't read these settings, and
     -- doing it here (not in a Window subscriber) keeps it after this rebuild.
     self.paintGeneration = self.paintGeneration + 1
+    -- A window subscriber that ran before this one recomputed the memos the
+    -- CONFIG_SET dropped (goblin.rows bakes scheme colour codes) while
+    -- currentScheme was still the old scheme; drop them again so the refresh
+    -- below computes in the new one.
+    HDG.Selectors:InvalidateMemos("*")
     if HDG.RefreshMainWindow then  -- exception(boundary): RefreshMainWindow nil in tests / partial load-order
         HDG.UI.RefreshIntrinsicWidths(HDG.mainFrame)
         HDG:RefreshMainWindow("*")

@@ -109,6 +109,11 @@ local function _validateSelectorDef(name, def)
 end
 
 function Selectors:Register(name, defOrFn)
+    -- One registration per name: a second one silently replaced the first, so
+    -- the same name in two files swapped reads and output by load order.
+    if _registry[name] then
+        error(("Selectors:Register: %q is already registered"):format(tostring(name)), 2)
+    end
     local def = normaliseDef(defOrFn)
     _validateSelectorDef(name, def)
     -- If `inputs` is declared, wrap the selector body in an HDG.Memo so

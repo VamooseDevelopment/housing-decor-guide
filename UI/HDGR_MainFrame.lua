@@ -437,6 +437,16 @@ end
 -- skip can't catch them). MAIN_WINDOW_OPENING invalidates "*" so the catch-up
 -- paint on open is complete -- closes the ADR-documented "hidden-at-boot never
 -- got first paint -> stale defaults" trap.
+-- Closed: lists hand back their data and the memos go with them; the open
+-- transition in FrameVisibility repaints everything with "*". Memos rebuilt
+-- while closed (tooltips, bag badges) age out again.
+local function _closeMainWindow(frame)
+    frame:Hide()
+    HDG.BindingEngine:Release(frame)
+    HDG.Selectors:InvalidateMemos("*")
+    HDG.Selectors:HoldAging(false)
+end
+
 PIPELINE_STAGES[#PIPELINE_STAGES + 1] = {
     name = "FrameVisibility",
     run  = function(ctx)
@@ -475,13 +485,7 @@ PIPELINE_STAGES[#PIPELINE_STAGES + 1] = {
             -- free nothing and cost a rebuild on the next switch. Aging waits for the close.
             HDG.Selectors:HoldAging(true)
         elseif not desired and isShown then
-            frame:Hide()
-            -- Closed: lists hand back their data and the memos go with them; the
-            -- open transition above repaints everything with "*". Memos rebuilt
-            -- while closed (tooltips, bag badges) age out again.
-            HDG.BindingEngine:Release(frame)
-            HDG.Selectors:InvalidateMemos("*")
-            HDG.Selectors:HoldAging(false)
+            _closeMainWindow(frame)
         end
         -- Publish post-reconcile visibility so Bind/Layout can skip when the
         -- window is hidden (frame-level extension of Engine:Apply's per-widget
@@ -758,6 +762,13 @@ function HDG:RefreshMainWindow(invalidation, actionType)
     local frame = self.mainFrame
     if not frame or not HDG.Layout then return end
     if _G.InCombatLockdown and _G.InCombatLockdown() then
+        -- The close half can't wait: deferring it left the window on screen with
+        -- its state reading closed, so the next click on X reopened it. Hiding
+        -- this frame in combat is safe (no secure templates; the Hide-in-combat
+        -- subscriber does the same).
+        if frame:IsShown() and not HDG.Store:GetState().account.ui.mainWindowShown then
+            _closeMainWindow(frame)
+        end
         _accumulatePendingRefresh(self, invalidation)
         return   -- replays on the first non-combat refresh (COMBAT_EXIT) via _drainPendingInto
     end

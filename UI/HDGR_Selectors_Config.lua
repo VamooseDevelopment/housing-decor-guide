@@ -41,8 +41,8 @@ Selectors:Register("config.auctionatorAvailable", {
 })
 
 -- (TSM mode pills retired 2026-06: the Goblin-header source selector replaced the
--- Config auction section, and the per-mode UI was dropped. PRICES_SET_TSM_MODE +
--- account.config.tsmPriceMode remain for the price layer's default.)
+-- Config auction section, and the per-mode UI was dropped. account.config.tsmPriceMode
+-- remains for the price layer's default; nothing sets it any more.)
 
 -- ===== Cache freshness display =============================================
 Selectors:Register("config.cacheFreshnessLabel", {

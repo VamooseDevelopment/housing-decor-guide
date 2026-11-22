@@ -578,27 +578,124 @@ HDG.Constants = {
         },
     },
 
-    -- Decor tags-row chips: one widget, one set of slot selectors, one wired click
-    -- each. Here, not beside the selectors: LayoutConfig_Decor loads before them and
-    -- built its own count, so the controller wired slots the window never had.
-    TAG_SLOT_COUNT = 12,
-
-    -- Top-row filter chip values. SSoT for Selectors, LayoutConfig, Controller_Decor, and the reducer.
-    -- Adding or removing a bucket is one edit here.
-    TOP_FILTERS = {
-        { value = "all",        label = "All"        },
-        { value = "crafted",    label = "Crafted"    },
-        { value = "sizes",      label = "Size |A:house-decor-budget-icon:12:12|a" },
-        { value = "styles",     label = "Styles"     },
-        { value = "expansions", label = "Expansions" },
-        { value = "other",      label = "Other"      },
-        { value = "sources",    label = "Sources"    },
-        -- Pets is a MODE, not a narrowing filter: it swaps the browser list from
-        -- decor to the player's decor-attachable pets. One row here generates the
-        -- chip widget (LayoutConfig_Decor's loop) and decor.topFilter.active_pets
-        -- (Selectors_Decor's loop), so there is nothing else to wire.
-        { value = "pets",       label = "Pets"       },
+    -- ===== Decor tab filter menus (2026-11 redesign) ==========================
+    -- Here, not beside the selectors: LayoutConfig_Decor builds one button per menu
+    -- and loads before them.
+    --
+    -- A GROUP is one question a decor answers with a set of values (its colours, its
+    -- room, where it comes from). `from` says where the values come from:
+    --   facet       HDGR_FacetDB axis `axis` (our vision pass: English on every client)
+    --   tag         the game's own tags in HDG.TagData categories `cats` (localized)
+    --   flag        the player's collection flags (decor.filterFlags)
+    --   cost / where / source / profession    one field of the catalog row
+    -- allOf: every ticked value has to hold (Collection narrows, as Uncollected
+    -- always did), and it narrows in both match modes.
+    -- each: every ticked value is a filter of its own -- a decor carries several
+    -- (three colours, two materials), and Brown + Gold + Gray asks for all three:
+    -- Every filter lists the decor with all of them, Best first scores each one
+    -- ("Fits 2 of 3: misses Gray"). Owner 2026-11-22, on a gold-only doormat that
+    -- "fit" three ticked colours.
+    -- Every other group passes on any one of its ticked values: a decor has one
+    -- size, one expansion, one finish, and its sources are alternatives.
+    -- `fixed`: the values in this order, whether a decor carries them yet or not.
+    -- `order`: how the values a decor carries are listed -- "id" by number (the
+    -- game's own order for its Size and Expansion tags, and the budget costs),
+    -- "label" by name; without one, most-used first.
+    DECOR_FILTER_GROUPS = {
+        { id = "status",    label = "DECOR_FG_STATUS",    from = "flag", allOf = true,
+          fixed = { "uncollected", "collected", "favorites", "placed", "dyeable", "dyed", "housexp", "redeemable", "new" } },
+        { id = "category",  label = "DECOR_FG_CATEGORY",  from = "facet", axis = "category" },
+        { id = "subject",   label = "DECOR_FG_SUBJECT",   from = "facet", axis = "subject" },
+        { id = "room",      label = "DECOR_FG_ROOM",      from = "facet", axis = "room", each = true },
+        { id = "placement", label = "DECOR_FG_PLACEMENT", from = "facet", axis = "placement" },
+        { id = "size",      label = "DECOR_FG_SIZE",      from = "tag", cats = { Sizes = true }, order = "id" },
+        { id = "cost",      label = "DECOR_FG_COST",      from = "cost", order = "id" },
+        { id = "source",    label = "DECOR_FG_SOURCE",    from = "source" },
+        { id = "prof",      label = "DECOR_FG_PROF",      from = "profession", order = "label" },
+        { id = "exp",       label = "DECOR_FG_EXP",       from = "tag", cats = { Expansions = true }, order = "id" },
+        -- Every holiday of the calendar, in calendar order, also the ones no decor
+        -- carries yet: they are what players look for as each one comes round
+        -- (owner 2026-11-22). Values are the FacetDB `seasonal` vocabulary.
+        { id = "seasonal",  label = "DECOR_FG_SEASONAL",  from = "facet", axis = "seasonal",
+          fixed = { "lunar-festival", "noblegarden", "midsummer", "pirates-day", "brewfest",
+                    "harvest-festival", "hallows-end", "day-of-dead", "winter-veil" } },
+        { id = "color",     label = "DECOR_FG_COLOR",     from = "facet", axis = "color", each = true },
+        { id = "material",  label = "DECOR_FG_MATERIAL",  from = "facet", axis = "material", each = true },
+        { id = "form",      label = "DECOR_FG_FORM",      from = "facet", axis = "form", each = true },
+        { id = "motif",     label = "DECOR_FG_MOTIF",     from = "facet", axis = "motif", each = true },
+        { id = "palette",   label = "DECOR_FG_PALETTE",   from = "facet", axis = "palette" },
+        { id = "formality", label = "DECOR_FG_FORMALITY", from = "facet", axis = "formality" },
+        { id = "light",     label = "DECOR_FG_LIGHT",     from = "facet", axis = "light" },
+        { id = "mood",      label = "DECOR_FG_MOOD",      from = "facet", axis = "mood", each = true },
+        -- The game's Style and Theme tag groups: the old Styles chips and the four
+        -- Theme tags that sat under Other.
+        { id = "bstyle",    label = "DECOR_FG_BSTYLE",    from = "tag", cats = { Styles = true, Themes = true }, order = "label", each = true },
+        { id = "culture",   label = "DECOR_FG_CULTURE",   from = "facet", axis = "culture", each = true },
+        -- The game's own Culture tags (the rest of the old Other chips), beside ours.
+        { id = "bculture",  label = "DECOR_FG_BCULTURE",  from = "tag", cats = { Cultures = true }, order = "label", each = true },
+        { id = "origin",    label = "DECOR_FG_ORIGIN",    from = "facet", axis = "origin", each = true },
+        { id = "condition", label = "DECOR_FG_CONDITION", from = "facet", axis = "condition" },
+        { id = "faction",   label = "DECOR_FG_FACTION",   from = "facet", axis = "faction" },
+        { id = "where",     label = "DECOR_FG_WHERE",     from = "where", fixed = { "indoor", "outdoor" } },
     },
+
+    -- A MENU is one button on the filter strip, holding one group or a few (each
+    -- under its own heading). `row` 1 = what the piece is and where it goes, 2 = how
+    -- it looks. `gap`: a wider gap before the button, so the row reads in clusters.
+    -- `tree`: Kind and Object as ONE filter -- each kind opens its objects beside it;
+    -- a ticked kind lists all of it, an object ticked under it lists only that.
+    -- Its 22 kinds stay unscrolled: a tick row that opens a submenu is Blizzard's
+    -- own case (Blizzard_Menu/Menu.lua AttributeRespond), inside a scrolling menu
+    -- it is not one we have seen.
+    DECOR_FILTER_MENUS = {
+        { id = "status",    row = 1, label = "DECOR_FG_STATUS",    groups = { "status" } },
+        { id = "type",      row = 1, label = "DECOR_FM_TYPE",      groups = { "category", "subject" }, tree = true, gap = true },
+        { id = "room",      row = 1, label = "DECOR_FG_ROOM",      groups = { "room" }, gap = true },
+        { id = "placement", row = 1, label = "DECOR_FG_PLACEMENT", groups = { "placement" } },
+        { id = "size",      row = 1, label = "DECOR_FG_SIZE",      groups = { "size", "cost" }, gap = true },
+        { id = "source",    row = 1, label = "DECOR_FG_SOURCE",    groups = { "source", "prof" }, gap = true },
+        { id = "exp",       row = 1, label = "DECOR_FG_EXP",       groups = { "exp" } },
+        { id = "seasonal",  row = 1, label = "DECOR_FG_SEASONAL",  groups = { "seasonal" } },
+        { id = "color",     row = 2, label = "DECOR_FG_COLOR",     groups = { "color" } },
+        { id = "material",  row = 2, label = "DECOR_FG_MATERIAL",  groups = { "material" } },
+        { id = "form",      row = 2, label = "DECOR_FG_FORM",      groups = { "form" }, gap = true },
+        { id = "motif",     row = 2, label = "DECOR_FG_MOTIF",     groups = { "motif" } },
+        { id = "palette",   row = 2, label = "DECOR_FG_PALETTE",   groups = { "palette" }, gap = true },
+        { id = "formality", row = 2, label = "DECOR_FG_FORMALITY", groups = { "formality" } },
+        { id = "light",     row = 2, label = "DECOR_FG_LIGHT",     groups = { "light" } },
+        { id = "mood",      row = 2, label = "DECOR_FG_MOOD",      groups = { "mood" }, gap = true },
+        { id = "bstyle",    row = 2, label = "DECOR_FG_BSTYLE",    groups = { "bstyle" } },
+        { id = "culture",   row = 2, label = "DECOR_FG_CULTURE",   groups = { "culture", "bculture" } },
+        { id = "origin",    row = 2, label = "DECOR_FG_ORIGIN",    groups = { "origin" } },
+        { id = "more",      row = 2, label = "DECOR_FM_MORE",      groups = { "condition", "faction", "where" }, gap = true },
+    },
+
+    -- The Colour menu's squares: one RGB per FacetDB `color` value.
+    DECOR_FILTER_SWATCHES = {
+        ["red"] = { 0.75, 0.22, 0.17 }, ["dark-red"] = { 0.48, 0.12, 0.12 }, ["orange"] = { 0.90, 0.49, 0.13 },
+        ["amber"] = { 0.94, 0.64, 0.04 }, ["gold"] = { 0.83, 0.69, 0.22 }, ["yellow"] = { 0.95, 0.77, 0.06 },
+        ["green"] = { 0.25, 0.64, 0.30 }, ["dark-green"] = { 0.12, 0.36, 0.18 }, ["teal"] = { 0.10, 0.60, 0.58 },
+        ["blue"] = { 0.20, 0.47, 0.85 }, ["dark-blue"] = { 0.10, 0.20, 0.50 }, ["sky-blue"] = { 0.50, 0.78, 0.95 },
+        ["purple"] = { 0.56, 0.27, 0.68 }, ["dark-purple"] = { 0.29, 0.13, 0.40 }, ["violet"] = { 0.62, 0.45, 0.90 },
+        ["pink"] = { 0.93, 0.49, 0.69 }, ["brown"] = { 0.55, 0.35, 0.17 }, ["dark-brown"] = { 0.30, 0.19, 0.10 },
+        ["tan"] = { 0.82, 0.71, 0.55 }, ["ivory"] = { 0.96, 0.94, 0.86 }, ["gray"] = { 0.58, 0.60, 0.62 },
+        ["dark-gray"] = { 0.27, 0.29, 0.31 }, ["black"] = { 0.07, 0.07, 0.08 }, ["white"] = { 1.00, 1.00, 1.00 },
+        ["silver"] = { 0.75, 0.78, 0.80 }, ["bronze"] = { 0.80, 0.50, 0.20 }, ["copper"] = { 0.72, 0.45, 0.20 },
+    },
+
+    -- The Decor view's rows: the filter strip (search row + two rows of menu
+    -- buttons), and what the browser and the detail pane share under it. One home
+    -- for LayoutConfig_Decor and decor.gridRows, which carves the chips' row out
+    -- of the browser's.
+    DECOR_FILTER_BAR_HEIGHT = 89,
+    DECOR_BODY_HEIGHT       = 600,
+
+    -- Best first lists a decor that misses at most this many of the scored filters,
+    -- or at most half of them once there are many (Find similar ticks a dozen).
+    DECOR_BEST_MATCH_MAX_MISSES = 2,
+
+    -- The Decor list's sort orders (session.ui.decor.sort).
+    DECOR_SORTS = { "name", "newest", "cost", "owned" },
 
     -- Crafting history ring-buffer cap. ~110KB worst case in SV.
     CRAFT_HISTORY_CAP = 500,
@@ -948,9 +1045,9 @@ HDG.Constants = {
         DECOR_CATALOG_READY = "HDGR_DECOR_CATALOG_READY",
 
         -- ===== Filter + collection actions =====
-        DECOR_SET_TOP_FILTER          = "HDGR_DECOR_SET_TOP_FILTER",   -- payload: { value = "all"|... }
-        DECOR_SET_TAG                 = "HDGR_DECOR_SET_TAG",           -- payload: { tag = string|nil }
-        DECOR_TOGGLE_ONLY_UNCOLLECTED = "HDGR_DECOR_TOGGLE_ONLY_UNCOLLECTED",
+        DECOR_TOGGLE_FILTER           = "HDGR_DECOR_TOGGLE_FILTER",     -- payload: { tick = "group:value" }
+        DECOR_CLEAR_FILTERS           = "HDGR_DECOR_CLEAR_FILTERS",     -- payload: { menu = DECOR_FILTER_MENUS id }
+        DECOR_FIND_SIMILAR            = "HDGR_DECOR_FIND_SIMILAR",      -- payload: { ticks = { [tick] = true } }
         DECOR_TOGGLE_ONLY_STORED      = "HDGR_DECOR_TOGGLE_ONLY_STORED",
         DECOR_SET_SEARCH              = "HDGR_DECOR_SET_SEARCH",        -- payload: { query = string }
         FAVORITE_TOGGLE               = "HDGR_FAVORITE_TOGGLE",         -- payload: { itemID }
@@ -1079,7 +1176,6 @@ HDG.Constants = {
         GOBLIN_SET_SORT              = "HDGR_GOBLIN_SET_SORT",             -- payload: { col = "name"|"lumber"|... }
         GOBLIN_TOGGLE_ROW_EXPAND     = "HDGR_GOBLIN_TOGGLE_ROW_EXPAND",   -- payload: { itemID }
         PRICES_SET_PREFERRED_SOURCE  = "HDGR_PRICES_SET_PREFERRED_SOURCE", -- payload: { source = "TSM"|"Auctionator"|"Direct"|nil }
-        PRICES_SET_TSM_MODE          = "HDGR_PRICES_SET_TSM_MODE",         -- payload: { mode = "min"|"market"|"region" }
 
         -- ===== Crafting queue + history =====
         -- CRAFT_QUEUE_DECREMENT matches by (position, recipeID) -- both needed for uniqueness.

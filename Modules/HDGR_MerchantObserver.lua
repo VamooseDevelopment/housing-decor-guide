@@ -349,11 +349,14 @@ HDG.Modules:Declare({
         -- A post-hook: it runs after the buy call and never touches its arguments,
         -- so Blizzard's own buying stays untainted.
         hooksecurefunc("BuyMerchantItem", function(index, quantity) MO:_OnBuy(index, quantity) end)
-        -- Decor landing in storage arrives as the catalog's counts dispatch. The
-        -- credit dispatches too, so it runs a frame later, never nested inside
-        -- another action's subscriber (same rule as the buy queue).
+        -- Decor landing in storage arrives as the catalog's counts dispatch, or,
+        -- when the per-entry read was stale, as the catalog re-search that fixes
+        -- the row (it sends DECOR_CATALOG_READY, no counts dispatch). The credit
+        -- dispatches too, so it runs a frame later, never nested inside another
+        -- action's subscriber (same rule as the buy queue).
+        local A = HDG.Constants.ACTIONS
         self._storeToken = HDG.Store:Subscribe(function(actionType)
-            if actionType == HDG.Constants.ACTIONS.COLLECTION_CATALOG_ROW_COUNTS_UPDATED
+            if (actionType == A.COLLECTION_CATALOG_ROW_COUNTS_UPDATED or actionType == A.DECOR_CATALOG_READY)
                and next(MO._pending) then
                 C_Timer.After(0, function() MO:_CreditLanded() end)
             end

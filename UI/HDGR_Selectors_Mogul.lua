@@ -192,6 +192,7 @@ Selectors:Register("mogul.plan", {
         "account.collection.ownedDecorIDs",
         "session.resolvers.bag.tick",            -- lumber and reagents held (BagObserver)
         "session.resolvers.prices.tick",
+        "account.prices",                        -- PriceSource reads the direct-scan cache: a scan or clear moves no tick
         "session.itemNames.names",
     },
     calls = { "recipes.knowledge", "recipes.db" },   -- Mogul:Candidates: the known set, each recipe's reagents

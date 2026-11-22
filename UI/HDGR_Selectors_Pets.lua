@@ -1,7 +1,7 @@
 -- HDGR_Selectors_Pets.lua
 -- ============================================================================
--- Pure selectors for the Pets browser -- a top-filter MODE of the Decor tab, not
--- a view of its own. So its selection lives in the decor session bucket
+-- Pure selectors for the Pets browser -- a MODE of the Decor tab (the Decor |
+-- Pets switch, session.ui.decor.mode), not a view of its own. So its selection lives in the decor session bucket
 -- (session.ui.decor.selectedSpeciesID, invariant 16) and its panels borrow the
 -- decor view's `body` and `detail` cells rather than declaring a view.
 --
@@ -14,12 +14,34 @@
 
 local Selectors = HDG.Selectors
 
--- Pets mode is the "pets" top filter -- ONE source of truth for it, composed by
--- both browser gates and every pets selector.
+-- Pets mode -- ONE source of truth for it, composed by both browser gates and
+-- every pets selector.
 Selectors:Register("pets.isMode", {
-    calls = { "decor.topFilter" },
+    calls = { "decor.mode" },
     fn = function(state, ctx)
-        return Selectors:Call("decor.topFilter", state, ctx) == "pets"
+        return Selectors:Call("decor.mode", state, ctx) == "pets"
+    end,
+})
+
+-- The Family menu's pick: a battle-pet family's name, or nil for every family.
+Selectors:Register("pets.family", {
+    reads = { "session.ui.decor.petFamily" },
+    fn = function(state, ctx)
+        return state.session.ui.decor.petFamily   -- exception(nullable): nil = every family
+    end,
+})
+
+-- The Family menu: every family, then each one, from PetObserver's per-rebuild
+-- snapshot. Read through the observer rather than _G.BATTLE_PET_NAME_* directly --
+-- a selector may not touch FrameXML globals (invariant 1).
+Selectors:Register("pets.familyMenuItems", {
+    reads = { "session.resolvers.pets.tick" },
+    fn = function(state, ctx)
+        local items = { { text = HDG.Locale:Get("PETS_ALL_FAMILIES"), value = nil } }
+        for _, family in ipairs(HDG.PetObserver:GetFamilies()) do
+            items[#items + 1] = { text = family, value = family }
+        end
+        return items
     end,
 })
 
@@ -54,15 +76,15 @@ local function _petRow(entry, families)
 end
 
 -- The pet list. The observer already sorted by height, so this does NOT re-sort:
--- search narrows on the displayed name, the active tag narrows by family.
+-- search narrows on the displayed name, the Family menu narrows by family.
 Selectors:Register("pets.items", {
     memoized = true,
     reads = { "session.resolvers.pets.tick", "session.ui.decor.searchQuery" },
-    calls = { "decor.activeTag" },
+    calls = { "pets.family" },
     fn = function(state, ctx)
         local entries    = HDG.PetObserver:GetAttachable()
         local families   = HDG.PetObserver:GetFamilies()
-        local activeTag  = Selectors:Call("decor.activeTag", state, ctx)
+        local family     = Selectors:Call("pets.family", state, ctx)
         local q          = state.session.ui.decor.searchQuery
         local needle     = q ~= "" and q:lower() or nil
 
@@ -70,7 +92,7 @@ Selectors:Register("pets.items", {
         for i = 1, #entries do
             local row = _petRow(entries[i], families)
             local nameOk   = not needle or row.displayName:lower():find(needle, 1, true) ~= nil
-            local familyOk = not activeTag or row.familyLabel == activeTag
+            local familyOk = not family or row.familyLabel == family
             if nameOk and familyOk then out[#out + 1] = row end
         end
         return out

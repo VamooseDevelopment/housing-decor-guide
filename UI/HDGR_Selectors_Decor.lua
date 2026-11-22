@@ -5,6 +5,7 @@
 
 HDG = HDG or {}
 local Selectors = HDG.Selectors
+local DF = HDG.DecorFilters
 
 -- ============================================================================
 -- Decor browser selectors
@@ -54,12 +55,12 @@ Selectors:Register("decor.matchesSearch", {
     end,
 })
 
--- (decor.activeProfessions retired -- profession filtering lives in the tag-row
---  system under topFilter='crafted'; state slot + chips had no consumers.)
+-- (decor.activeProfessions retired -- profession filtering is the Source menu's
+--  "Crafted by" ticks.)
 
--- Shown items: allItems through every active filter (AND-composed).
--- Filter axes: search query (descriptive: decor.matchesSearch), top-filter bucket, active tag,
--- onlyUncollected, onlyStored.
+-- Shown items: allItems through the search box (descriptive: decor.matchesSearch),
+-- the Destroy list (onlyStored) and the filter menus' ticks (decor.filterUnits) --
+-- every one of them, or the closest fits first (decor.match).
 -- Data-state gates (catalog Section B):
 --   hasItems: catalog ready AND filtered list non-empty -> show list.
 --   isBlank:  catalog ready AND filtered list empty     -> "no results".
@@ -79,19 +80,45 @@ Selectors:Register("decor.isBlank", {
 })
 
 -- ===== decor.matchingRows row helpers =======================================
--- Per-item work split into three pure helpers; `f` bundles resolved predicates
+-- Per-item work split into pure helpers; `f` bundles resolved predicates
 -- + filter scalars so each helper takes one context arg.
 
--- Filter gate. f.* predicates are closure-returning selectors (always functions).
-local function _decorRowPasses(item, f)
-    local id = item.itemID
-    if not f.matchSearch(item) then return false end
-    if not f.matchTag(id) then return false end
-    if f.onlyUncollected and f.isCollected(id) then return false end
-    if f.onlyStored and not f.isStored(id) then return false end
-    -- Hide PvP decor spares the Destroy list: it lists what you own so you can destroy it.
-    if not f.onlyStored and f.isHiddenPvp(id) then return false end
-    return true
+-- The gates no match mode softens: the search box, the Destroy list (which lists
+-- what you own so you can destroy it, hidden PvP decor included) and Hide PvP
+-- decor. fn(item) -> boolean.
+Selectors:Register("decor.passesBase", {
+    calls = { "decor.matchesSearch", "decor.onlyStored", "decor.isStored", "decor.isHiddenPvp" },
+    fn = function(state, ctx)
+        local matchSearch = Selectors:Call("decor.matchesSearch", state, ctx)
+        local onlyStored  = Selectors:Call("decor.onlyStored",    state, ctx)
+        local isStored    = Selectors:Call("decor.isStored",      state, ctx)
+        local isHiddenPvp = Selectors:Call("decor.isHiddenPvp",   state, ctx)
+        return function(item)
+            if not matchSearch(item) then return false end
+            if onlyStored then return isStored(item.itemID) end
+            return not isHiddenPvp(item.itemID)
+        end
+    end,
+})
+
+-- How many of `units` the item fits not, and the last one it missed.
+local function _misses(item, units)
+    local n, missed = 0, nil
+    for i = 1, #units do
+        local unit = units[i]
+        if not unit.pass(item) then n, missed = n + 1, unit end
+    end
+    return n, missed
+end
+
+-- `units` split into the ones that always narrow and the ones Best first scores.
+local function _splitUnits(units)
+    local hard, soft = {}, {}
+    for _, unit in ipairs(units) do
+        local list = unit.hard and hard or soft
+        list[#list + 1] = unit
+    end
+    return hard, soft
 end
 
 -- List rows are reused across rebuilds, one table per variantKey: a search keystroke,
@@ -121,7 +148,9 @@ local function _reuseRow(variantKey, item)
     return row
 end
 
-local function _stampDecorRow(item, f)
+-- `fit` / `fitOf`: Best first's score (how many of the scored filters the decor
+-- fits); nil when every listed decor fits them all.
+local function _stampDecorRow(item, f, fit, fitOf)
     local id = item.itemID
     local row = _reuseRow(tostring(id) .. ":base", item)
     row.isFavorite       = f.isFavorite(id)
@@ -132,6 +161,7 @@ local function _stampDecorRow(item, f)
     -- Outside the Stored view, every copy owned (the tooltip's "Owned: N"; owner 10-30: a decor
     -- that is only placed read blank). The Stored view counts storage, all Destroy can act on.
     row.shownCount       = row.inStoredMode and row.destroyableCount or HDG.HousingCatalogObserver:OwnedTotal(id)
+    row.fit, row.fitOf   = fit, fitOf
     return row
 end
 
@@ -153,6 +183,7 @@ local function _stampVariantRow(stamped, item, dv)
     row.craftableState     = stamped.craftableState
     row.isCollected        = stamped.isCollected
     row.inStoredMode       = stamped.inStoredMode
+    row.fit, row.fitOf     = stamped.fit, stamped.fitOf
     row.isVariantRow       = true
     row.variantIdentifier  = dv.variantIdentifier
     row.dyeColorIDs        = dv.dyeColorIDs
@@ -164,17 +195,17 @@ local function _stampVariantRow(stamped, item, dv)
     return row
 end
 
--- Append base row then one row per owned dyed variant. Under "Dyed" tag the
+-- Append base row then one row per owned dyed variant. With Dyed ticked the
 -- undyed base is suppressed. variantKey (itemID:variant) is pool + selection
 -- identity. Each variant carries its own dv.numStored (not the aggregate base count).
-local function _emitDecorRows(out, item, stamped, activeTag)
+local function _emitDecorRows(out, item, stamped, dyedOnly)
     local dyedVariants = stamped.dyedVariants
     local hasDyed = dyedVariants and #dyedVariants > 0
     -- Base row = the undyed (vid=0) variant. In Stored view, suppress it when the item
     -- has dyed stacks but zero undyed copies (Blizzard's showQuantity > 0) -- else the
     -- undyed slot renders a phantom count that can't be destroyed.
     local hideEmptyUndyed = hasDyed and stamped.inStoredMode and stamped.destroyableCount <= 0
-    if not (activeTag == "Dyed" and hasDyed) and not hideEmptyUndyed then
+    if not (dyedOnly and hasDyed) and not hideEmptyUndyed then
         out[#out + 1] = stamped
     end
     if not hasDyed then return end
@@ -183,11 +214,140 @@ local function _emitDecorRows(out, item, stamped, activeTag)
     end
 end
 
--- The Decor list's rows in catalog order, before the Stored sort. Apart from
--- decor.items so the Destroy list's sort pin, which every tab switch clears,
--- never reaches the rows: outside Stored mode decor.items hands the list this
--- same table back and the list skips its refill (2,000 rows restamped and
--- refilled on every switch in and out of Decor, memory plan 2026-10-19 sec 6).
+-- ===== Sort ==================================================================
+-- The catalog's rows arrive by name (decor.allItems). Every other order falls
+-- back to the name, so two decor that tie stay where the name put them.
+
+local function _byName(a, b)
+    local na, nb = a.name or "", b.name or ""   -- exception(boundary): the catalog can answer a row before its name (decor.allItems sorts the same way)
+    if na == nb then return a.itemID < b.itemID end
+    return na < nb
+end
+
+-- A decor's newest expansion: one the game tags with two (Lost Explorers' Mailbox:
+-- Battle for Azeroth and Midnight) sorts with the later. 0 = no expansion tag.
+local function _expansionRank(item)
+    local rank = 0
+    if not item.expansion then return rank end   -- exception(nullable): a decor the game tags with no expansion
+    for _, name in ipairs(HDG.Expansion.Members(item.expansion)) do
+        local index = HDG.Expansion.GetIndex(name)
+        if index and index > rank then rank = index end   -- exception(nullable): a tag name EXPANSION_DATA does not know
+    end
+    return rank
+end
+
+-- Each order's sort key, smallest first. The key is worked out once per decor,
+-- not once per comparison.
+local SORT_KEYS = {
+    newest = function(item) return -_expansionRank(item) end,
+    cost   = function(item) return item.placementCost or 0 end,   -- exception(boundary): catalog struct field sparse
+    owned  = function(item) return -HDG.HousingCatalogObserver:OwnedTotal(item.itemID) end,
+}
+
+-- `items` in the chosen order: itself for "name" (how it arrived), a sorted copy otherwise.
+local function _sortItems(items, sort)
+    local keyOf = SORT_KEYS[sort]
+    if not keyOf then return items end   -- exception(nullable): "name" has no key, the catalog order is it
+    local out, key = {}, {}
+    for i = 1, #items do
+        local item = items[i]
+        out[i], key[item] = item, keyOf(item)
+    end
+    table.sort(out, function(a, b)
+        if key[a] ~= key[b] then return key[a] < key[b] end
+        return _byName(a, b)
+    end)
+    return out
+end
+
+-- ===== The two match modes ===================================================
+
+-- A heading row of the Best first list: "Fits 3 of 4 (11)". No itemID, so the row
+-- factory wires no click and the header count skips it. Headings come only with
+-- a second band, so "all" is never "all 1".
+local function _bandRow(fit, fitOf, count)
+    local label
+    if fit < fitOf then
+        label = HDG.Locale:Get("DECOR_BAND_SOME"):format(fit, fitOf, count)
+    else
+        label = HDG.Locale:Get("DECOR_BAND_ALL"):format(fitOf, count)
+    end
+    return { variantKey = "band:" .. fit, isBand = true, name = label, fit = fit, fitOf = fitOf }
+end
+
+-- Every filter: a decor is listed when it fits them all.
+local function _allRows(all, f)
+    local out = {}
+    -- By name, the catalog's own order: rows are stamped as the walk finds them.
+    -- (A second array of what passed was 37 KB on every search, favourite and
+    -- count change with Decor open -- offline harness, 2026-11-22.)
+    if not SORT_KEYS[f.sort] then
+        for _, item in ipairs(all) do
+            if f.passesBase(item) and _misses(item, f.units) == 0 then
+                _emitDecorRows(out, item, _stampDecorRow(item, f), f.dyedOnly)
+            end
+        end
+        return out
+    end
+    local items = {}
+    for _, item in ipairs(all) do
+        if f.passesBase(item) and _misses(item, f.units) == 0 then items[#items + 1] = item end
+    end
+    for _, item in ipairs(_sortItems(items, f.sort)) do
+        _emitDecorRows(out, item, _stampDecorRow(item, f), f.dyedOnly)
+    end
+    return out
+end
+
+-- Best first: the hard filters narrow as ever; every remaining decor is scored by
+-- how many of the other filters it fits, and listed under a heading per score,
+-- best first -- down to DECOR_BEST_MATCH_MAX_MISSES misses (half the filters once
+-- there are many), and never a decor that fits none.
+local function _bestRows(all, f, hard, soft)
+    local of = #soft
+    -- Two misses at most -- or half, once that is the looser of the two: a dozen
+    -- ticks (Find similar) would otherwise list next to nothing.
+    local floor = math.max(1, math.min(of - HDG.Constants.DECOR_BEST_MATCH_MAX_MISSES, math.ceil(of / 2)))
+    local bands = {}
+    for _, item in ipairs(all) do
+        if f.passesBase(item) and _misses(item, hard) == 0 then
+            local fit = of - _misses(item, soft)
+            if fit >= floor then
+                local band = bands[fit]
+                if not band then
+                    band = {}
+                    bands[fit] = band
+                end
+                band[#band + 1] = item
+            end
+        end
+    end
+    -- Headings and scores only when some decor falls short. Best first is the
+    -- default, so a list in which every decor fits every filter reads as the
+    -- plain list it is.
+    local short = false
+    for fit = of - 1, floor, -1 do
+        if bands[fit] then short = true end
+    end
+    local out = {}
+    for fit = of, floor, -1 do
+        local band = bands[fit]
+        if band then   -- exception(nullable): no decor scored this fit
+            if short then out[#out + 1] = _bandRow(fit, of, #band) end
+            for _, item in ipairs(_sortItems(band, f.sort)) do
+                local stamped = short and _stampDecorRow(item, f, fit, of) or _stampDecorRow(item, f)
+                _emitDecorRows(out, item, stamped, f.dyedOnly)
+            end
+        end
+    end
+    return out
+end
+
+-- The Decor list's rows, before the Stored sort. Apart from decor.items so the
+-- Destroy list's sort pin, which every tab switch clears, never reaches the
+-- rows: outside Stored mode decor.items hands the list this same table back and
+-- the list skips its refill (2,000 rows restamped and refilled on every switch in
+-- and out of Decor, memory plan 2026-10-19 sec 6).
 Selectors:Register("decor.matchingRows", {
     -- Memoized: decor.headerLabel calls through decor.items for "shown N", which
     -- would double-walk ~2000 items per dispatch without caching.
@@ -196,53 +356,46 @@ Selectors:Register("decor.matchingRows", {
     reads = { "session.resolvers.catalog.tick" },
     calls = {
         "decor.allItems",
-        "decor.matchesSearch",
-        "decor.onlyUncollected",
+        "decor.passesBase",
+        "decor.filterUnits",
+        "decor.filterTicks",
+        "decor.match",
+        "decor.sort",
         "decor.onlyStored",
-        "decor.matchesTag",
         "decor.isCollected",
-        "decor.isStored",
-        "decor.activeTag",
         "decor.destroyableCount",
-        -- isFavorite + craftableState called directly in fn -> declared here per
-        -- accurate-calls invariant. Their paths also reach via matchesTag, but
-        -- direct calls must still be declared.
         "decor.isFavorite",
         "decor.craftableState",
-        "decor.isHiddenPvp",
         -- decor.selectedItemID retired: selection highlight owned by
         -- SelectionBehaviorMixin; clicks no longer invalidate the items list.
     },
     fn = function(state, ctx)
-        local all = Selectors:Call("decor.allItems",   state, ctx)
+        local all = Selectors:Call("decor.allItems", state, ctx)
         -- Resolve all per-item predicates once (not per row) and bundle into `f`.
         local f = {
-            onlyUncollected  = Selectors:Call("decor.onlyUncollected",  state, ctx),
+            passesBase       = Selectors:Call("decor.passesBase",       state, ctx),
+            units            = Selectors:Call("decor.filterUnits",      state, ctx),
+            sort             = Selectors:Call("decor.sort",             state, ctx),
             onlyStored       = Selectors:Call("decor.onlyStored",       state, ctx),
-            matchTag         = Selectors:Call("decor.matchesTag",       state, ctx),
             isCollected      = Selectors:Call("decor.isCollected",      state, ctx),
-            isStored         = Selectors:Call("decor.isStored",         state, ctx),
-            activeTag        = Selectors:Call("decor.activeTag",        state, ctx),
             isFavorite       = Selectors:Call("decor.isFavorite",       state, ctx),
             craftableState   = Selectors:Call("decor.craftableState",   state, ctx),
             destroyableCount = Selectors:Call("decor.destroyableCount", state, ctx),
-            isHiddenPvp      = Selectors:Call("decor.isHiddenPvp",      state, ctx),
-            matchSearch      = Selectors:Call("decor.matchesSearch",    state, ctx),
+            dyedOnly         = Selectors:Call("decor.filterTicks",      state, ctx)[HDG.DecorFilters.Tick("status", "dyed")] == true,
         }
-
-        local out = {}
-        for _, item in ipairs(all) do
-            if _decorRowPasses(item, f) then
-                _emitDecorRows(out, item, _stampDecorRow(item, f), f.activeTag)
-            end
+        if Selectors:Call("decor.match", state, ctx) == "best" then
+            local hard, soft = _splitUnits(f.units)
+            -- Nothing to score: Best first is Every filter.
+            if #soft > 0 then return _bestRows(all, f, hard, soft) end
         end
-        return out
+        return _allRows(all, f)
     end,
 })
 
 -- The Decor list. Stored mode (the Destroy list) sorts most-cluttering first
 -- (destroyable count desc, name asc), by the pinned counts once the player has
 -- destroyed from it -- into a copy, because decor.matchingRows' table is memoized.
+-- Best first's headings have nothing to do there: they are dropped.
 Selectors:Register("decor.items", {
     memoized = true,
     calls = { "decor.matchingRows", "decor.onlyStored", "decor.pinnedSortCounts" },
@@ -251,11 +404,17 @@ Selectors:Register("decor.items", {
         if not Selectors:Call("decor.onlyStored", state, ctx) then return rows end
         local pinned = Selectors:Call("decor.pinnedSortCounts", state, ctx)
         local out = {}
-        for i, row in ipairs(rows) do out[i] = row end
+        for _, row in ipairs(rows) do
+            if not row.isBand then out[#out + 1] = row end
+        end
         table.sort(out, function(a, b)
             local da, db = _sortCount(a, pinned), _sortCount(b, pinned)
             if da ~= db then return da > db end
-            return (a.name or "") < (b.name or "")
+            local na, nb = a.name or "", b.name or ""   -- exception(boundary): the catalog can answer a row before its name
+            if na ~= nb then return na < nb end
+            -- Two stacks of one decor, or two decor of one name: without this the
+            -- sort is free to swap them between rebuilds.
+            return a.variantKey < b.variantKey
         end)
         return out
     end,
@@ -708,9 +867,43 @@ Selectors:Register("decor.headerDenominator", {
     end,
 })
 
+-- What the list holds, for the count line: { shown, collected, dyedRows, full,
+-- partial, fitOf }. Read off decor.matchingRows, where a decor's rows sit together
+-- (its base row, then its dyed stacks), so a decor is counted where its itemID
+-- first appears -- no set of the decor seen. (That set was 74 KB on every update
+-- of the count line, perf profile 2026-11-22.) The Destroy list re-sorts the same
+-- rows, so the figures are its own too.
+--   shown / collected   unique base decor: owned dyed-variant rows would inflate
+--                       the ratio every time something is dyed (VDS says 143
+--                       dyeable, the row count said 157)
+--   dyedRows            the dyed-stack rows, for the "+ N dyed" tail
+--   full / partial      Best first: decor fitting every scored filter, and some
+Selectors:Register("decor.listSummary", {
+    memoized = true,
+    calls = {"decor.matchingRows", "decor.isCollected"},
+    fn = function(state, ctx)
+        local isColl = Selectors:Call("decor.isCollected", state, ctx)
+        local sum = { shown = 0, collected = 0, dyedRows = 0, full = 0, partial = 0, fitOf = 0 }
+        local last
+        for _, row in ipairs(Selectors:Call("decor.matchingRows", state, ctx)) do
+            if row.isVariantRow then sum.dyedRows = sum.dyedRows + 1 end
+            local id = row.itemID
+            if id and id ~= last then   -- exception(nullable): a Best first heading has no itemID
+                last = id
+                sum.shown = sum.shown + 1
+                if isColl(id) then sum.collected = sum.collected + 1 end
+                if row.fit then   -- exception(nullable): fit is nil outside Best first
+                    sum.fitOf = row.fitOf
+                    if row.fit == row.fitOf then sum.full = sum.full + 1 else sum.partial = sum.partial + 1 end
+                end
+            end
+        end
+        return sum
+    end,
+})
+
 Selectors:Register("decor.headerLabel", {
-    calls = {"decor.headerDenominator", "decor.ownedCount", "decor.filterActive",
-             "decor.items", "decor.isCollected", "decor.activeTag"},
+    calls = {"decor.headerDenominator", "decor.ownedCount", "decor.filterActive", "decor.listSummary"},
     fn = function(state, ctx)
         local denom = Selectors:Call("decor.headerDenominator", state, ctx)
         if denom == 0 then return "" end
@@ -719,33 +912,18 @@ Selectors:Register("decor.headerLabel", {
             local owned = Selectors:Call("decor.ownedCount", state, ctx)
             return string.format("%d/%d (%d%%)", owned, denom, math.floor(owned / denom * 100))
         end
-        -- Filtered: collected / shown WITHIN the current filter, + the filter name
-        -- (e.g. "204/309 (66%)  Quest"). Counts unique base decor -- owned
-        -- dyed-variant rows would inflate the ratio every time something is
-        -- dyed (VDS says 143 dyeable, the row count said 157). Variant rows
-        -- surface as a "+ N dyed" tail instead.
-        local items  = Selectors:Call("decor.items", state, ctx)
-        local isColl = Selectors:Call("decor.isCollected", state, ctx)
-        local shown, collected, dyedRows, seen = 0, 0, 0, {}
-        for _, row in ipairs(items) do
-            if row.isVariantRow then dyedRows = dyedRows + 1 end
-            if not seen[row.itemID] then
-                seen[row.itemID] = true
-                shown = shown + 1
-                if isColl(row.itemID) then collected = collected + 1 end
-            end
+        local sum = Selectors:Call("decor.listSummary", state, ctx)
+        -- Best first with decor that fall short: how many fit every scored filter
+        -- and how many only some. (None short: the plain line says it.)
+        if sum.partial > 0 then
+            return HDG.Locale:Get("DECOR_COUNT_BEST"):format(sum.full, sum.fitOf, sum.partial)
         end
-        local pct = shown > 0 and math.floor(collected / shown * 100) or 0
-        local out = string.format("%d/%d (%d%%)", collected, shown, pct)
-        local tag = Selectors:Call("decor.activeTag", state, ctx)
-        if tag then
-            -- Source-kind tags are stored as SOURCE_KINDS.key (e.g. "QUEST"); show the
-            -- friendly label. Other tags (Favorites/sizes/styles) are already friendly.
-            local kind = HDG.Constants.SOURCE_KIND_BY_KEY[tag]
-            out = out .. "  " .. ((kind and kind.label) or tag)
-        end
-        if dyedRows > 0 then
-            out = out .. " + " .. dyedRows .. " dyed"
+        -- Filtered: collected / shown WITHIN the current filters (e.g. "204/309
+        -- (66%)"); the chips above the list name them.
+        local pct = sum.shown > 0 and math.floor(sum.collected / sum.shown * 100) or 0
+        local out = string.format("%d/%d (%d%%)", sum.collected, sum.shown, pct)
+        if sum.dyedRows > 0 then
+            out = out .. " + " .. sum.dyedRows .. " dyed"
         end
         return out
     end,
@@ -831,66 +1009,539 @@ Selectors:Register("decor.craftableState", {
 })
 
 -- ===== Filter state surface ===================================================
--- Used by chip `active` bindings and by decor.matchingRows as composed filter inputs.
+-- The filter strip's bindings, and the inputs decor.matchingRows composes.
 
-Selectors:Register("decor.topFilter", {
-    reads = {"session.ui.decor.filters.topFilter"},
+-- "decor" or "pets": which list the tab shows (the Decor | Pets switch).
+Selectors:Register("decor.mode", {
+    reads = {"session.ui.decor.mode"},
     fn = function(state, ctx)
-        local d = state.session.ui.decor
-        return (d.filters and d.filters.topFilter) or "all"
+        return state.session.ui.decor.mode
     end,
 })
 
--- Per-top-filter boolean selectors for chip `active` bindings. HDG.Constants.TOP_FILTERS is SSoT.
-for _, entry in ipairs(HDG.Constants.TOP_FILTERS or {}) do
-    local captured = entry.value
-    Selectors:Register("decor.topFilter.active_" .. captured, {
-        calls = {"decor.topFilter"},
+-- How the list answers the ticks: "all" (a decor has to fit every filter) or
+-- "best" (the closest fits first).
+Selectors:Register("decor.match", {
+    reads = {"session.ui.decor.match"},
+    fn = function(state, ctx)
+        return state.session.ui.decor.match
+    end,
+})
+
+-- One boolean per switch position, for the buttons' `active` bindings.
+for _, mode in ipairs({ "decor", "pets" }) do
+    Selectors:Register("decor.isMode_" .. mode, {
+        calls = {"decor.mode"},
         fn = function(state, ctx)
-            return Selectors:Call("decor.topFilter", state, ctx) == captured
+            return Selectors:Call("decor.mode", state, ctx) == mode
+        end,
+    })
+end
+for _, match in ipairs({ "all", "best" }) do
+    Selectors:Register("decor.isMatch_" .. match, {
+        calls = {"decor.match"},
+        fn = function(state, ctx)
+            return Selectors:Call("decor.match", state, ctx) == match
         end,
     })
 end
 
--- ===== Tags-row dynamic slot selectors =======================================
--- One set per tags-row chip (Constants.TAG_SLOT_COUNT). Each slot:
---   decor.tagSlot.text_N    -- tag label or "" when slot empty
---   decor.tagSlot.active_N  -- true when this slot's tag is active
---   decor.tagSlot.visible_N -- true when slot has content
-for slot = 1, HDG.Constants.TAG_SLOT_COUNT do
-    local n = slot
-    Selectors:Register("decor.tagSlot.text_" .. n, {
-        calls = {"decor.tagsForFilter", "decor.topFilter"},
+-- The list's sort order (Constants.DECOR_SORTS).
+Selectors:Register("decor.sort", {
+    reads = {"session.ui.decor.sort"},
+    fn = function(state, ctx)
+        return state.session.ui.decor.sort
+    end,
+})
+
+Selectors:Register("decor.sortMenuItems", {
+    fn = function(state, ctx)
+        local items = {}
+        for i, sort in ipairs(HDG.Constants.DECOR_SORTS) do
+            items[i] = { value = sort, text = HDG.Locale:Get("DECOR_SORT_" .. sort:upper()) }
+        end
+        return items
+    end,
+})
+
+-- The filter menus' ticks: { ["group:value"] = true } (Core/HDGR_DecorFilters.lua).
+Selectors:Register("decor.filterTicks", {
+    reads = {"session.ui.decor.filters.ticks"},
+    fn = function(state, ctx)
+        return state.session.ui.decor.filters.ticks
+    end,
+})
+
+-- The Decor Browser heading's Uncollected button: the Collection menu's tick.
+Selectors:Register("decor.onlyUncollected", {
+    calls = {"decor.filterTicks"},
+    fn = function(state, ctx)
+        return Selectors:Call("decor.filterTicks", state, ctx)[DF.Tick("status", "uncollected")] == true
+    end,
+})
+
+Selectors:Register("decor.onlyStored", {
+    reads = {"session.ui.decor.filters.onlyStored"},
+    fn = function(state, ctx)
+        local d = state.session.ui.decor
+        return d.filters.onlyStored == true
+    end,
+})
+
+-- (decor.onlyDyed / decor.onlyDyeable retired: Dyed and Dyeable are ticks of the
+--  Collection menu.)
+
+-- Curried per-item flag for dyed-or-dyeable filtering. Reads catalog row
+-- data populated by ReconcileFull.
+Selectors:Register("decor.isDyeable", {
+    reads = {"session.resolvers.catalog.tick"},
+    fn = function(state, ctx)
+        local byItemID = HDG.HousingCatalogObserver.byItemID
+        return function(itemID)
+            local row = byItemID[itemID]
+            return row and row.canCustomize == true or false
+        end
+    end,
+})
+Selectors:Register("decor.isDyed", {
+    reads = {"session.resolvers.catalog.tick"},
+    fn = function(state, ctx)
+        local byItemID = HDG.HousingCatalogObserver.byItemID
+        return function(itemID)
+            local row = byItemID[itemID]
+            -- row.dyedVariants is baked by the observer (_bakeVariantDyes) =
+            -- owned variants (numStored>0) with an applied dye. Single source of
+            -- truth, shared with the decor.matchingRows per-variant expansion.
+            return (row and row.dyedVariants and #row.dyedVariants > 0) or false
+        end
+    end,
+})
+
+-- Curried per-item flag for the "New in <patch>" tick. newIds = the batch of
+-- itemIDs that appeared in the live catalog under the current client build
+-- (observer snapshot diff at _CommitSweep; the first-ever sweep seeds the
+-- snapshot silently, so a fresh install has no batch).
+Selectors:Register("decor.isNew", {
+    reads = {"account.catalogVintage"},
+    fn = function(state, ctx)
+        local newIds = state.account.catalogVintage.newIds
+        return function(itemID) return newIds[itemID] == true end
+    end,
+})
+
+-- The Collection menu's flags: { [value] = fn(itemID) -> boolean }, one per value
+-- of the `status` group (Constants.DECOR_FILTER_GROUPS).
+Selectors:Register("decor.filterFlags", {
+    reads = {"session.resolvers.catalog.tick"},
+    calls = {"decor.isCollected", "decor.isFavorite", "decor.isDyed", "decor.isDyeable", "decor.isNew"},
+    fn = function(state, ctx)
+        local isCollected = Selectors:Call("decor.isCollected", state, ctx)
+        local byItemID = HDG.HousingCatalogObserver.byItemID
+        return {
+            collected   = isCollected,
+            uncollected = function(itemID) return not isCollected(itemID) end,
+            favorites   = Selectors:Call("decor.isFavorite", state, ctx),
+            -- Decor currently placed in a house (catalog live numPlaced > 0).
+            placed      = function(itemID) return byItemID[itemID].numPlaced > 0 end,
+            dyeable     = Selectors:Call("decor.isDyeable", state, ctx),
+            dyed        = Selectors:Call("decor.isDyed", state, ctx),
+            -- Eligible for first-acquisition House XP AND not yet owned.
+            housexp     = function(itemID)
+                if isCollected(itemID) then return false end
+                return byItemID[itemID].firstAcquisitionBonus > 0
+            end,
+            -- A redeemable token is outstanding AND no copy has been claimed yet
+            -- (nothing in storage, nothing placed) -- i.e. still waiting to redeem.
+            redeemable  = function(itemID)
+                local row = byItemID[itemID]
+                return row.remainingRedeemable > 0 and row.quantity == 0 and row.numPlaced == 0
+            end,
+            new         = Selectors:Call("decor.isNew", state, ctx),
+        }
+    end,
+})
+
+-- What a catalog row does not carry, for DecorFilters (`known`): the collection
+-- flags, and the recipe book -- shipped plus captured, so a decor whose recipe was
+-- read off a profession window is crafted before HDG ships that recipe (owner
+-- ruling 2026-10-31, as the old Crafted tag had it).
+Selectors:Register("decor.filterKnown", {
+    calls = {"decor.filterFlags", "recipes.db"},
+    fn = function(state, ctx)
+        return { flags   = Selectors:Call("decor.filterFlags", state, ctx),
+                 recipes = Selectors:Call("recipes.db", state, ctx) }
+    end,
+})
+
+-- The filters in force, compiled once per change of the ticks or of what the
+-- player owns: { { id, hard, pass = fn(row) }, ... } (DecorFilters.Units).
+Selectors:Register("decor.filterUnits", {
+    memoized = true,
+    calls = {"decor.filterTicks", "decor.filterKnown"},
+    fn = function(state, ctx)
+        return DF.Units(Selectors:Call("decor.filterTicks", state, ctx),
+                        Selectors:Call("decor.filterKnown", state, ctx))
+    end,
+})
+
+-- Anything narrowing the list? Drives the count line (whole collection, or
+-- what the filters leave).
+Selectors:Register("decor.filterActive", {
+    calls = { "decor.filterTicks", "decor.onlyStored", "decor.filterQuery" },
+    fn = function(state, ctx)
+        if next(Selectors:Call("decor.filterTicks", state, ctx)) ~= nil then return true end
+        if Selectors:Call("decor.onlyStored", state, ctx) == true then return true end
+        return Selectors:Call("decor.filterQuery", state, ctx) ~= ""
+    end,
+})
+
+-- ===== Menu contents ==========================================================
+
+-- A group's values in menu order: the game's Size and Expansion tags and the
+-- budget costs by number (the game's own order), names by name, everything else
+-- most-used first.
+local function _orderValues(group, values, totals)
+    if group.order == "id" then
+        table.sort(values, function(a, b) return tonumber(a) < tonumber(b) end)
+    elseif group.order == "label" then
+        local labels = {}
+        for _, value in ipairs(values) do labels[value] = DF.ValueLabel(group.id, value) end
+        table.sort(values, function(a, b)
+            if labels[a] ~= labels[b] then return labels[a] < labels[b] end
+            return a < b
+        end)
+    else
+        table.sort(values, function(a, b)
+            local ca, cb = totals[DF.Tick(group.id, a)], totals[DF.Tick(group.id, b)]
+            if ca ~= cb then return ca > cb end
+            return a < b
+        end)
+    end
+end
+
+-- What one menu lists: { [group id] = { value, ... } } for its groups. A `fixed`
+-- group lists its own values; every other group the values some decor in the
+-- catalog carries, found by one walk that reads this menu's groups alone. Run as
+-- the menu opens: nothing keeps it.
+local function _menuValues(menu, state, ctx)
+    local valuesOf, walk = {}, false
+    for _, gid in ipairs(menu.groups) do
+        local fixed = DF.GroupByID[gid].fixed
+        valuesOf[gid] = fixed or {}
+        if not fixed then walk = true end
+    end
+    if not walk then return valuesOf end
+    local totals, buf, plan = {}, {}, DF.MenuPlan(menu.id)
+    -- No flags: what a menu lists does not depend on what the player owns.
+    local known = { recipes = Selectors:Call("recipes.db", state, ctx) }
+    for _, item in ipairs(Selectors:Call("decor.allItems", state, ctx)) do
+        for i = 1, DF.RowTicks(item, known, plan, buf) do
+            local tick = buf[i]
+            totals[tick] = (totals[tick] or 0) + 1
+        end
+    end
+    for tick in pairs(totals) do
+        local gid, value = DF.Split(tick)
+        if not DF.GroupByID[gid].fixed then
+            local values = valuesOf[gid]
+            values[#values + 1] = value
+        end
+    end
+    for _, gid in ipairs(menu.groups) do
+        local group = DF.GroupByID[gid]
+        if not group.fixed then _orderValues(group, valuesOf[gid], totals) end
+    end
+    return valuesOf
+end
+
+-- The "New in <patch>" flag's build, or nil when the catalog diff holds no batch.
+local function _newBuildLabel(state)
+    local cv = state.account.catalogVintage
+    if next(cv.newIds) == nil then return nil end
+    return cv.newBuildLabel
+end
+
+-- What a value reads as. "New in 12.1.5" carries the live build of the batch.
+local function _valueLabel(gid, value, newBuild)
+    local label = DF.ValueLabel(gid, value)
+    -- "?": the tick outlived its batch (a chip can still name it). Visible, not blank.
+    if gid == "status" and value == "new" then return label:format(newBuild or "?") end   -- exception(nullable): no batch under this build
+    return label
+end
+
+-- The rows that explain themselves on hover. Redeemable: the catalog counts the
+-- decor as yours before you have ever placed one, which needs saying.
+local function _rowTip(gid, value)
+    if gid ~= "status" or value ~= "redeemable" then return nil end
+    return { title = HDG.Locale:Get("TIP_REDEEMABLE_TAG_TITLE"), body = HDG.Locale:Get("TIP_REDEEMABLE_TAG_BODY") }
+end
+
+-- One tick row. `children`: the rows of the submenu it opens (the Type menu).
+local function _tickRow(gid, value, newBuild, children)
+    return {
+        kind     = "checkbox",
+        value    = DF.Tick(gid, value),
+        text     = _valueLabel(gid, value, newBuild),
+        tip      = _rowTip(gid, value),
+        swatch   = gid == "color" and HDG.Constants.DECOR_FILTER_SWATCHES[value] or nil,   -- exception(nullable): only the Colour menu carries squares
+        children = children,
+    }
+end
+
+-- A group's tick rows appended to `items`. No batch -> no "New in" row.
+local function _addGroupRows(items, gid, values, newBuild)
+    for _, value in ipairs(values) do
+        if not (gid == "status" and value == "new" and not newBuild) then
+            items[#items + 1] = _tickRow(gid, value, newBuild)
+        end
+    end
+end
+
+-- The Type menu: each kind a tick row that opens its objects beside it, then the
+-- objects no kind claims under "Other".
+local function _addTypeRows(items, valuesOf)
+    local tree, under, other = DF.TypeTree(), {}, {}
+    for _, kind in ipairs(valuesOf.category) do under[kind] = {} end
+    for _, object in ipairs(valuesOf.subject) do
+        -- Other: no kind claims the object, or the kind that does is one no decor
+        -- in this catalog carries (so it has no row to sit under).
+        local list = under[tree.kindOf[object]] or other   -- exception(nullable): an object outside the listed kinds
+        list[#list + 1] = _tickRow("subject", object)
+    end
+    for _, kind in ipairs(valuesOf.category) do
+        local children = under[kind]
+        items[#items + 1] = _tickRow("category", kind, nil, #children > 0 and children or nil)
+    end
+    if #other > 0 then
+        items[#items + 1] = { kind = "submenu", text = HDG.Locale:Get("DECOR_FM_OTHER_KIND"), children = other }
+    end
+end
+
+-- One menu's rows: Clear, then each group's ticks (under its own heading when the
+-- menu holds more than one). The rows do not depend on the ticks: their counts
+-- are read live from decor.filterCounts as the menu draws.
+-- NOT memoized and bound to no widget: a menu button asks for its rows when it
+-- opens (the dropdown's `rows`), so a menu nobody opened costs nothing -- bound,
+-- all twenty were built when the tab opened and again on every catalog change
+-- (+380 KB to open Decor, +250 KB per count change; offline harness, 2026-11-22).
+-- Its value list is one walk of the catalog for this menu's groups (_menuValues).
+for _, menu in ipairs(HDG.Constants.DECOR_FILTER_MENUS) do
+    Selectors:Register("decor.filterMenu_" .. menu.id, {
+        reads = {"account.catalogVintage", "session.resolvers.catalog.tick"},
+        calls = {"decor.allItems", "recipes.db"},
         fn = function(state, ctx)
-            local tags = Selectors:Call("decor.tagsForFilter", state, ctx)
-            local raw  = tags[n]
-            if not raw then return "" end
-            -- Source kinds arrive as SOURCE_KINDS.key (all caps); show the friendly
-            -- label for DISPLAY only. activeTag + matchesTag still use the raw key.
-            if Selectors:Call("decor.topFilter", state, ctx) == "sources" then
-                local kind = HDG.Constants.SOURCE_KIND_BY_KEY[raw]
-                return (kind and kind.label) or raw
+            local valuesOf = _menuValues(menu, state, ctx)
+            local newBuild = _newBuildLabel(state)
+            local items = {
+                { kind = "action", text = HDG.Locale:Get("DECOR_FM_CLEAR"):format(HDG.Locale:Get(menu.label)),
+                  action = "DECOR_CLEAR_FILTERS", payload = { menu = menu.id } },
+                { kind = "divider" },
+            }
+            if menu.tree then
+                _addTypeRows(items, valuesOf)
+                return items
             end
-            return raw
-        end,
-    })
-    Selectors:Register("decor.tagSlot.active_" .. n, {
-        calls = {"decor.tagsForFilter", "decor.activeTag"},
-        fn = function(state, ctx)
-            local tags = Selectors:Call("decor.tagsForFilter", state, ctx)
-            local mine = tags[n]
-            local active = Selectors:Call("decor.activeTag", state, ctx)
-            return mine ~= nil and active == mine
-        end,
-    })
-    Selectors:Register("decor.tagSlot.visible_" .. n, {
-        calls = {"decor.tagsForFilter"},
-        fn = function(state, ctx)
-            local tags = Selectors:Call("decor.tagsForFilter", state, ctx)
-            return tags[n] ~= nil and true or false
+            for _, gid in ipairs(menu.groups) do
+                if #menu.groups > 1 then
+                    items[#items + 1] = { kind = "title", text = DF.GroupLabel(gid) }
+                end
+                _addGroupRows(items, gid, valuesOf[gid], newBuild)
+            end
+            return items
         end,
     })
 end
+
+-- How many values of each menu are ticked: { [menu id] = n }, for the closed
+-- buttons. One walk of the ticks serves all twenty.
+Selectors:Register("decor.filterMenuCounts", {
+    memoized = true,
+    calls = {"decor.filterTicks"},
+    fn = function(state, ctx)
+        local counts = {}
+        for tick in pairs(Selectors:Call("decor.filterTicks", state, ctx)) do
+            local id = DF.MenuOfGroup[(DF.Split(tick))].id
+            counts[id] = (counts[id] or 0) + 1
+        end
+        return counts
+    end,
+})
+for _, menu in ipairs(HDG.Constants.DECOR_FILTER_MENUS) do
+    Selectors:Register("decor.filterMenuCount_" .. menu.id, {
+        calls = {"decor.filterMenuCounts"},
+        fn = function(state, ctx)
+            return Selectors:Call("decor.filterMenuCounts", state, ctx)[menu.id] or 0   -- exception(nullable): a menu with no tick
+        end,
+    })
+end
+
+-- One menu's counts, for its rows' right column: [tick] = the decor ticking it
+-- would list.
+--   Every filter: the decor that fit every OTHER filter. Where any one ticked
+--                 value passes (Size, Source), a menu's own ticks do not shrink
+--                 its own counts. Where every ticked value has to hold (Colour,
+--                 Collection), they do: a count is what adding the tick leaves.
+--   Best first:   the decor the hard filters leave (the list scores the rest).
+-- A decor missing no filter counts for its values in this menu; a decor missing
+-- exactly one filter counts only when that is an any-of filter of this menu, for
+-- that filter's values. One selector a menu, read live as its rows draw, so only an
+-- OPEN menu is ever counted -- and it walks its own groups alone (the count of
+-- every menu at once was 22 ms a tick in game, perf profile 2026-11-22).
+local function _menuCounts(menuID, state, ctx)
+    local passesBase = Selectors:Call("decor.passesBase",  state, ctx)
+    local known      = Selectors:Call("decor.filterKnown", state, ctx)
+    local units      = Selectors:Call("decor.filterUnits", state, ctx)
+    if Selectors:Call("decor.match", state, ctx) == "best" then units = (_splitUnits(units)) end
+    local plan, counts, buf = DF.MenuPlan(menuID), {}, {}
+    for _, item in ipairs(Selectors:Call("decor.allItems", state, ctx)) do
+        if passesBase(item) then
+            local misses, missed = _misses(item, units)
+            if misses == 0 or (misses == 1 and missed.anyOf and plan.units[missed.id]) then
+                local only = missed and missed.id   -- exception(nullable): no miss, every value counts
+                for i = 1, DF.RowTicks(item, known, plan, buf) do
+                    local tick = buf[i]
+                    if not only or DF.UnitOfTick(tick) == only then
+                        counts[tick] = (counts[tick] or 0) + 1
+                    end
+                end
+            end
+        end
+    end
+    return counts
+end
+for _, menu in ipairs(HDG.Constants.DECOR_FILTER_MENUS) do
+    Selectors:Register("decor.filterCounts_" .. menu.id, {
+        memoized = true,
+        calls = {"decor.allItems", "decor.passesBase", "decor.filterUnits", "decor.filterKnown", "decor.match"},
+        fn = function(state, ctx) return _menuCounts(menu.id, state, ctx) end,
+    })
+end
+
+-- ===== Chips: the ticks in force, above the list ==============================
+
+-- A group's ticked values in chip order: its fixed order where it has one, else
+-- by what the chip reads.
+local function _chipValues(group, values, newBuild)
+    if group.fixed then
+        local out = {}
+        for _, value in ipairs(group.fixed) do
+            if values[value] then out[#out + 1] = value end
+        end
+        return out
+    end
+    local out, labels = {}, {}
+    for value in pairs(values) do
+        out[#out + 1] = value
+        labels[value] = _valueLabel(group.id, value, newBuild)
+    end
+    table.sort(out, function(a, b)
+        if labels[a] ~= labels[b] then return labels[a] < labels[b] end
+        return a < b
+    end)
+    return out
+end
+
+-- One chip per tick, in menu order: { tick, label }; a click removes it. Then
+-- the Clear all chip: { clearAll = true, label }. Built from the ticks alone -- not from the menus' value lists, which would then be
+-- recounted on every catalog change for a row of chips.
+Selectors:Register("decor.filterChips", {
+    memoized = true,
+    reads = {"account.catalogVintage"},
+    calls = {"decor.filterTicks"},
+    fn = function(state, ctx)
+        local byGroup = {}
+        for tick in pairs(Selectors:Call("decor.filterTicks", state, ctx)) do
+            local gid, value = DF.Split(tick)
+            local values = byGroup[gid]
+            if not values then
+                values = {}
+                byGroup[gid] = values
+            end
+            values[value] = true
+        end
+        local newBuild = _newBuildLabel(state)
+        local chips = {}
+        for _, group in ipairs(HDG.Constants.DECOR_FILTER_GROUPS) do
+            local values = byGroup[group.id]
+            if values then   -- exception(nullable): a group with no tick
+                for _, value in ipairs(_chipValues(group, values, newBuild)) do
+                    chips[#chips + 1] = {
+                        tick  = DF.Tick(group.id, value),
+                        label = HDG.Locale:Get("DECOR_CHIP_FMT"):format(DF.GroupLabel(group.id), _valueLabel(group.id, value, newBuild)),
+                    }
+                end
+            end
+        end
+        -- Clear all closes the strip, beside the filters it clears (owner
+        -- 2026-11-22): the strip's own button is a row away from the chips.
+        if #chips > 0 then
+            chips[#chips + 1] = { clearAll = true, label = HDG.Locale:Get("DECOR_CLEAR_ALL") }
+        end
+        return chips
+    end,
+})
+
+-- Chips show in decor mode once a menu holds a tick.
+Selectors:Register("decor.hasFilterChips", {
+    calls = {"decor.filterTicks", "decor.mode"},
+    fn = function(state, ctx)
+        return Selectors:Call("decor.mode", state, ctx) == "decor"
+           and next(Selectors:Call("decor.filterTicks", state, ctx)) ~= nil
+    end,
+})
+
+-- The view's rows: filter strip, chips, browser. The chip row takes the chips'
+-- real wrapped height (published to chipsHeight by the strip, as the Recipes
+-- run strip does) out of the browser's, so the window keeps its size and only
+-- the list gives way -- the preview column spans both rows. No chips: a
+-- zero-height row, which the layout gives no gap. The row grows with the chips
+-- (owner's lab: "leave it"), down to a browser of BROWSER_MIN.
+local CHIPS_ONE_LINE = 22
+local CHIPS_PAD      = 6      -- the chips panel's own padding around the strip
+local BROWSER_MIN    = 220    -- what the browser keeps however many chips there are (some 16 lines of them)
+Selectors:Register("decor.gridRows", {
+    reads = {"session.ui.decor.chipsHeight"},
+    calls = {"decor.hasFilterChips"},
+    fn = function(state, ctx)
+        local strip, body = HDG.Constants.DECOR_FILTER_BAR_HEIGHT, HDG.Constants.DECOR_BODY_HEIGHT
+        if not Selectors:Call("decor.hasFilterChips", state, ctx) then return { strip, 0, body } end
+        local gap = HDG.Layout._resolveSpacing(HDG.LayoutConfig.window.gap)
+        local h = state.session.ui.decor.chipsHeight
+        if h <= 0 then h = CHIPS_ONE_LINE end   -- not measured yet: one line, so nothing clips
+        h = math.min(h + CHIPS_PAD, body - gap - BROWSER_MIN)
+        return { strip, h, body - h - gap }
+    end,
+})
+
+-- ===== Best first: how the selected decor fits =================================
+
+Selectors:Register("decor.selectedItem.hasFitNote", {
+    calls = {"decor.selectedItem.fitNote"},
+    fn = function(state, ctx)
+        return Selectors:Call("decor.selectedItem.fitNote", state, ctx) ~= ""
+    end,
+})
+
+-- "Fits 3 of 4: misses Colour" under the preview for a decor Best first lists
+-- though it falls short; "" for one that fits everything, and in Every filter.
+Selectors:Register("decor.selectedItem.fitNote", {
+    reads = {"session.resolvers.catalog.tick"},
+    calls = {"decor.selectedItemID", "decor.filterUnits", "decor.match"},
+    fn = function(state, ctx)
+        if Selectors:Call("decor.match", state, ctx) ~= "best" then return "" end
+        local id = Selectors:Call("decor.selectedItemID", state, ctx)
+        local row = id and HDG.HousingCatalogObserver:GetRow(id)
+        if not row then return "" end   -- exception(nullable): nothing selected, or the catalog is cold
+        local _, soft = _splitUnits(Selectors:Call("decor.filterUnits", state, ctx))
+        if #soft == 0 then return "" end
+        local missed = {}
+        for _, unit in ipairs(soft) do
+            if not unit.pass(row) then missed[#missed + 1] = DF.UnitLabel(unit) end
+        end
+        if #missed == 0 then return "" end
+        return HDG.Locale:Get("DECOR_FIT_SOME"):format(#soft - #missed, #soft, table.concat(missed, ", "))
+    end,
+})
 
 -- ===== Shu'halo fortunes tracker (DecorWidgets special) ======================
 -- Renders only when the selected item is the registered "shuhalo_fortunes" special
@@ -951,371 +1602,6 @@ Selectors:Register("decor.fortune.cells", {
             pieces[i] = cc .. i .. "|r"
         end
         return table.concat(pieces, "   ")
-    end,
-})
-
--- "Tags:" label visibility. Explicit boolean (callers expect false/true, not false/nil).
-Selectors:Register("decor.hasTagsRow", {
-    calls = {"decor.tagsForFilter"},
-    fn = function(state, ctx)
-        local tags = Selectors:Call("decor.tagsForFilter", state, ctx)
-        return tags[1] ~= nil and true or false
-    end,
-})
-
-Selectors:Register("decor.activeTag", {
-    reads = {"session.ui.decor.filters.activeTag"},
-    fn = function(state, ctx)
-        local d = state.session.ui.decor
-        return d.filters and d.filters.activeTag or nil
-    end,
-})
-
-Selectors:Register("decor.onlyUncollected", {
-    reads = {"session.ui.decor.filters.onlyUncollected"},
-    fn = function(state, ctx)
-        local d = state.session.ui.decor
-        return (d.filters and d.filters.onlyUncollected) == true
-    end,
-})
-
-Selectors:Register("decor.onlyStored", {
-    reads = {"session.ui.decor.filters.onlyStored"},
-    fn = function(state, ctx)
-        local d = state.session.ui.decor
-        return (d.filters and d.filters.onlyStored) == true
-    end,
-})
-
--- (decor.onlyDyed / decor.onlyDyeable retired: Dyed/Dyeable moved to sub-tags
---  under topFilter='all'; matchesTag reads isDyed/isDyeable directly.)
-
--- Curried per-item flag for dyed-or-dyeable filtering. Reads catalog row
--- data populated by ReconcileFull.
-Selectors:Register("decor.isDyeable", {
-    reads = {"session.resolvers.catalog.tick"},
-    fn = function(state, ctx)
-        local byItemID = HDG.HousingCatalogObserver.byItemID
-        return function(itemID)
-            local row = byItemID[itemID]
-            return row and row.canCustomize == true or false
-        end
-    end,
-})
-Selectors:Register("decor.isDyed", {
-    reads = {"session.resolvers.catalog.tick"},
-    fn = function(state, ctx)
-        local byItemID = HDG.HousingCatalogObserver.byItemID
-        return function(itemID)
-            local row = byItemID[itemID]
-            -- row.dyedVariants is baked by the observer (_bakeVariantDyes) =
-            -- owned variants (numStored>0) with an applied dye. Single source of
-            -- truth, shared with the decor.matchingRows per-variant expansion.
-            return (row and row.dyedVariants and #row.dyedVariants > 0) or false
-        end
-    end,
-})
-
--- Curried per-item flag for the "New in <patch>" chip. newIds = the batch of
--- itemIDs that appeared in the live catalog under the current client build
--- (observer snapshot diff at _CommitSweep; the first-ever sweep seeds the
--- snapshot silently, so a fresh install has no batch).
-Selectors:Register("decor.isNew", {
-    reads = {"account.catalogVintage"},
-    fn = function(state, ctx)
-        local newIds = state.account.catalogVintage.newIds
-        return function(itemID) return newIds[itemID] == true end
-    end,
-})
-
--- Any filter active? Drives the 'Clear filters' affordance.
--- decor.activeProfessions (retired) not checked here: legacy state with no UI effect.
-Selectors:Register("decor.filterActive", {
-    calls = {
-        "decor.topFilter",
-        "decor.activeTag",
-        "decor.onlyUncollected",
-        "decor.onlyStored",
-        "decor.filterQuery",
-    },
-    fn = function(state, ctx)
-        if Selectors:Call("decor.topFilter",       state, ctx) ~= "all"   then return true end
-        if Selectors:Call("decor.activeTag",       state, ctx) ~= nil     then return true end
-        if Selectors:Call("decor.onlyUncollected", state, ctx) == true    then return true end
-        if Selectors:Call("decor.onlyStored",      state, ctx) == true    then return true end
-        if (Selectors:Call("decor.filterQuery", state, ctx)) ~= "" then return true end
-        return false
-    end,
-})
-
--- ===== Tags row content + bucket/tag matching =================================
--- decor.tagsForFilter -> ordered chip list for the current topFilter.
--- decor.matchesTag -> curried predicate composed into decor.matchingRows.
-
--- Placement-cost chips under the Size top filter. The budget atlas IS the
--- label ("cost" reads as gold; "weight" is room terminology) -- the same
--- glyph as the card corner badges. ONE format string builds AND parses the
--- chip, so the matcher cannot drift from the builder.
-local COST_TAG_FMT = "|A:house-decor-budget-icon:12:12|a %d"
-local function _costTagValue(tag)
-    if type(tag) ~= "string" then return nil end
-    return tonumber(tag:match("^|A:house%-decor%-budget%-icon:%d+:%d+|a (%d+)$"))
-end
--- "New in <patch>" chip under 'all'. ONE format string builds AND parses
--- (same discipline as COST_TAG_FMT) -- the label half is the live build
--- version stamped on the batch ("12.0.5"), so the matcher keys on the prefix.
-local NEW_TAG_FMT = "New in %s"
-local function _isNewTag(tag)
-    return type(tag) == "string" and tag:find("^New in ") ~= nil
-end
-Selectors:Register("decor.tagsForFilter", {
-    -- pets.tick: the 'pets' arm reads PetObserver's family list behind its facade
-    -- tick, same contract as any other resolver read.
-    reads    = {"session.resolvers.catalog.tick", "account.catalogVintage",
-                "session.resolvers.pets.tick"},
-    calls    = {"decor.topFilter"},
-    memoized = true,
-    fn = function(state, ctx)
-        local top = Selectors:Call("decor.topFilter", state, ctx)
-        -- Curated set under 'all'. Dyed/Dyeable moved from Row 3 toggles to
-        -- sub-tags (toggle row was crowded; composability with profession sub-tags
-        -- under 'crafted' is a niche case and was dropped).
-        -- "All Decor" dropped: redundant; top='all' with no activeTag = everything.
-        -- per ADR-018: DECOR_FILTER_RESET on the 'All' chip is the canonical reset.
-        -- Uncollected stays a Row 3 toggle so it composes with Crafted prof sub-tags.
-        if top == "all" then
-            -- Structural/status sub-tags. Rep/Quest/Ach dropped: they duplicated
-            -- the Sources top-filter. "Placed" = decor currently placed in a house.
-            local tags = { "Favorites", "Crafted", "House XP", "Dyed", "Dyeable", "Placed", "Redeemable" }
-            -- "New in <patch>" leads when the vintage diff has a current batch.
-            local cv = state.account.catalogVintage
-            if next(cv.newIds) ~= nil then
-                table.insert(tags, 1, NEW_TAG_FMT:format(cv.newBuildLabel))
-            end
-            return tags
-        end
-        if top == "crafted" then
-            local profs = HDG.Constants.DECOR_PROFESSIONS or {}
-            local out = {}
-            for i, p in ipairs(profs) do out[i] = p end
-            return out
-        end
-        -- 'pets': the battle-pet families, from PetObserver's per-rebuild snapshot.
-        -- Read through the observer rather than _G.BATTLE_PET_NAME_* directly --
-        -- a selector may not touch FrameXML globals (invariant 1). The same
-        -- activeTag the decor browser uses then narrows the pet list by family,
-        -- so the tags row is reused rather than duplicated.
-        if top == "pets" then
-            return HDG.PetObserver:GetFamilies()
-        end
-        -- 'sources': derive distinct kind keys from catalog sourceTags.
-        if top == "sources" then
-            local byDecorID = HDG.HousingCatalogObserver.byDecorID
-            local seen = {}
-            for _, row in pairs(byDecorID) do
-                local st = row.sourceTags
-                if type(st) == "table" then
-                    for _, entry in ipairs(st) do
-                        if entry.kind then seen[entry.kind] = true end
-                    end
-                end
-            end
-            local out = {}
-            for kind in pairs(seen) do out[#out + 1] = kind end
-            table.sort(out)
-            return out
-        end
-        -- sizes/factions/styles/expansions/other: derive labels from live catalog tagIDs.
-        local bucket = ({
-            sizes      = "Sizes",
-            factions   = "Factions",
-            styles     = "Styles",
-            expansions = "Expansions",
-            other      = "Other",
-        })[top]
-        if not bucket then return {} end
-        local TagData = HDG.TagData
-        local byDecorID = HDG.HousingCatalogObserver.byDecorID
-        local seen = {}
-        for _, row in pairs(byDecorID) do
-            local ids = row.dataTagsByID
-            if type(ids) == "table" then
-                for tagID in pairs(ids) do
-                    if TagData.GetCategory(tagID) == bucket then
-                        local label = TagData.GetShortLabel(tagID)  -- shortens expansions; identity for others
-                        if label then seen[label] = true end
-                    end
-                end
-            end
-        end
-        local out = {}
-        for label in pairs(seen) do out[#out + 1] = label end
-        if top == "expansions" then
-            -- Canonical release order (EXPANSION_DATA via Expansion.GetIndex), not
-            -- alphabetical. Short labels (TBC/WotLK/...) resolve through the alias map.
-            table.sort(out, function(a, b)
-                local ia = HDG.Expansion.GetIndex(a) or math.huge
-                local ib = HDG.Expansion.GetIndex(b) or math.huge
-                if ia ~= ib then return ia < ib end
-                return a < b
-            end)
-        else
-            table.sort(out)
-        end
-        if top == "sizes" then
-            -- Placement-cost chips after the size tags: distinct LIVE catalog
-            -- values (1/2/3/5 today; a future tier appears by itself).
-            local costs = {}
-            for _, row in pairs(byDecorID) do
-                local c = row.placementCost
-                if c and c > 0 then costs[c] = true end
-            end
-            local sorted = {}
-            for c in pairs(costs) do sorted[#sorted + 1] = c end
-            table.sort(sorted)
-            for _, c in ipairs(sorted) do out[#out + 1] = COST_TAG_FMT:format(c) end
-        end
-        return out
-    end,
-})
-
--- Pass-through placeholder for future bucket-level filters. No reads/calls
--- since the function is constant. Re-add to decor.matchingRows.calls if a bucket needs it.
-Selectors:Register("decor.matchesTopFilter", {
-    fn = function(state, ctx)
-        return function() return true end
-    end,
-})
-
--- Curried (itemID) -> bool for "matches the active tag at the current top filter".
--- nil or "All Decor" activeTag matches everything.
-Selectors:Register("decor.matchesTag", {
-    reads = {"account.favorites", "session.resolvers.catalog.tick"},
-    calls = {"recipes.db", "decor.topFilter", "decor.activeTag",
-             "decor.isFavorite", "decor.isCollected",
-             "decor.isDyed", "decor.isDyeable", "decor.isNew"},
-    fn = function(state, ctx)
-        local top = Selectors:Call("decor.topFilter", state, ctx)
-        local tag = Selectors:Call("decor.activeTag",  state, ctx)
-        -- Crafted is source-restricting: even with no profession sub-tag it must narrow
-        -- to crafted decor (handled below), so it skips this pass-all early-out.
-        if (tag == nil or tag == "All Decor") and top ~= "crafted" then
-            return function() return true end
-        end
-
-        -- ===== Sub-tags under 'all' =====
-        if top == "all" then
-            if tag == "Favorites" then
-                local isFav = Selectors:Call("decor.isFavorite", state, ctx)
-                return isFav
-            end
-            if tag == "Crafted" then
-                local db = Selectors:Call("recipes.db", state, ctx)
-                return function(itemID) return db[itemID] ~= nil end
-            end
-            if tag == "House XP" then
-                -- Items eligible for first-acquisition House XP AND not yet owned.
-                local byItemID = HDG.HousingCatalogObserver.byItemID
-                local isColl   = Selectors:Call("decor.isCollected", state, ctx)
-                return function(itemID)
-                    if isColl(itemID) then return false end
-                    return byItemID[itemID].firstAcquisitionBonus > 0
-                end
-            end
-            if tag == "Dyed" then
-                local isDyed = Selectors:Call("decor.isDyed", state, ctx)
-                return isDyed
-            end
-            if tag == "Dyeable" then
-                local isDyeable = Selectors:Call("decor.isDyeable", state, ctx)
-                return isDyeable
-            end
-            if _isNewTag(tag) then
-                return Selectors:Call("decor.isNew", state, ctx)
-            end
-            if tag == "Placed" then
-                -- Decor currently placed in a house (catalog live numPlaced > 0).
-                local byItemID = HDG.HousingCatalogObserver.byItemID
-                return function(itemID) return byItemID[itemID].numPlaced > 0 end
-            end
-            if tag == "Redeemable" then
-                -- A redeemable token is outstanding AND no copy has been claimed yet
-                -- (nothing in storage, nothing placed) -- i.e. still waiting to redeem.
-                local byItemID = HDG.HousingCatalogObserver.byItemID
-                return function(itemID)
-                    local row = byItemID[itemID]
-                    return row.remainingRedeemable > 0 and row.quantity == 0 and row.numPlaced == 0
-                end
-            end
-            -- Unknown sub-tag under 'all' -> no matches.
-            return function() return false end
-        end
-
-        -- ===== Crafted: items whose canonical source IS the recipe (sourceType==6) =====
-        -- row.sourceType is baked by _bakeSourceTypes (priority Vendor>Quest>Ach>Crafted),
-        -- so 6 = recipe-backed with no higher source -- the row's craft star. Matches the
-        -- curated recipe DB, NOT the player's known recipes. No profession sub-tag selected
-        -- -> all crafted; else narrow to that recipe's profession.
-        if top == "crafted" then
-            local byItemID = HDG.HousingCatalogObserver.byItemID
-            if tag == nil or tag == "All Decor" then
-                return function(itemID)
-                    local row = byItemID[itemID]
-                    return row ~= nil and row.sourceType == 6
-                end
-            end
-            return function(itemID)
-                local row = byItemID[itemID]
-                return row ~= nil and row.sourceType == 6
-                   and row.recipe and row.recipe.profession == tag
-            end
-        end
-
-        -- ===== Source-kind chips under 'sources' =====
-        if top == "sources" then
-            local byItemID = HDG.HousingCatalogObserver.byItemID
-            return function(itemID)
-                local row = byItemID[itemID]
-                if not (row and row.sourceTags) then return false end
-                for _, entry in ipairs(row.sourceTags) do
-                    if entry.kind == tag then return true end
-                end
-                return false
-            end
-        end
-
-        -- ===== Tag-bucket categories =====
-        local bucket = ({
-            sizes      = "Sizes",
-            factions   = "Factions",
-            styles     = "Styles",
-            expansions = "Expansions",
-            other      = "Other",
-        })[top]
-        if not bucket then return function() return true end end
-        local byItemID = HDG.HousingCatalogObserver.byItemID
-        local TagData = HDG.TagData
-        -- Placement-cost chip (Size bucket): exact-value match on the live row.
-        local cost = _costTagValue(tag)
-        if cost then
-            return function(itemID)
-                local row = byItemID[itemID]
-                return row ~= nil and row.placementCost == cost
-            end
-        end
-        -- Compare via GetShortLabel: activeTag uses the short display form,
-        -- so long-form comparison would miss shortened expansion tags.
-        return function(itemID)
-            local row = byItemID[itemID]
-            if not (row and row.dataTagsByID) then return false end
-            for tagID in pairs(row.dataTagsByID) do
-                if TagData.GetCategory(tagID) == bucket
-                   and TagData.GetShortLabel(tagID) == tag then
-                    return true
-                end
-            end
-            return false
-        end
     end,
 })
 

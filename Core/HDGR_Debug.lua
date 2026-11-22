@@ -370,8 +370,8 @@ function D:House()
     local snap = HDG.Store:GetState().session.house and HDG.Store:GetState().session.house.snapshot or nil
     _G.print(("  snapshotChangeSeq:   %s"):format(tostring(HDG.Store:GetState().session.house and HDG.Store:GetState().session.house.snapshotChangeSeq)))
     _G.print(("  snapshot keys:  %s"):format(snap and tostring(next(snap) or "EMPTY") or "nil"))
-    local items = HDG.Selectors:Call("house.widgetList", HDG.Store:GetState(), {})  -- exception(false-positive): debug dump function, not a row factory
-    _G.print(("  widgetList:     %d items"):format(#items))
+    local items = HDG.Selectors:Call("house.widgetRows", HDG.Store:GetState(), {})  -- exception(false-positive): debug dump function, not a row factory
+    _G.print(("  widgetRows:     %d items"):format(#items))
     if #items > 0 then
         _G.print(("    [1] id=%s height=%s data=%s"):format(
             tostring(items[1].id), tostring(items[1].height),
